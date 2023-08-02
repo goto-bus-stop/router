@@ -43,6 +43,7 @@ use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
 use crate::notification::HandleStream;
 use crate::plugin::DynPlugin;
+use crate::plugins::subgraph_connector::SubgraphConnector;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use crate::plugins::telemetry::Telemetry;
@@ -223,7 +224,14 @@ async fn service_call(
             Ok(response)
         }
 
-        Some(QueryPlannerContent::Plan { plan }) => {
+        Some(QueryPlannerContent::Plan {
+            plan,
+            relevant_subgraph_schemas,
+        }) => {
+            context
+                .private_entries
+                .lock()
+                .insert(relevant_subgraph_schemas);
             let operation_name = body.operation_name.clone();
             let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
             let is_subscription = plan.is_subscription(operation_name.as_deref());
@@ -430,22 +438,23 @@ async fn subscription_task(
                 // If the configuration was dropped in the meantime, we ignore this update and will
                 // pick up the next one.
                 if let Some(conf) = new_configuration.upgrade() {
-                    let plugins = match create_plugins(&conf, &execution_service_factory.schema, None).await {
-                        Ok(plugins) => plugins,
-                        Err(err) => {
-                            tracing::error!("cannot re-create plugins with the new configuration (closing existing subscription): {err:?}");
-                            break;
-                        },
-                    };
-                    let subgraph_services = match create_subgraph_services(&plugins, &execution_service_factory.schema, &conf).await {
-                        Ok(subgraph_services) => subgraph_services,
-                        Err(err) => {
-                            tracing::error!("cannot re-create subgraph service with the new configuration (closing existing subscription): {err:?}");
-                            break;
-                        },
-                    };
-                    let plugins = Arc::new(IndexMap::from_iter(plugins));
-                    execution_service_factory = ExecutionServiceFactory { schema: execution_service_factory.schema.clone(), plugins: plugins.clone(), subgraph_service_factory: Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(), plugins.clone())) };
+
+                let plugins = match create_plugins(&conf, &execution_service_factory.schema, None).await {
+                    Ok(plugins) => plugins,
+                    Err(err) => {
+                        tracing::error!("cannot re-create plugins with the new configuration (closing existing subscription): {err:?}");
+                        break;
+                    },
+                };
+                let (subgraph_services, subgraph_connector) = match create_subgraph_services(&plugins, execution_service_factory.schema.clone(), &conf).await {
+                    Ok(both) => both,
+                    Err(err) => {
+                        tracing::error!("cannot re-create subgraph service with the new configuration (closing existing subscription): {err:?}");
+                        break;
+                    },
+                };
+                let plugins = Arc::new(IndexMap::from_iter(plugins));
+                execution_service_factory = ExecutionServiceFactory { schema: execution_service_factory.schema.clone(), plugins: plugins.clone(), subgraph_service_factory: Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(),subgraph_connector, plugins.clone())) };
                 }
             }
             Some(new_schema) = schema_updated_rx.next() => {
@@ -647,9 +656,10 @@ impl PluggableSupergraphServiceBuilder {
         }
 
         let plugins = Arc::new(plugins);
-
+        let subgraph_connector = SubgraphConnector::for_schema(Arc::clone(&schema));
         let subgraph_service_factory = Arc::new(SubgraphServiceFactory::new(
             self.subgraph_services,
+            subgraph_connector,
             plugins.clone(),
         ));
 

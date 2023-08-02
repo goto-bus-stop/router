@@ -26,6 +26,7 @@ use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
+use crate::plugins::subgraph_connector::SubgraphConnector;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::traffic_shaping::rate;
@@ -186,7 +187,8 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
 
         let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
         builder = builder.with_configuration(configuration.clone());
-        let subgraph_services = create_subgraph_services(&plugins, &schema, &configuration).await?;
+        let (subgraph_services, subgraph_connector) =
+            create_subgraph_services(&plugins, Arc::clone(&schema), &configuration).await?;
         for (name, subgraph_service) in subgraph_services {
             builder = builder.with_subgraph_service(&name, subgraph_service);
         }
@@ -229,47 +231,50 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
 
 pub(crate) async fn create_subgraph_services(
     plugins: &[(String, Box<dyn DynPlugin>)],
-    schema: &Schema,
+    schema: Arc<Schema>,
     configuration: &Configuration,
 ) -> Result<
-    IndexMap<
-        String,
-        impl Service<
-                subgraph::Request,
-                Response = subgraph::Response,
-                Error = BoxError,
-                Future = Either<
-                    Either<
-                        BoxFuture<'static, Result<subgraph::Response, BoxError>>,
+    (
+        IndexMap<
+            String,
+            impl Service<
+                    subgraph::Request,
+                    Response = subgraph::Response,
+                    Error = BoxError,
+                    Future = Either<
                         Either<
                             BoxFuture<'static, Result<subgraph::Response, BoxError>>,
-                            timeout::future::ResponseFuture<
-                                Oneshot<
-                                    Either<
-                                        Retry<
-                                            RetryPolicy,
+                            Either<
+                                BoxFuture<'static, Result<subgraph::Response, BoxError>>,
+                                timeout::future::ResponseFuture<
+                                    Oneshot<
+                                        Either<
+                                            Retry<
+                                                RetryPolicy,
+                                                Either<
+                                                    rate::service::RateLimit<SubgraphService>,
+                                                    SubgraphService,
+                                                >,
+                                            >,
                                             Either<
                                                 rate::service::RateLimit<SubgraphService>,
                                                 SubgraphService,
                                             >,
                                         >,
-                                        Either<
-                                            rate::service::RateLimit<SubgraphService>,
-                                            SubgraphService,
-                                        >,
+                                        subgraph::Request,
                                     >,
-                                    subgraph::Request,
                                 >,
                             >,
                         >,
+                        <SubgraphService as Service<subgraph::Request>>::Future,
                     >,
-                    <SubgraphService as Service<subgraph::Request>>::Future,
-                >,
-            > + Clone
-            + Send
-            + Sync
-            + 'static,
-    >,
+                > + Clone
+                + Send
+                + Sync
+                + 'static,
+        >,
+        SubgraphConnector,
+    ),
     BoxError,
 > {
     let tls_root_store: Option<RootCertStore> = configuration
@@ -323,7 +328,10 @@ pub(crate) async fn create_subgraph_services(
         subgraph_services.insert(name.clone(), subgraph_service);
     }
 
-    Ok(subgraph_services)
+    Ok((
+        subgraph_services,
+        SubgraphConnector::for_schema(Arc::clone(&schema)),
+    ))
 }
 
 impl YamlRouterFactory {
@@ -348,9 +356,11 @@ impl YamlRouterFactory {
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
-        let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
+        let mut builder: PluggableSupergraphServiceBuilder =
+            PluggableSupergraphServiceBuilder::new(bridge_query_planner);
         builder = builder.with_configuration(configuration.clone());
-        let subgraph_services = create_subgraph_services(&plugins, &schema, &configuration).await?;
+        let (subgraph_services, subgraph_connector) =
+            create_subgraph_services(&plugins, Arc::clone(&schema), &configuration).await?;
         for (name, subgraph_service) in subgraph_services {
             builder = builder.with_subgraph_service(&name, subgraph_service);
         }

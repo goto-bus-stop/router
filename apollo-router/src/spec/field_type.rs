@@ -174,7 +174,7 @@ fn validate_input_value(
 }
 
 /// TODO: make `hir::Type::name` return &str instead of String
-fn hir_type_name(ty: &hir::Type) -> &str {
+pub(crate) fn hir_type_name(ty: &hir::Type) -> &str {
     match ty {
         hir::Type::NonNull { ty, .. } => hir_type_name(ty),
         hir::Type::List { ty, .. } => hir_type_name(ty),

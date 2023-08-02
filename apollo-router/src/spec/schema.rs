@@ -30,6 +30,7 @@ pub(crate) struct Schema {
     /// Stored for comparison with the validation errors from query planning.
     diagnostics: Vec<ApolloDiagnostic>,
     subgraphs: HashMap<String, Uri>,
+    subgraph_definition_and_names: HashMap<String, String>,
     api_schema: Option<Box<Schema>>,
     pub(crate) schema_id: Option<String>,
 }
@@ -103,16 +104,18 @@ impl Schema {
         }
 
         let mut subgraphs = HashMap::new();
+        let mut subgraph_definition_and_names = HashMap::new();
         // TODO: error if not found?
         if let Some(join_enum) = compiler.db.find_enum_by_name("join__Graph".into()) {
-            for (name, url) in join_enum.values().filter_map(|value| {
+            for (subgraph_name, name, url) in join_enum.values().filter_map(|value| {
+                let subgraph_name = value.enum_value().to_string();
                 let join_directive = value
                     .directives()
                     .iter()
                     .find(|directive| directive.name() == "join__graph")?;
                 let name = join_directive.argument_by_name("name")?.as_str()?;
                 let url = join_directive.argument_by_name("url")?.as_str()?;
-                Some((name, url))
+                Some((subgraph_name, name, url))
             }) {
                 if url.is_empty() {
                     return Err(SchemaError::MissingSubgraphUrl(name.to_string()));
@@ -124,6 +127,7 @@ impl Schema {
                         "must not have several subgraphs with same name '{name}'"
                     )));
                 }
+                subgraph_definition_and_names.insert(subgraph_name, name.to_string());
             }
         }
 
@@ -140,6 +144,7 @@ impl Schema {
             type_system: compiler.db.type_system(),
             diagnostics,
             subgraphs,
+            subgraph_definition_and_names,
             api_schema: None,
             schema_id,
         })
@@ -217,6 +222,10 @@ impl Schema {
     /// Return the subgraph URI given the service name
     pub(crate) fn subgraph_url(&self, service_name: &str) -> Option<&Uri> {
         self.subgraphs.get(service_name)
+    }
+
+    pub(crate) fn subgraph_name(&self, subgraph_definition: &str) -> Option<&String> {
+        self.subgraph_definition_and_names.get(subgraph_definition)
     }
 
     pub(crate) fn api_schema(&self) -> &Schema {

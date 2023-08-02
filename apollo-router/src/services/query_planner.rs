@@ -1,5 +1,6 @@
 #![allow(missing_docs)] // FIXME
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -11,6 +12,7 @@ use static_assertions::assert_impl_all;
 use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::query_planner::QueryPlan;
+use crate::spec::Schema;
 use crate::Context;
 
 assert_impl_all!(Request: Send);
@@ -78,8 +80,14 @@ pub(crate) struct Response {
 /// Query, QueryPlan and Introspection data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum QueryPlannerContent {
-    Plan { plan: Arc<QueryPlan> },
-    Introspection { response: Box<graphql::Response> },
+    Plan {
+        plan: Arc<QueryPlan>,
+        #[serde(skip)]
+        relevant_subgraph_schemas: Arc<HashMap<String, Arc<Schema>>>,
+    },
+    Introspection {
+        response: Box<graphql::Response>,
+    },
     IntrospectionDisabled,
 }
 

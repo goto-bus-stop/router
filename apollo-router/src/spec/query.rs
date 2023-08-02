@@ -274,7 +274,6 @@ impl Query {
         (compiler, id)
     }
 
-    #[cfg(test)]
     pub(crate) fn parse(
         query: impl Into<String>,
         schema: &Schema,

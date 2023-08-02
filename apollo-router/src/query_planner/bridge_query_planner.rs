@@ -58,6 +58,7 @@ pub(crate) struct BridgeQueryPlanner {
     introspection: Option<Arc<Introspection>>,
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
+    subgraph_schemas: Arc<HashMap<String, Arc<Schema>>>,
 }
 
 impl BridgeQueryPlanner {
@@ -125,6 +126,13 @@ impl BridgeQueryPlanner {
 
         let api_schema = planner.api_schema().await?;
         let api_schema = Schema::parse(&api_schema.schema, &configuration)?;
+
+        let subgraph_schema_strings = planner.subgraphs().await?;
+        let mut subgraph_schemas = HashMap::with_capacity(subgraph_schema_strings.len());
+        for (name, schema) in subgraph_schema_strings {
+            subgraph_schemas.insert(name, Arc::new(Schema::parse(&schema, &configuration)?));
+        }
+
         let schema = Arc::new(schema.with_api_schema(api_schema));
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(Introspection::new(planner.clone()).await))
@@ -140,6 +148,7 @@ impl BridgeQueryPlanner {
             introspection,
             enable_authorization_directives,
             configuration,
+            subgraph_schemas: Arc::new(subgraph_schemas),
         })
     }
 
@@ -168,6 +177,13 @@ impl BridgeQueryPlanner {
 
         let api_schema = planner.api_schema().await?;
         let api_schema = Schema::parse(&api_schema.schema, &configuration)?;
+
+        let subgraph_schema_strings = planner.subgraphs().await?;
+        let mut subgraph_schemas = HashMap::with_capacity(subgraph_schema_strings.len());
+        for (name, schema) in subgraph_schema_strings {
+            subgraph_schemas.insert(name, Arc::new(Schema::parse(&schema, &configuration)?));
+        }
+
         let schema = Arc::new(Schema::parse(&schema, &configuration)?.with_api_schema(api_schema));
 
         let introspection = if configuration.supergraph.introspection {
@@ -184,6 +200,7 @@ impl BridgeQueryPlanner {
             introspection,
             enable_authorization_directives,
             configuration,
+            subgraph_schemas: Arc::new(subgraph_schemas),
         })
     }
 
@@ -375,6 +392,7 @@ impl BridgeQueryPlanner {
                         formatted_query_plan,
                         query: Arc::new(selections),
                     }),
+                    relevant_subgraph_schemas: self.subgraph_schemas.clone(),
                 })
             }
             #[cfg_attr(feature = "failfast", allow(unused_variables))]

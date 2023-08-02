@@ -61,6 +61,7 @@ use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
+use crate::plugins::subgraph_connector::SubgraphConnector;
 use crate::plugins::subscription::create_verifier;
 use crate::plugins::subscription::CallbackMode;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -814,7 +815,7 @@ async fn call_http(
     }
 
     let resp = http::Response::from_parts(parts, graphql_response);
-    Ok(SubgraphResponse::new_from_response(resp, context))
+    Ok(dbg!(SubgraphResponse::new_from_response(resp, context)))
 }
 
 enum ContentType {
@@ -1036,16 +1037,19 @@ pub(crate) async fn compress(body: String, headers: &HeaderMap) -> Result<Vec<u8
 #[derive(Clone)]
 pub(crate) struct SubgraphServiceFactory {
     pub(crate) services: Arc<HashMap<String, Arc<dyn MakeSubgraphService>>>,
+    pub(crate) subgraph_connector: SubgraphConnector,
     pub(crate) plugins: Arc<Plugins>,
 }
 
 impl SubgraphServiceFactory {
     pub(crate) fn new(
         services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
+        subgraph_connector: SubgraphConnector,
         plugins: Arc<Plugins>,
     ) -> Self {
         SubgraphServiceFactory {
             services: Arc::new(services.into_iter().collect()),
+            subgraph_connector,
             plugins,
         }
     }
@@ -1055,7 +1059,9 @@ impl SubgraphServiceFactory {
         name: &str,
     ) -> Option<BoxService<SubgraphRequest, SubgraphResponse, BoxError>> {
         self.services.get(name).map(|service| {
-            let service = service.make();
+            let service = self
+                .subgraph_connector
+                .subgraph_service(name, service.make());
             self.plugins
                 .iter()
                 .rev()

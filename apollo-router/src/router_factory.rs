@@ -187,7 +187,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
 
         let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
         builder = builder.with_configuration(configuration.clone());
-        let (subgraph_services, subgraph_connector) =
+        let (subgraph_services, _) =
             create_subgraph_services(&plugins, Arc::clone(&schema), &configuration).await?;
         for (name, subgraph_service) in subgraph_services {
             builder = builder.with_subgraph_service(&name, subgraph_service);
@@ -359,7 +359,7 @@ impl YamlRouterFactory {
         let mut builder: PluggableSupergraphServiceBuilder =
             PluggableSupergraphServiceBuilder::new(bridge_query_planner);
         builder = builder.with_configuration(configuration.clone());
-        let (subgraph_services, subgraph_connector) =
+        let (subgraph_services, _) =
             create_subgraph_services(&plugins, Arc::clone(&schema), &configuration).await?;
         for (name, subgraph_service) in subgraph_services {
             builder = builder.with_subgraph_service(&name, subgraph_service);

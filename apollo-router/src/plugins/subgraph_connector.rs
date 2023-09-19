@@ -26,6 +26,7 @@ pub(crate) const HTTP_FIELD_DIRECTIVE_NAME: &str = "http_field";
 #[derive(Clone)]
 pub(crate) struct SubgraphConnector {
     metadata: HashMap<String, CallParams>,
+    // TODO: Arc plz
     field_directives_for_type: HashMap<String, HashMap<String, Directive>>,
 }
 
@@ -93,6 +94,7 @@ impl SubgraphConnector {
         if let Some(call_parameters) = self.metadata.get(subgraph_name) {
             let call_parameters: CallParams = call_parameters.clone();
             let service_name = subgraph_name.to_string();
+            let field_directives_for_types = self.field_directives_for_type.clone();
             ServiceBuilder::new()
             .checkpoint_async(move |request: subgraph::Request| {
                     println!("{}", serde_json::to_string_pretty(&request.subgraph_request.body()).unwrap());
@@ -205,10 +207,10 @@ impl SubgraphConnector {
 
                     let mut requests_to_send = if root_is_list {
                         let call_parameters = call_parameters.list.clone().expect("we should have a list endpoint here...");
-                        call_parameters.into_requests(&request.subgraph_request)
+                        call_parameters.into_requests(&request.subgraph_request, root_field_type.as_ref().and_then(|f| field_directives_for_types.get(f).cloned()).unwrap_or_default())
                     } else {
                         let call_parameters = &call_parameters.object;
-                       call_parameters.into_requests(&request.subgraph_request)
+                       call_parameters.into_requests(&request.subgraph_request, root_field_type.as_ref().and_then(|f| field_directives_for_types.get(f).cloned()).unwrap_or_default())
                     };
 
                     // TODO: traverse query roots!
@@ -362,8 +364,14 @@ impl ObjectCallParams {
     fn into_requests(
         &self,
         request: &http::Request<crate::graphql::Request>,
+        field_directives_for_type: HashMap<String, Directive>,
     ) -> Vec<(hyper::Request<hyper::Body>, Option<String>)> {
-        into_requests(self.uri.clone().to_string(), self.method.clone(), request)
+        into_requests(
+            self.uri.clone().to_string(),
+            self.method.clone(),
+            request,
+            field_directives_for_type,
+        )
     }
 }
 
@@ -392,8 +400,14 @@ impl ListCallParams {
     fn into_requests(
         &self,
         request: &http::Request<crate::graphql::Request>,
+        field_directives_for_type: HashMap<String, Directive>,
     ) -> Vec<(hyper::Request<hyper::Body>, Option<String>)> {
-        into_requests(self.uri.clone().to_string(), self.method.clone(), request)
+        into_requests(
+            self.uri.clone().to_string(),
+            self.method.clone(),
+            request,
+            field_directives_for_type,
+        )
     }
 }
 
@@ -417,12 +431,15 @@ fn into_requests(
     mut uri: String,
     method: http::Method,
     request: &http::Request<crate::graphql::Request>,
+    field_directives_for_type: HashMap<String, Directive>,
 ) -> Vec<(hyper::Request<hyper::Body>, Option<String>)> {
     let mut representations = request
         .body()
         .variables
         .get("representations")
-        .map(|rep| deal_with_representations(rep.clone(), uri.clone()))
+        .map(|rep| {
+            deal_with_representations(rep.clone(), uri.clone(), field_directives_for_type.clone())
+        })
         .unwrap_or_default();
 
     for (name, value) in request.body().variables.iter() {
@@ -496,6 +513,7 @@ fn into_requests(
 fn deal_with_representations(
     representations: serde_json_bytes::Value,
     uri: String,
+    field_directives_for_type: HashMap<String, Directive>,
 ) -> Vec<(String, String)> {
     use serde_json_bytes::Value;
 
@@ -525,6 +543,7 @@ fn deal_with_representations(
             .iter()
             .filter(|o| o.0.as_str() != "__typename")
         {
+            // TODO: this is terribly wrong
             let name = format!(
                 "{}{}",
                 type_name.to_lowercase(),

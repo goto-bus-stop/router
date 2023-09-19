@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
+use apollo_compiler::hir::Directive;
 use apollo_compiler::hir::{Type, TypeDefinition, Value};
 use http::uri::*;
 use http::Uri;
@@ -20,14 +21,18 @@ use crate::spec::Selection;
 
 pub(crate) const HTTP_RESOURCE_DIRECTIVE_NAME: &str = "http_resource";
 pub(crate) const HTTP_LIST_RESOURCE_DIRECTIVE_NAME: &str = "http_list_resource";
+pub(crate) const HTTP_FIELD_DIRECTIVE_NAME: &str = "http_field";
 
 #[derive(Clone)]
 pub(crate) struct SubgraphConnector {
     metadata: HashMap<String, CallParams>,
+    field_directives_for_type: HashMap<String, HashMap<String, Directive>>,
 }
 
 impl SubgraphConnector {
     pub(crate) fn for_schema(schema: Arc<Schema>) -> Self {
+        let mut field_directives_for_type: HashMap<String, HashMap<String, Directive>> =
+            Default::default();
         let metadata = schema
             .type_system
             .type_definitions_by_name
@@ -38,6 +43,24 @@ impl SubgraphConnector {
                     .directive_by_name(HTTP_RESOURCE_DIRECTIVE_NAME)
                     .and_then(|http_directive| {
                         http_directive.argument_by_name("api").and_then(|api_name| {
+                            if let TypeDefinition::ObjectTypeDefinition(otd) = definition {
+                                let mut field_directives: HashMap<String, Directive> =
+                                    Default::default();
+
+                                for field in otd.fields() {
+                                    field.directive_by_name(HTTP_FIELD_DIRECTIVE_NAME).map(
+                                        |directive| {
+                                            field_directives.insert(
+                                                field.name().to_string(),
+                                                directive.clone(),
+                                            );
+                                        },
+                                    );
+                                }
+
+                                field_directives_for_type
+                                    .insert(otd.name().to_string(), field_directives);
+                            }
                             if let Value::Enum { value, .. } = api_name {
                                 schema.subgraph_name(value.src()).map(|subgraph_name| {
                                     (
@@ -56,7 +79,10 @@ impl SubgraphConnector {
             })
             .collect();
 
-        Self { metadata }
+        Self {
+            metadata,
+            field_directives_for_type,
+        }
     }
 
     pub(crate) fn subgraph_service(

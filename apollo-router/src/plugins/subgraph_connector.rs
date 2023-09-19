@@ -97,7 +97,7 @@ impl SubgraphConnector {
             let field_directives_for_types = self.field_directives_for_type.clone();
             ServiceBuilder::new()
             .checkpoint_async(move |request: subgraph::Request| {
-                    println!("{}", serde_json::to_string_pretty(&request.subgraph_request.body()).unwrap());
+                    println!("subgraph request \n{}", serde_json::to_string_pretty(&request.subgraph_request.body()).unwrap());
                     let service_name = service_name.clone();
 
                     let query = request.subgraph_request.body().query.clone().unwrap();

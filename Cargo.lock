@@ -331,6 +331,7 @@ dependencies = [
  "mockall",
  "multer",
  "multimap 0.9.1",
+ "nom",
  "notify",
  "nu-ansi-term 0.49.0",
  "num-traits",

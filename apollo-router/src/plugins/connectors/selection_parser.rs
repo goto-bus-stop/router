@@ -1,11 +1,16 @@
-use nom::{
-    branch::alt,
-    character::complete::{char, multispace0, one_of},
-    combinator::{map, opt, recognize},
-    multi::{many0, many1},
-    sequence::{pair, preceded, tuple},
-    IResult,
-};
+use nom::branch::alt;
+use nom::character::complete::char;
+use nom::character::complete::multispace0;
+use nom::character::complete::one_of;
+use nom::combinator::map;
+use nom::combinator::opt;
+use nom::combinator::recognize;
+use nom::multi::many0;
+use nom::multi::many1;
+use nom::sequence::pair;
+use nom::sequence::preceded;
+use nom::sequence::tuple;
+use nom::IResult;
 
 // Selection ::= NamedSelection+ | PathSelection
 

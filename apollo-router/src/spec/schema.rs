@@ -1,20 +1,17 @@
 //! GraphQL schema.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
-use apollo_compiler::diagnostics::ApolloDiagnostic;
-use apollo_compiler::ApolloCompiler;
-use apollo_compiler::AstDatabase;
-use apollo_compiler::HirDatabase;
-use apollo_compiler::InputDatabase;
+use apollo_compiler::ast;
+use apollo_compiler::Diagnostics;
 use http::Uri;
 use sha2::Digest;
 use sha2::Sha256;
 
-use super::FieldType;
 use crate::configuration::GraphQLValidationMode;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
@@ -26,11 +23,11 @@ use crate::Configuration;
 #[derive(Debug)]
 pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
-    pub(crate) type_system: Arc<apollo_compiler::hir::TypeSystem>,
+    pub(crate) definitions: apollo_compiler::Schema,
     /// Stored for comparison with the validation errors from query planning.
-    diagnostics: Vec<ApolloDiagnostic>,
+    diagnostics: Option<Diagnostics>,
     subgraphs: HashMap<String, Uri>,
-    subgraph_definition_and_names: HashMap<String, String>,
+    pub(crate) implementers_map: HashMap<ast::Name, HashSet<ast::Name>>,
     api_schema: Option<Box<Schema>>,
     pub(crate) schema_id: Option<String>,
 }
@@ -62,76 +59,75 @@ impl Schema {
         Ok(schema)
     }
 
-    pub(crate) fn parse(sdl: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
-        let start = Instant::now();
-        let mut compiler = ApolloCompiler::new();
-        let id = compiler.add_type_system(sdl, "schema.graphql");
-
-        let ast = compiler.db.ast(id);
+    pub(crate) fn make_compiler(sdl: &str) -> Result<apollo_compiler::schema::Schema, SchemaError> {
+        let mut parser = apollo_compiler::Parser::new();
+        let ast = parser.parse_ast(sdl, "schema.graphql");
 
         // Trace log recursion limit data
-        let recursion_limit = ast.recursion_limit();
+        let recursion_limit = parser.recursion_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        let mut parse_errors = ast.errors().peekable();
-        if parse_errors.peek().is_some() {
-            let errors = parse_errors.cloned().collect::<Vec<_>>();
-            return Err(SchemaError::Parse(ParseErrors { errors }));
-        }
+        ast.check_parse_errors()
+            .map_err(|errors| SchemaError::Parse(ParseErrors { errors }))?;
+
+        let definitions = ast.to_schema();
+        Ok(definitions)
+    }
+
+    pub(crate) fn parse(sdl: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
+        let start = Instant::now();
+        let mut parser = apollo_compiler::Parser::new();
+        let ast = parser.parse_ast(sdl, "schema.graphql");
+
+        // Trace log recursion limit data
+        let recursion_limit = parser.recursion_reached();
+        tracing::trace!(?recursion_limit, "recursion limit data");
+
+        ast.check_parse_errors()
+            .map_err(|errors| SchemaError::Parse(ParseErrors { errors }))?;
+
+        let definitions = ast.to_schema();
 
         let diagnostics = if configuration.experimental_graphql_validation_mode
             == GraphQLValidationMode::Legacy
         {
-            vec![]
+            None
         } else {
-            compiler
-                .validate()
-                .into_iter()
-                .filter(|err| err.data.is_error())
-                .collect::<Vec<_>>()
+            definitions.validate().err()
         };
 
-        if !diagnostics.is_empty() {
-            let errors = ValidationErrors {
-                errors: diagnostics.clone(),
-            };
-
-            // Only error out if new validation is used: with `Both`, we take the legacy
-            // validation as authoritative and only use the new result for comparison
-            if configuration.experimental_graphql_validation_mode == GraphQLValidationMode::New {
-                return Err(SchemaError::Validate(errors));
+        // Only error out if new validation is used: with `Both`, we take the legacy
+        // validation as authoritative and only use the new result for comparison
+        if configuration.experimental_graphql_validation_mode == GraphQLValidationMode::New {
+            if let Some(errors) = diagnostics {
+                return Err(SchemaError::Validate(ValidationErrors { errors }));
             }
         }
 
         let mut subgraphs = HashMap::new();
-        let mut subgraph_definition_and_names = HashMap::new();
-        // TODO: error if not found?
-        if let Some(join_enum) = compiler.db.find_enum_by_name("join__Graph".into()) {
-            for (subgraph_name, name, url) in join_enum.values().filter_map(|value| {
-                let subgraph_name = value.enum_value().to_string();
-                let join_directive = value
-                    .directives()
-                    .iter()
-                    .find(|directive| directive.name() == "join__graph")?;
-                let name = join_directive.argument_by_name("name")?.as_str()?;
-                let url = join_directive.argument_by_name("url")?.as_str()?;
-                Some((subgraph_name, name, url))
-            }) {
-                if url.is_empty() {
-                    return Err(SchemaError::MissingSubgraphUrl(name.to_string()));
-                }
-                let url = Uri::from_str(url)
-                    .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?;
-                if subgraphs.insert(name.to_string(), url).is_some() {
-                    return Err(SchemaError::Api(format!(
-                        "must not have several subgraphs with same name '{name}'"
-                    )));
-                }
-                subgraph_definition_and_names.insert(subgraph_name, name.to_string());
-            }
-        }
+        // TODO[igni]: update it for apollo compiler 1.0
+        // let mut subgraph_definition_and_names = HashMap::new();
+        // if let Some(join_enum) = definitions.get_enum("join__Graph") {
+        //     for (name, url) in join_enum.values.iter().filter_map(|(_name, value)| {
+        //         let join_directive = value.directives.get("join__graph")?;
+        //         let name = join_directive.argument_by_name("name")?.as_str()?;
+        //         let url = join_directive.argument_by_name("url")?.as_str()?;
+        //         Some((subgraph_name, name, url))
+        //     }) {
+        //         if url.is_empty() {
+        //             return Err(SchemaError::MissingSubgraphUrl(name.to_string()));
+        //         }
+        //         let url = Uri::from_str(url)
+        //             .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?;
+        //         if subgraphs.insert(name.to_string(), url).is_some() {
+        //             return Err(SchemaError::Api(format!(
+        //                 "must not have several subgraphs with same name '{name}'"
+        //             )));
+        //         }
+        //         subgraph_definition_and_names.insert(subgraph_name, name.to_string());
+        //     }
+        // }
 
-        let sdl = compiler.db.source_code(id);
         let mut hasher = Sha256::new();
         hasher.update(sdl.as_bytes());
         let schema_id = Some(format!("{:x}", hasher.finalize()));
@@ -139,12 +135,14 @@ impl Schema {
             histogram.apollo.router.schema.load.duration = start.elapsed().as_secs_f64()
         );
 
+        let implementers_map = definitions.implementers_map();
+
         Ok(Schema {
-            raw_sdl: Arc::new(sdl.to_string()),
-            type_system: compiler.db.type_system(),
+            raw_sdl: Arc::new(sdl.to_owned()),
+            definitions,
             diagnostics,
             subgraphs,
-            subgraph_definition_and_names,
+            implementers_map,
             api_schema: None,
             schema_id,
         })
@@ -163,41 +161,27 @@ impl Schema {
     }
 
     pub(crate) fn is_subtype(&self, abstract_type: &str, maybe_subtype: &str) -> bool {
-        self.type_system
-            .subtype_map
-            .get(abstract_type)
-            .map(|x| x.contains(maybe_subtype))
-            .unwrap_or(false)
+        self.definitions.is_subtype(abstract_type, maybe_subtype)
     }
 
     pub(crate) fn is_implementation(&self, interface: &str, implementor: &str) -> bool {
-        self.type_system
-            .definitions
-            .interfaces
-            .get(interface)
+        self.definitions
+            .get_interface(interface)
             .map(|interface| {
-                interface
-                    .implements_interfaces()
-                    .any(|i| i.interface() == implementor)
+                // FIXME: this looks backwards
+                interface.implements_interfaces.contains(implementor)
             })
             .unwrap_or(false)
     }
 
     pub(crate) fn is_interface(&self, abstract_type: &str) -> bool {
-        self.type_system
-            .definitions
-            .interfaces
-            .contains_key(abstract_type)
+        self.definitions.get_interface(abstract_type).is_some()
     }
 
     // given two field, returns the one that implements the other, if applicable
-    pub(crate) fn most_precise<'f>(
-        &self,
-        a: &'f FieldType,
-        b: &'f FieldType,
-    ) -> Option<&'f FieldType> {
-        let typename_a = a.inner_type_name().unwrap_or_default();
-        let typename_b = b.inner_type_name().unwrap_or_default();
+    pub(crate) fn most_precise<'f>(&self, a: &'f str, b: &'f str) -> Option<&'f str> {
+        let typename_a = a;
+        let typename_b = b;
         if typename_a == typename_b {
             return Some(a);
         }
@@ -225,7 +209,9 @@ impl Schema {
     }
 
     pub(crate) fn subgraph_name(&self, subgraph_definition: &str) -> Option<&String> {
-        self.subgraph_definition_and_names.get(subgraph_definition)
+        // TODO[igni]: update to apollo compiler 1
+        todo!();
+        // self.subgraph_definition_and_names.get(subgraph_definition)
     }
 
     pub(crate) fn api_schema(&self) -> &Schema {
@@ -236,17 +222,50 @@ impl Schema {
     }
 
     pub(crate) fn root_operation_name(&self, kind: OperationKind) -> &str {
-        let schema_def = &self.type_system.definitions.schema;
-        match kind {
-            OperationKind::Query => schema_def.query(),
-            OperationKind::Mutation => schema_def.mutation(),
-            OperationKind::Subscription => schema_def.subscription(),
+        if let Some(name) = self.definitions.root_operation(kind.into()) {
+            name.as_str()
+        } else {
+            kind.as_str()
         }
-        .unwrap_or_else(|| kind.as_str())
     }
 
     pub(crate) fn has_errors(&self) -> bool {
-        !self.diagnostics.is_empty()
+        self.diagnostics.is_some()
+    }
+
+    pub(crate) fn has_spec(&self, url: &str) -> bool {
+        self.definitions
+            .schema_definition
+            .directives
+            .iter()
+            .filter(|dir| dir.name.as_str() == "link")
+            .any(|link| {
+                link.argument_by_name("url")
+                    .and_then(|value| value.as_str())
+                    == Some(url)
+            })
+    }
+
+    pub(crate) fn directive_name(
+        schema: &apollo_compiler::schema::Schema,
+        url: &str,
+        default: &str,
+    ) -> Option<String> {
+        schema
+            .schema_definition
+            .directives
+            .iter()
+            .filter(|dir| dir.name.as_str() == "link")
+            .find(|link| {
+                link.argument_by_name("url")
+                    .and_then(|value| value.as_str())
+                    == Some(url)
+            })
+            .map(|link| {
+                link.argument_by_name("as")
+                    .and_then(|value| value.as_str().map(|s| s.to_string()))
+                    .unwrap_or_else(|| default.to_string())
+            })
     }
 }
 
@@ -430,9 +449,12 @@ mod tests {
         let schema = include_str!("../testdata/contract_schema.graphql");
         let schema = Schema::parse_test(schema, &Default::default()).unwrap();
         let has_in_stock_field = |schema: &Schema| {
-            schema.type_system.definitions.objects["Product"]
-                .fields()
-                .any(|f| f.name() == "inStock")
+            schema
+                .definitions
+                .get_object("Product")
+                .unwrap()
+                .fields
+                .contains_key("inStock")
         };
         assert!(has_in_stock_field(&schema));
         assert!(!has_in_stock_field(schema.api_schema.as_ref().unwrap()));

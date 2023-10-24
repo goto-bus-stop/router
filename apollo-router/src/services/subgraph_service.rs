@@ -1129,13 +1129,13 @@ impl SubgraphServiceFactory {
         name: &str,
     ) -> Option<BoxService<SubgraphRequest, SubgraphResponse, BoxError>> {
         self.services.get(name).map(|service| {
-            self.plugins
-                .iter()
-                .rev()
-                .fold(self.subgraph_connector.as_ref().map_or_else(
+            self.plugins.iter().rev().fold(
+                self.subgraph_connector.as_ref().map_or_else(
                     || service.make(),
                     |connector| connector.subgraph_service(name, service.make()),
-                ), |acc, (_, e)| e.subgraph_service(name, acc))
+                ),
+                |acc, (_, e)| e.subgraph_service(name, acc),
+            )
         })
     }
 }

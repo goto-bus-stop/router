@@ -1,9 +1,9 @@
 use nom::{
     branch::alt,
     character::complete::{char, multispace0, one_of},
-    combinator::{map, recognize, opt},
+    combinator::{map, opt, recognize},
     multi::{many0, many1},
-    sequence::{pair, tuple, preceded},
+    sequence::{pair, preceded, tuple},
     IResult,
 };
 
@@ -30,9 +30,11 @@ fn test_selection() {
         Selection::parse("hello"),
         Ok((
             "",
-            Selection::Named(vec![
-                NamedSelection::Field(None, Identifier { name: "hello" }, None),
-            ]),
+            Selection::Named(vec![NamedSelection::Field(
+                None,
+                Identifier { name: "hello" },
+                None
+            ),]),
         )),
     );
 
@@ -41,9 +43,7 @@ fn test_selection() {
         Ok((
             "",
             Selection::Path(PathSelection {
-                path: vec![
-                    Property::Field(Identifier { name: "hello" }),
-                ],
+                path: vec![Property::Field(Identifier { name: "hello" }),],
                 selection: None,
             }),
         )),
@@ -53,18 +53,18 @@ fn test_selection() {
         Selection::parse("hi: .hello.world"),
         Ok((
             "",
-            Selection::Named(vec![
-                NamedSelection::Path(
-                    Alias { name: Identifier { name: "hi" } },
-                    PathSelection {
-                        path: vec![
-                            Property::Field(Identifier { name: "hello" }),
-                            Property::Field(Identifier { name: "world" }),
-                        ],
-                        selection: None,
-                    },
-                ),
-            ]),
+            Selection::Named(vec![NamedSelection::Path(
+                Alias {
+                    name: Identifier { name: "hi" }
+                },
+                PathSelection {
+                    path: vec![
+                        Property::Field(Identifier { name: "hello" }),
+                        Property::Field(Identifier { name: "world" }),
+                    ],
+                    selection: None,
+                },
+            ),]),
         )),
     );
 
@@ -75,7 +75,9 @@ fn test_selection() {
             Selection::Named(vec![
                 NamedSelection::Field(None, Identifier { name: "before" }, None),
                 NamedSelection::Path(
-                    Alias { name: Identifier { name: "hi" } },
+                    Alias {
+                        name: Identifier { name: "hi" }
+                    },
                     PathSelection {
                         path: vec![
                             Property::Field(Identifier { name: "hello" }),
@@ -94,7 +96,9 @@ fn test_selection() {
         Selection::Named(vec![
             NamedSelection::Field(None, Identifier { name: "before" }, None),
             NamedSelection::Path(
-                Alias { name: Identifier { name: "hi" } },
+                Alias {
+                    name: Identifier { name: "hi" },
+                },
                 PathSelection {
                     path: vec![
                         Property::Field(Identifier { name: "hello" }),
@@ -123,7 +127,8 @@ fn test_selection() {
     );
 
     assert_eq!(
-        Selection::parse("
+        Selection::parse(
+            "
             topLevelAlias: topLevelField {
                 nonIdentifier: 'property name with spaces'
                 pathSelection: .some.nested.path {
@@ -133,70 +138,89 @@ fn test_selection() {
                 }
                 siblingGroup: { brother sister }
             }
-        "),
+        "
+        ),
         Ok((
             "",
-            Selection::Named(vec![
-                NamedSelection::Field(
-                    Some(Alias { name: Identifier { name: "topLevelAlias" } }),
-                    Identifier { name: "topLevelField" },
-                    Some(SubSelection {
-                        selections: vec![
-                            NamedSelection::Quoted(
-                                Alias { name: Identifier { name: "nonIdentifier" } },
-                                "property name with spaces".to_string(),
-                                None,
-                            ),
-                            NamedSelection::Path(
-                                Alias { name: Identifier { name: "pathSelection" } },
-                                PathSelection {
-                                    path: vec![
-                                        Property::Field(Identifier { name: "some" }),
-                                        Property::Field(Identifier { name: "nested" }),
-                                        Property::Field(Identifier { name: "path" }),
-                                    ],
-                                    selection: Some(SubSelection {
-                                        selections: vec![
-                                            NamedSelection::Field(
-                                                Some(Alias { name: Identifier { name: "still" } }),
-                                                Identifier { name: "yet" },
-                                                None,
-                                            ),
-                                            NamedSelection::Field(
-                                                None,
-                                                Identifier { name: "more" },
-                                                None,
-                                            ),
-                                            NamedSelection::Field(
-                                                None,
-                                                Identifier { name: "properties" },
-                                                None,
-                                            ),
-                                        ],
-                                    }),
-                                },
-                            ),
-                            NamedSelection::Group(
-                                Alias { name: Identifier { name: "siblingGroup" } },
-                                SubSelection {
+            Selection::Named(vec![NamedSelection::Field(
+                Some(Alias {
+                    name: Identifier {
+                        name: "topLevelAlias"
+                    }
+                }),
+                Identifier {
+                    name: "topLevelField"
+                },
+                Some(SubSelection {
+                    selections: vec![
+                        NamedSelection::Quoted(
+                            Alias {
+                                name: Identifier {
+                                    name: "nonIdentifier"
+                                }
+                            },
+                            "property name with spaces".to_string(),
+                            None,
+                        ),
+                        NamedSelection::Path(
+                            Alias {
+                                name: Identifier {
+                                    name: "pathSelection"
+                                }
+                            },
+                            PathSelection {
+                                path: vec![
+                                    Property::Field(Identifier { name: "some" }),
+                                    Property::Field(Identifier { name: "nested" }),
+                                    Property::Field(Identifier { name: "path" }),
+                                ],
+                                selection: Some(SubSelection {
                                     selections: vec![
                                         NamedSelection::Field(
-                                            None,
-                                            Identifier { name: "brother" },
+                                            Some(Alias {
+                                                name: Identifier { name: "still" }
+                                            }),
+                                            Identifier { name: "yet" },
                                             None,
                                         ),
                                         NamedSelection::Field(
                                             None,
-                                            Identifier { name: "sister" },
+                                            Identifier { name: "more" },
+                                            None,
+                                        ),
+                                        NamedSelection::Field(
+                                            None,
+                                            Identifier { name: "properties" },
                                             None,
                                         ),
                                     ],
-                                },
-                            ),
-                        ],
-                    }),
-                ),
-            ]),
+                                }),
+                            },
+                        ),
+                        NamedSelection::Group(
+                            Alias {
+                                name: Identifier {
+                                    name: "siblingGroup"
+                                }
+                            },
+                            SubSelection {
+                                selections: vec![
+                                    NamedSelection::Field(
+                                        None,
+                                        Identifier { name: "brother" },
+                                        None,
+                                    ),
+                                    NamedSelection::Field(
+                                        None,
+                                        Identifier { name: "sister" },
+                                        None,
+                                    ),
+                                ],
+                            },
+                        ),
+                    ],
+                }),
+            ),]),
         )),
     );
 }
@@ -230,43 +254,23 @@ impl<'a> NamedSelection<'a> {
             opt(Alias::parse),
             Identifier::parse,
             opt(SubSelection::parse),
-        ))(input).map(|(input, (
-            alias,
-            name,
-            selection,
-        ))| (input, Self::Field(alias, name, selection)))
+        ))(input)
+        .map(|(input, (alias, name, selection))| (input, Self::Field(alias, name, selection)))
     }
 
     fn parse_quoted(input: &'a str) -> IResult<&str, Self> {
-        tuple((
-            Alias::parse,
-            parse_string_literal,
-            opt(SubSelection::parse),
-        ))(input).map(|(input, (
-            alias,
-            name,
-            selection,
-        ))| (input, Self::Quoted(alias, name, selection)))
+        tuple((Alias::parse, parse_string_literal, opt(SubSelection::parse)))(input)
+            .map(|(input, (alias, name, selection))| (input, Self::Quoted(alias, name, selection)))
     }
 
     fn parse_path(input: &'a str) -> IResult<&str, Self> {
-        tuple((
-            Alias::parse,
-            PathSelection::parse,
-        ))(input).map(|(input, (
-            alias,
-            path,
-        ))| (input, Self::Path(alias, path)))
+        tuple((Alias::parse, PathSelection::parse))(input)
+            .map(|(input, (alias, path))| (input, Self::Path(alias, path)))
     }
 
     fn parse_group(input: &'a str) -> IResult<&str, Self> {
-        tuple((
-            Alias::parse,
-            SubSelection::parse,
-        ))(input).map(|(input, (
-            alias,
-            group,
-        ))| (input, Self::Group(alias, group)))
+        tuple((Alias::parse, SubSelection::parse))(input)
+            .map(|(input, (alias, group))| (input, Self::Group(alias, group)))
     }
 
     fn name(&self) -> &str {
@@ -277,7 +281,7 @@ impl<'a> NamedSelection<'a> {
                 } else {
                     name.name
                 }
-            },
+            }
             Self::Quoted(alias, _, _) => alias.name.name,
             Self::Path(alias, _) => alias.name.name,
             Self::Group(alias, _) => alias.name.name,
@@ -287,11 +291,7 @@ impl<'a> NamedSelection<'a> {
 
 #[test]
 fn test_named_selection() {
-    fn assert_result_and_name(
-        input: &str,
-        expected: NamedSelection,
-        name: &str,
-    ) {
+    fn assert_result_and_name(input: &str, expected: NamedSelection, name: &str) {
         let actual = NamedSelection::parse(input);
         assert_eq!(actual, Ok(("", expected.clone())));
         assert_eq!(actual.unwrap().1.name(), name);
@@ -303,11 +303,7 @@ fn test_named_selection() {
 
     assert_result_and_name(
         "hello",
-        NamedSelection::Field(
-            None,
-            Identifier { name: "hello" },
-            None,
-        ),
+        NamedSelection::Field(None, Identifier { name: "hello" }, None),
         "hello",
     );
 
@@ -317,9 +313,11 @@ fn test_named_selection() {
             None,
             Identifier { name: "hello" },
             Some(SubSelection {
-                selections: vec![
-                    NamedSelection::Field(None, Identifier { name: "world" }, None),
-                ],
+                selections: vec![NamedSelection::Field(
+                    None,
+                    Identifier { name: "world" },
+                    None,
+                )],
             }),
         ),
         "hello",
@@ -328,7 +326,9 @@ fn test_named_selection() {
     assert_result_and_name(
         "hi: hello",
         NamedSelection::Field(
-            Some(Alias { name: Identifier { name: "hi" } }),
+            Some(Alias {
+                name: Identifier { name: "hi" },
+            }),
             Identifier { name: "hello" },
             None,
         ),
@@ -338,7 +338,9 @@ fn test_named_selection() {
     assert_result_and_name(
         "hi: 'hello world'",
         NamedSelection::Quoted(
-            Alias { name: Identifier { name: "hi" } },
+            Alias {
+                name: Identifier { name: "hi" },
+            },
             "hello world".to_string(),
             None,
         ),
@@ -348,12 +350,16 @@ fn test_named_selection() {
     assert_result_and_name(
         "hi: hello { world }",
         NamedSelection::Field(
-            Some(Alias { name: Identifier { name: "hi" } }),
+            Some(Alias {
+                name: Identifier { name: "hi" },
+            }),
             Identifier { name: "hello" },
             Some(SubSelection {
-                selections: vec![
-                    NamedSelection::Field(None, Identifier { name: "world" }, None),
-                ],
+                selections: vec![NamedSelection::Field(
+                    None,
+                    Identifier { name: "world" },
+                    None,
+                )],
             }),
         ),
         "hi",
@@ -362,7 +368,9 @@ fn test_named_selection() {
     assert_result_and_name(
         "hey: hello { world again }",
         NamedSelection::Field(
-            Some(Alias { name: Identifier { name: "hey" } }),
+            Some(Alias {
+                name: Identifier { name: "hey" },
+            }),
             Identifier { name: "hello" },
             Some(SubSelection {
                 selections: vec![
@@ -377,12 +385,16 @@ fn test_named_selection() {
     assert_result_and_name(
         "hey: 'hello world' { again }",
         NamedSelection::Quoted(
-            Alias { name: Identifier { name: "hey" } },
+            Alias {
+                name: Identifier { name: "hey" },
+            },
             "hello world".to_string(),
             Some(SubSelection {
-                selections: vec![
-                    NamedSelection::Field(None, Identifier { name: "again" }, None),
-                ],
+                selections: vec![NamedSelection::Field(
+                    None,
+                    Identifier { name: "again" },
+                    None,
+                )],
             }),
         ),
         "hey",
@@ -391,7 +403,9 @@ fn test_named_selection() {
     assert_result_and_name(
         "leggo: 'my ego'",
         NamedSelection::Quoted(
-            Alias { name: Identifier { name: "leggo" } },
+            Alias {
+                name: Identifier { name: "leggo" },
+            },
             "my ego".to_string(),
             None,
         ),
@@ -413,14 +427,8 @@ impl<'a> PathSelection<'a> {
             multispace0,
             many1(preceded(char('.'), Property::parse)),
             opt(SubSelection::parse),
-        ))(input).map(|(input, (
-            _,
-            path,
-            selection,
-        ))| (input, Self {
-            path,
-            selection,
-        }))
+        ))(input)
+        .map(|(input, (_, path, selection))| (input, Self { path, selection }))
     }
 }
 
@@ -428,15 +436,16 @@ impl<'a> PathSelection<'a> {
 fn test_path_selection() {
     fn check_path_selection(input: &str, expected: PathSelection) {
         assert_eq!(PathSelection::parse(input), Ok(("", expected.clone())));
-        assert_eq!(Selection::parse(input), Ok(("", Selection::Path(expected.clone()))));
+        assert_eq!(
+            Selection::parse(input),
+            Ok(("", Selection::Path(expected.clone())))
+        );
     }
 
     check_path_selection(
         ".hello",
         PathSelection {
-            path: vec![
-                Property::Field(Identifier { name: "hello" }),
-            ],
+            path: vec![Property::Field(Identifier { name: "hello" })],
             selection: None,
         },
     );
@@ -460,9 +469,11 @@ fn test_path_selection() {
                 Property::Field(Identifier { name: "world" }),
             ],
             selection: Some(SubSelection {
-                selections: vec![
-                    NamedSelection::Field(None, Identifier { name: "hello" }, None),
-                ],
+                selections: vec![NamedSelection::Field(
+                    None,
+                    Identifier { name: "hello" },
+                    None,
+                )],
             }),
         },
     );
@@ -488,13 +499,13 @@ fn test_path_selection() {
                 Property::Quoted("string literal".to_string()),
             ],
             selection: Some(SubSelection {
-                selections: vec![
-                    NamedSelection::Quoted(
-                        Alias { name: Identifier { name: "leggo" } },
-                        "my ego".to_string(),
-                        None,
-                    ),
-                ],
+                selections: vec![NamedSelection::Quoted(
+                    Alias {
+                        name: Identifier { name: "leggo" },
+                    },
+                    "my ego".to_string(),
+                    None,
+                )],
             }),
         },
     );
@@ -515,13 +526,8 @@ impl<'a> SubSelection<'a> {
             many1(NamedSelection::parse),
             char('}'),
             multispace0,
-        ))(input).map(|(input, (
-            _,
-            _,
-            selections,
-            _,
-            _,
-        ))| (input, Self { selections }))
+        ))(input)
+        .map(|(input, (_, _, selections, _, _))| (input, Self { selections }))
     }
 }
 
@@ -532,9 +538,11 @@ fn test_subselection() {
         Ok((
             "",
             SubSelection {
-                selections: vec![
-                    NamedSelection::Field(None, Identifier { name: "hello" }, None),
-                ],
+                selections: vec![NamedSelection::Field(
+                    None,
+                    Identifier { name: "hello" },
+                    None
+                ),],
             },
         )),
     );
@@ -544,9 +552,11 @@ fn test_subselection() {
         Ok((
             "",
             SubSelection {
-                selections: vec![
-                    NamedSelection::Field(None, Identifier { name: "hello" }, None),
-                ],
+                selections: vec![NamedSelection::Field(
+                    None,
+                    Identifier { name: "hello" },
+                    None
+                ),],
             },
         )),
     );
@@ -556,9 +566,11 @@ fn test_subselection() {
         Ok((
             "",
             SubSelection {
-                selections: vec![
-                    NamedSelection::Field(None, Identifier { name: "padded" }, None),
-                ],
+                selections: vec![NamedSelection::Field(
+                    None,
+                    Identifier { name: "padded" },
+                    None
+                ),],
             },
         )),
     );
@@ -581,13 +593,17 @@ fn test_subselection() {
         Ok((
             "",
             SubSelection {
-                selections: vec![
-                    NamedSelection::Field(None, Identifier { name: "hello" }, Some(SubSelection {
-                        selections: vec![
-                            NamedSelection::Field(None, Identifier { name: "world" }, None),
-                        ],
-                    })),
-                ],
+                selections: vec![NamedSelection::Field(
+                    None,
+                    Identifier { name: "hello" },
+                    Some(SubSelection {
+                        selections: vec![NamedSelection::Field(
+                            None,
+                            Identifier { name: "world" },
+                            None
+                        ),],
+                    })
+                ),],
             },
         )),
     );
@@ -602,15 +618,8 @@ pub(self) struct Alias<'a> {
 
 impl<'a> Alias<'a> {
     fn parse(input: &'a str) -> IResult<&'a str, Self> {
-        tuple((
-            Identifier::parse,
-            char(':'),
-            multispace0,
-        ))(input).map(|(input, (
-            name,
-            _,
-            _,
-        ))| (input, Self { name }))
+        tuple((Identifier::parse, char(':'), multispace0))(input)
+            .map(|(input, (name, _, _))| (input, Self { name }))
     }
 }
 
@@ -688,18 +697,12 @@ impl<'a> Property<'a> {
 fn test_property() {
     assert_eq!(
         Property::parse("hello"),
-        Ok((
-            "",
-            Property::Field(Identifier { name: "hello" }),
-        )),
+        Ok(("", Property::Field(Identifier { name: "hello" }),)),
     );
 
     assert_eq!(
         Property::parse("'hello'"),
-        Ok((
-            "",
-            Property::Quoted("hello".to_string()),
-        )),
+        Ok(("", Property::Quoted("hello".to_string()),)),
     );
 }
 
@@ -716,14 +719,13 @@ impl<'a> Identifier<'a> {
             multispace0,
             recognize(pair(
                 one_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_"),
-                many0(one_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789")),
+                many0(one_of(
+                    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789",
+                )),
             )),
             multispace0,
-        ))(input).map(|(input, (
-            _,
-            name,
-            _,
-        ))| (input, Self { name }))
+        ))(input)
+        .map(|(input, (_, name, _))| (input, Self { name }))
     }
 
     fn name(&self) -> &str {
@@ -740,12 +742,22 @@ fn test_identifier() {
 
     assert_eq!(
         Identifier::parse("hello_world"),
-        Ok(("", Identifier { name: "hello_world" })),
+        Ok((
+            "",
+            Identifier {
+                name: "hello_world"
+            }
+        )),
     );
 
     assert_eq!(
         Identifier::parse("hello_world_123"),
-        Ok(("", Identifier { name: "hello_world_123" })),
+        Ok((
+            "",
+            Identifier {
+                name: "hello_world_123"
+            }
+        )),
     );
 
     assert_eq!(
@@ -763,8 +775,7 @@ fn parse_string_literal<'a>(input: &'a str) -> IResult<&'a str, String> {
     let mut input_char_indices = input.char_indices();
 
     match input_char_indices.next() {
-        Some((0, quote @ '\'')) |
-        Some((0, quote @ '"')) => {
+        Some((0, quote @ '\'')) | Some((0, quote @ '"')) => {
             let mut escape_next = false;
             let mut chars: Vec<char> = vec![];
             let mut remainder: Option<&str> = None;
@@ -797,7 +808,7 @@ fn parse_string_literal<'a>(input: &'a str) -> IResult<&'a str, String> {
                     nom::error::ErrorKind::Eof,
                 )))
             }
-        },
+        }
 
         _ => Err(nom::Err::Error(nom::error::Error::new(
             input,

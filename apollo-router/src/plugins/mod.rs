@@ -30,7 +30,7 @@ mod headers;
 mod include_subgraph_errors;
 pub(crate) mod override_url;
 pub(crate) mod rhai;
-pub(crate) mod subgraph_connector;
+pub(crate) mod connectors;
 pub(crate) mod subscription;
 pub(crate) mod telemetry;
 pub(crate) mod traffic_shaping;

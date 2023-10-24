@@ -62,7 +62,7 @@ use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
-use crate::plugins::subgraph_connector::SubgraphConnector;
+use crate::plugins::connectors::subgraph_connector::SubgraphConnector;
 use crate::plugins::subscription::create_verifier;
 use crate::plugins::subscription::CallbackMode;
 use crate::plugins::subscription::SubscriptionConfig;

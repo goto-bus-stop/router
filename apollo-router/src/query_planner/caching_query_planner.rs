@@ -627,6 +627,7 @@ mod tests {
                 };
                 let qp_content = QueryPlannerContent::Plan {
                     plan: Arc::new(query_plan),
+                    relevant_subgraph_schemas: Default::default(),
                 };
 
                 Ok(QueryPlannerResponse::builder()

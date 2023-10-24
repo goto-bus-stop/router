@@ -1104,10 +1104,10 @@ pub(crate) async fn compress(body: String, headers: &HeaderMap) -> Result<Vec<u8
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(crate) struct SubgraphServiceFactory {
     pub(crate) services: Arc<HashMap<String, Arc<dyn MakeSubgraphService>>>,
-    pub(crate) subgraph_connector: SubgraphConnector,
+    pub(crate) subgraph_connector: Option<SubgraphConnector>,
     pub(crate) plugins: Arc<Plugins>,
 }
 
@@ -1119,7 +1119,7 @@ impl SubgraphServiceFactory {
     ) -> Self {
         SubgraphServiceFactory {
             services: Arc::new(services.into_iter().collect()),
-            subgraph_connector,
+            subgraph_connector: Some(subgraph_connector),
             plugins,
         }
     }
@@ -1129,13 +1129,13 @@ impl SubgraphServiceFactory {
         name: &str,
     ) -> Option<BoxService<SubgraphRequest, SubgraphResponse, BoxError>> {
         self.services.get(name).map(|service| {
-            let service = self
-                .subgraph_connector
-                .subgraph_service(name, service.make());
             self.plugins
                 .iter()
                 .rev()
-                .fold(service, |acc, (_, e)| e.subgraph_service(name, acc))
+                .fold(self.subgraph_connector.as_ref().map_or_else(
+                    || service.make(),
+                    |connector| connector.subgraph_service(name, service.make()),
+                ), |acc, (_, e)| e.subgraph_service(name, acc))
         })
     }
 }

@@ -47,10 +47,10 @@ fn test_selection() {
         Selection::parse(".hello"),
         Ok((
             "",
-            Selection::Path(PathSelection {
-                path: vec![Property::Field(Identifier { name: "hello" }),],
-                selection: None,
-            }),
+            Selection::Path(PathSelection::from_slice(
+                &[Property::Field(Identifier { name: "hello" }),],
+                None
+            )),
         )),
     );
 
@@ -62,14 +62,14 @@ fn test_selection() {
                 Alias {
                     name: Identifier { name: "hi" }
                 },
-                PathSelection {
-                    path: vec![
+                PathSelection::from_slice(
+                    &[
                         Property::Field(Identifier { name: "hello" }),
                         Property::Field(Identifier { name: "world" }),
                     ],
-                    selection: None,
-                },
-            ),]),
+                    None
+                ),
+            )]),
         )),
     );
 
@@ -83,13 +83,13 @@ fn test_selection() {
                     Alias {
                         name: Identifier { name: "hi" }
                     },
-                    PathSelection {
-                        path: vec![
+                    PathSelection::from_slice(
+                        &[
                             Property::Field(Identifier { name: "hello" }),
                             Property::Field(Identifier { name: "world" }),
                         ],
-                        selection: None,
-                    },
+                        None
+                    ),
                 ),
                 NamedSelection::Field(None, Identifier { name: "after" }, None),
             ]),
@@ -104,18 +104,18 @@ fn test_selection() {
                 Alias {
                     name: Identifier { name: "hi" },
                 },
-                PathSelection {
-                    path: vec![
+                PathSelection::from_slice(
+                    &[
                         Property::Field(Identifier { name: "hello" }),
                         Property::Field(Identifier { name: "world" }),
                     ],
-                    selection: Some(SubSelection {
+                    Some(SubSelection {
                         selections: vec![
                             NamedSelection::Field(None, Identifier { name: "nested" }, None),
                             NamedSelection::Field(None, Identifier { name: "names" }, None),
                         ],
                     }),
-                },
+                ),
             ),
             NamedSelection::Field(None, Identifier { name: "after" }, None),
         ]),
@@ -173,13 +173,13 @@ fn test_selection() {
                                     name: "pathSelection"
                                 }
                             },
-                            PathSelection {
-                                path: vec![
+                            PathSelection::from_slice(
+                                &[
                                     Property::Field(Identifier { name: "some" }),
                                     Property::Field(Identifier { name: "nested" }),
                                     Property::Field(Identifier { name: "path" }),
                                 ],
-                                selection: Some(SubSelection {
+                                Some(SubSelection {
                                     selections: vec![
                                         NamedSelection::Field(
                                             Some(Alias {
@@ -199,8 +199,8 @@ fn test_selection() {
                                             None,
                                         ),
                                     ],
-                                }),
-                            },
+                                })
+                            ),
                         ),
                         NamedSelection::Group(
                             Alias {
@@ -421,9 +421,12 @@ fn test_named_selection() {
 // PathSelection ::= ("." Property)+ SubSelection?
 
 #[derive(Debug, PartialEq, Clone)]
-pub(self) struct PathSelection<'a> {
-    path: Vec<Property<'a>>,
-    selection: Option<SubSelection<'a>>,
+pub(self) enum PathSelection<'a> {
+    // We use a recursive structure here instead of a Vec<Property> to make
+    // applying the selection to a JSON value easier.
+    Path(Property<'a>, Box<PathSelection<'a>>),
+    Selection(SubSelection<'a>),
+    Empty,
 }
 
 impl<'a> PathSelection<'a> {
@@ -433,7 +436,16 @@ impl<'a> PathSelection<'a> {
             many1(preceded(char('.'), Property::parse)),
             opt(SubSelection::parse),
         ))(input)
-        .map(|(input, (_, path, selection))| (input, Self { path, selection }))
+        .map(|(input, (_, path, selection))| (input, Self::from_slice(&path, selection)))
+    }
+
+    fn from_slice(properties: &[Property<'a>], selection: Option<SubSelection<'a>>) -> Self {
+        match properties {
+            [] => selection.map_or(Self::Empty, Self::Selection),
+            [head, tail @ ..] => {
+                Self::Path(head.clone(), Box::new(Self::from_slice(tail, selection)))
+            }
+        }
     }
 }
 
@@ -449,61 +461,58 @@ fn test_path_selection() {
 
     check_path_selection(
         ".hello",
-        PathSelection {
-            path: vec![Property::Field(Identifier { name: "hello" })],
-            selection: None,
-        },
+        PathSelection::from_slice(&[Property::Field(Identifier { name: "hello" })], None),
     );
 
     check_path_selection(
         ".hello.world",
-        PathSelection {
-            path: vec![
+        PathSelection::from_slice(
+            &[
                 Property::Field(Identifier { name: "hello" }),
                 Property::Field(Identifier { name: "world" }),
             ],
-            selection: None,
-        },
+            None,
+        ),
     );
 
     check_path_selection(
         ".hello.world { hello }",
-        PathSelection {
-            path: vec![
+        PathSelection::from_slice(
+            &[
                 Property::Field(Identifier { name: "hello" }),
                 Property::Field(Identifier { name: "world" }),
             ],
-            selection: Some(SubSelection {
+            Some(SubSelection {
                 selections: vec![NamedSelection::Field(
                     None,
                     Identifier { name: "hello" },
                     None,
                 )],
             }),
-        },
+        ),
     );
 
     check_path_selection(
         ".nested.'string literal'.\"property\".name",
-        PathSelection {
-            path: vec![
+        PathSelection::from_slice(
+            &[
                 Property::Field(Identifier { name: "nested" }),
                 Property::Quoted("string literal".to_string()),
                 Property::Quoted("property".to_string()),
                 Property::Field(Identifier { name: "name" }),
             ],
-            selection: None,
-        },
+            None,
+        ),
     );
 
     check_path_selection(
         ".nested.'string literal' { leggo: 'my ego' }",
-        PathSelection {
-            path: vec![
+        PathSelection::from_slice(
+            &[
                 Property::Field(Identifier { name: "nested" }),
                 Property::Quoted("string literal".to_string()),
             ],
-            selection: Some(SubSelection {
+            Some(SubSelection {
                 selections: vec![NamedSelection::Quoted(
                     Alias {
                         name: Identifier { name: "leggo" },
@@ -512,7 +521,7 @@ fn test_path_selection() {
                     None,
                 )],
             }),
-        },
+        ),
     );
 }
 

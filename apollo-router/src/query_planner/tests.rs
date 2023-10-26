@@ -102,7 +102,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
             "product".into(),
             Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
         )])),
-        plugins: Default::default(),
+        ..Default::default()
     });
 
     let result = query_plan
@@ -162,7 +162,7 @@ async fn fetch_includes_operation_name() {
             "product".into(),
             Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
         )])),
-        plugins: Default::default(),
+        ..Default::default()
     });
 
     let _response = query_plan
@@ -219,7 +219,7 @@ async fn fetch_makes_post_requests() {
             "product".into(),
             Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
         )])),
-        plugins: Default::default(),
+        ..Default::default()
     });
 
     let _response = query_plan
@@ -365,7 +365,7 @@ async fn defer() {
                 Arc::new(mock_y_service) as Arc<dyn MakeSubgraphService>,
             ),
         ])),
-        plugins: Default::default(),
+        ..Default::default()
     });
 
     let response = query_plan
@@ -457,7 +457,7 @@ async fn defer_if_condition() {
             "accounts".into(),
             Arc::new(mocked_accounts) as Arc<dyn MakeSubgraphService>,
         )])),
-        plugins: Default::default(),
+        ..Default::default()
     });
     let defer_primary_response = query_plan
         .execute(
@@ -631,7 +631,7 @@ async fn dependent_mutations() {
                 Arc::new(mock_b_service) as Arc<dyn MakeSubgraphService>,
             ),
         ])),
-        plugins: Default::default(),
+        ..Default::default()
     });
 
     let (sender, _) = futures::channel::mpsc::channel(10);

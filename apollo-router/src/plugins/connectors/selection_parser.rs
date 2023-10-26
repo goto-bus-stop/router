@@ -15,13 +15,13 @@ use nom::IResult;
 // Selection ::= NamedSelection+ | PathSelection
 
 #[derive(Debug, PartialEq, Clone)]
-pub(self) enum Selection<'a> {
-    Named(Vec<NamedSelection<'a>>),
-    Path(PathSelection<'a>),
+pub(self) enum Selection {
+    Named(Vec<NamedSelection>),
+    Path(PathSelection),
 }
 
-impl<'a> Selection<'a> {
-    fn parse(input: &'a str) -> IResult<&str, Self> {
+impl Selection {
+    fn parse<'a>(input: &'a str) -> IResult<&str, Self> {
         alt((
             map(many1(NamedSelection::parse), Self::Named),
             map(PathSelection::parse, Self::Path),
@@ -35,11 +35,7 @@ fn test_selection() {
         Selection::parse("hello"),
         Ok((
             "",
-            Selection::Named(vec![NamedSelection::Field(
-                None,
-                Identifier { name: "hello" },
-                None
-            ),]),
+            Selection::Named(vec![NamedSelection::Field(None, "hello".to_string(), None),]),
         )),
     );
 
@@ -48,7 +44,7 @@ fn test_selection() {
         Ok((
             "",
             Selection::Path(PathSelection::from_slice(
-                &[Property::Field(Identifier { name: "hello" }),],
+                &[Property::Field("hello".to_string()),],
                 None
             )),
         )),
@@ -60,12 +56,12 @@ fn test_selection() {
             "",
             Selection::Named(vec![NamedSelection::Path(
                 Alias {
-                    name: Identifier { name: "hi" }
+                    name: "hi".to_string(),
                 },
                 PathSelection::from_slice(
                     &[
-                        Property::Field(Identifier { name: "hello" }),
-                        Property::Field(Identifier { name: "world" }),
+                        Property::Field("hello".to_string()),
+                        Property::Field("world".to_string()),
                     ],
                     None
                 ),
@@ -78,20 +74,20 @@ fn test_selection() {
         Ok((
             "",
             Selection::Named(vec![
-                NamedSelection::Field(None, Identifier { name: "before" }, None),
+                NamedSelection::Field(None, "before".to_string(), None),
                 NamedSelection::Path(
                     Alias {
-                        name: Identifier { name: "hi" }
+                        name: "hi".to_string(),
                     },
                     PathSelection::from_slice(
                         &[
-                            Property::Field(Identifier { name: "hello" }),
-                            Property::Field(Identifier { name: "world" }),
+                            Property::Field("hello".to_string()),
+                            Property::Field("world".to_string()),
                         ],
                         None
                     ),
                 ),
-                NamedSelection::Field(None, Identifier { name: "after" }, None),
+                NamedSelection::Field(None, "after".to_string(), None),
             ]),
         )),
     );
@@ -99,25 +95,25 @@ fn test_selection() {
     let before_path_nested_after_result = Ok((
         "",
         Selection::Named(vec![
-            NamedSelection::Field(None, Identifier { name: "before" }, None),
+            NamedSelection::Field(None, "before".to_string(), None),
             NamedSelection::Path(
                 Alias {
-                    name: Identifier { name: "hi" },
+                    name: "hi".to_string(),
                 },
                 PathSelection::from_slice(
                     &[
-                        Property::Field(Identifier { name: "hello" }),
-                        Property::Field(Identifier { name: "world" }),
+                        Property::Field("hello".to_string()),
+                        Property::Field("world".to_string()),
                     ],
                     Some(SubSelection {
                         selections: vec![
-                            NamedSelection::Field(None, Identifier { name: "nested" }, None),
-                            NamedSelection::Field(None, Identifier { name: "names" }, None),
+                            NamedSelection::Field(None, "nested".to_string(), None),
+                            NamedSelection::Field(None, "names".to_string(), None),
                         ],
                     }),
                 ),
             ),
-            NamedSelection::Field(None, Identifier { name: "after" }, None),
+            NamedSelection::Field(None, "after".to_string(), None),
         ]),
     ));
 
@@ -149,77 +145,51 @@ fn test_selection() {
             "",
             Selection::Named(vec![NamedSelection::Field(
                 Some(Alias {
-                    name: Identifier {
-                        name: "topLevelAlias"
-                    }
+                    name: "topLevelAlias".to_string(),
                 }),
-                Identifier {
-                    name: "topLevelField"
-                },
+                "topLevelField".to_string(),
                 Some(SubSelection {
                     selections: vec![
                         NamedSelection::Quoted(
                             Alias {
-                                name: Identifier {
-                                    name: "nonIdentifier"
-                                }
+                                name: "nonIdentifier".to_string(),
                             },
                             "property name with spaces".to_string(),
                             None,
                         ),
                         NamedSelection::Path(
                             Alias {
-                                name: Identifier {
-                                    name: "pathSelection"
-                                }
+                                name: "pathSelection".to_string(),
                             },
                             PathSelection::from_slice(
                                 &[
-                                    Property::Field(Identifier { name: "some" }),
-                                    Property::Field(Identifier { name: "nested" }),
-                                    Property::Field(Identifier { name: "path" }),
+                                    Property::Field("some".to_string()),
+                                    Property::Field("nested".to_string()),
+                                    Property::Field("path".to_string()),
                                 ],
                                 Some(SubSelection {
                                     selections: vec![
                                         NamedSelection::Field(
                                             Some(Alias {
-                                                name: Identifier { name: "still" }
+                                                name: "still".to_string(),
                                             }),
-                                            Identifier { name: "yet" },
+                                            "yet".to_string(),
                                             None,
                                         ),
-                                        NamedSelection::Field(
-                                            None,
-                                            Identifier { name: "more" },
-                                            None,
-                                        ),
-                                        NamedSelection::Field(
-                                            None,
-                                            Identifier { name: "properties" },
-                                            None,
-                                        ),
+                                        NamedSelection::Field(None, "more".to_string(), None,),
+                                        NamedSelection::Field(None, "properties".to_string(), None,),
                                     ],
                                 })
                             ),
                         ),
                         NamedSelection::Group(
                             Alias {
-                                name: Identifier {
-                                    name: "siblingGroup"
-                                }
+                                name: "siblingGroup".to_string(),
                             },
                             SubSelection {
                                 selections: vec![
-                                    NamedSelection::Field(
-                                        None,
-                                        Identifier { name: "brother" },
-                                        None,
-                                    ),
-                                    NamedSelection::Field(
-                                        None,
-                                        Identifier { name: "sister" },
-                                        None,
-                                    ),
+                                    NamedSelection::Field(None, "brother".to_string(), None,),
+                                    NamedSelection::Field(None, "sister".to_string(), None,),
                                 ],
                             },
                         ),
@@ -237,15 +207,15 @@ fn test_selection() {
 //     | Alias SubSelection
 
 #[derive(Debug, PartialEq, Clone)]
-pub(self) enum NamedSelection<'a> {
-    Field(Option<Alias<'a>>, Identifier<'a>, Option<SubSelection<'a>>),
-    Quoted(Alias<'a>, String, Option<SubSelection<'a>>),
-    Path(Alias<'a>, PathSelection<'a>),
-    Group(Alias<'a>, SubSelection<'a>),
+pub(self) enum NamedSelection {
+    Field(Option<Alias>, String, Option<SubSelection>),
+    Quoted(Alias, String, Option<SubSelection>),
+    Path(Alias, PathSelection),
+    Group(Alias, SubSelection),
 }
 
-impl<'a> NamedSelection<'a> {
-    fn parse(input: &'a str) -> IResult<&str, Self> {
+impl NamedSelection {
+    fn parse<'a>(input: &'a str) -> IResult<&str, Self> {
         alt((
             Self::parse_field,
             Self::parse_quoted,
@@ -254,42 +224,42 @@ impl<'a> NamedSelection<'a> {
         ))(input)
     }
 
-    fn parse_field(input: &'a str) -> IResult<&str, Self> {
+    fn parse_field<'a>(input: &'a str) -> IResult<&str, Self> {
         tuple((
             opt(Alias::parse),
-            Identifier::parse,
+            parse_identifier,
             opt(SubSelection::parse),
         ))(input)
         .map(|(input, (alias, name, selection))| (input, Self::Field(alias, name, selection)))
     }
 
-    fn parse_quoted(input: &'a str) -> IResult<&str, Self> {
+    fn parse_quoted<'a>(input: &'a str) -> IResult<&str, Self> {
         tuple((Alias::parse, parse_string_literal, opt(SubSelection::parse)))(input)
             .map(|(input, (alias, name, selection))| (input, Self::Quoted(alias, name, selection)))
     }
 
-    fn parse_path(input: &'a str) -> IResult<&str, Self> {
+    fn parse_path<'a>(input: &'a str) -> IResult<&str, Self> {
         tuple((Alias::parse, PathSelection::parse))(input)
             .map(|(input, (alias, path))| (input, Self::Path(alias, path)))
     }
 
-    fn parse_group(input: &'a str) -> IResult<&str, Self> {
+    fn parse_group<'a>(input: &'a str) -> IResult<&str, Self> {
         tuple((Alias::parse, SubSelection::parse))(input)
             .map(|(input, (alias, group))| (input, Self::Group(alias, group)))
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &String {
         match self {
             Self::Field(alias, name, _) => {
                 if let Some(alias) = alias {
-                    alias.name.name
+                    &alias.name
                 } else {
-                    name.name
+                    name
                 }
             }
-            Self::Quoted(alias, _, _) => alias.name.name,
-            Self::Path(alias, _) => alias.name.name,
-            Self::Group(alias, _) => alias.name.name,
+            Self::Quoted(alias, _, _) => &alias.name,
+            Self::Path(alias, _) => &alias.name,
+            Self::Group(alias, _) => &alias.name,
         }
     }
 }
@@ -308,7 +278,7 @@ fn test_named_selection() {
 
     assert_result_and_name(
         "hello",
-        NamedSelection::Field(None, Identifier { name: "hello" }, None),
+        NamedSelection::Field(None, "hello".to_string(), None),
         "hello",
     );
 
@@ -316,13 +286,9 @@ fn test_named_selection() {
         "hello { world }",
         NamedSelection::Field(
             None,
-            Identifier { name: "hello" },
+            "hello".to_string(),
             Some(SubSelection {
-                selections: vec![NamedSelection::Field(
-                    None,
-                    Identifier { name: "world" },
-                    None,
-                )],
+                selections: vec![NamedSelection::Field(None, "world".to_string(), None)],
             }),
         ),
         "hello",
@@ -332,9 +298,9 @@ fn test_named_selection() {
         "hi: hello",
         NamedSelection::Field(
             Some(Alias {
-                name: Identifier { name: "hi" },
+                name: "hi".to_string(),
             }),
-            Identifier { name: "hello" },
+            "hello".to_string(),
             None,
         ),
         "hi",
@@ -344,7 +310,7 @@ fn test_named_selection() {
         "hi: 'hello world'",
         NamedSelection::Quoted(
             Alias {
-                name: Identifier { name: "hi" },
+                name: "hi".to_string(),
             },
             "hello world".to_string(),
             None,
@@ -356,15 +322,11 @@ fn test_named_selection() {
         "hi: hello { world }",
         NamedSelection::Field(
             Some(Alias {
-                name: Identifier { name: "hi" },
+                name: "hi".to_string(),
             }),
-            Identifier { name: "hello" },
+            "hello".to_string(),
             Some(SubSelection {
-                selections: vec![NamedSelection::Field(
-                    None,
-                    Identifier { name: "world" },
-                    None,
-                )],
+                selections: vec![NamedSelection::Field(None, "world".to_string(), None)],
             }),
         ),
         "hi",
@@ -374,13 +336,13 @@ fn test_named_selection() {
         "hey: hello { world again }",
         NamedSelection::Field(
             Some(Alias {
-                name: Identifier { name: "hey" },
+                name: "hey".to_string(),
             }),
-            Identifier { name: "hello" },
+            "hello".to_string(),
             Some(SubSelection {
                 selections: vec![
-                    NamedSelection::Field(None, Identifier { name: "world" }, None),
-                    NamedSelection::Field(None, Identifier { name: "again" }, None),
+                    NamedSelection::Field(None, "world".to_string(), None),
+                    NamedSelection::Field(None, "again".to_string(), None),
                 ],
             }),
         ),
@@ -391,15 +353,11 @@ fn test_named_selection() {
         "hey: 'hello world' { again }",
         NamedSelection::Quoted(
             Alias {
-                name: Identifier { name: "hey" },
+                name: "hey".to_string(),
             },
             "hello world".to_string(),
             Some(SubSelection {
-                selections: vec![NamedSelection::Field(
-                    None,
-                    Identifier { name: "again" },
-                    None,
-                )],
+                selections: vec![NamedSelection::Field(None, "again".to_string(), None)],
             }),
         ),
         "hey",
@@ -409,7 +367,7 @@ fn test_named_selection() {
         "leggo: 'my ego'",
         NamedSelection::Quoted(
             Alias {
-                name: Identifier { name: "leggo" },
+                name: "leggo".to_string(),
             },
             "my ego".to_string(),
             None,
@@ -421,16 +379,16 @@ fn test_named_selection() {
 // PathSelection ::= ("." Property)+ SubSelection?
 
 #[derive(Debug, PartialEq, Clone)]
-pub(self) enum PathSelection<'a> {
+pub(self) enum PathSelection {
     // We use a recursive structure here instead of a Vec<Property> to make
     // applying the selection to a JSON value easier.
-    Path(Property<'a>, Box<PathSelection<'a>>),
-    Selection(SubSelection<'a>),
+    Path(Property, Box<PathSelection>),
+    Selection(SubSelection),
     Empty,
 }
 
-impl<'a> PathSelection<'a> {
-    fn parse(input: &'a str) -> IResult<&str, Self> {
+impl PathSelection {
+    fn parse<'a>(input: &'a str) -> IResult<&str, Self> {
         tuple((
             multispace0,
             many1(preceded(char('.'), Property::parse)),
@@ -439,7 +397,7 @@ impl<'a> PathSelection<'a> {
         .map(|(input, (_, path, selection))| (input, Self::from_slice(&path, selection)))
     }
 
-    fn from_slice(properties: &[Property<'a>], selection: Option<SubSelection<'a>>) -> Self {
+    fn from_slice(properties: &[Property], selection: Option<SubSelection>) -> Self {
         match properties {
             [] => selection.map_or(Self::Empty, Self::Selection),
             [head, tail @ ..] => {
@@ -461,15 +419,15 @@ fn test_path_selection() {
 
     check_path_selection(
         ".hello",
-        PathSelection::from_slice(&[Property::Field(Identifier { name: "hello" })], None),
+        PathSelection::from_slice(&[Property::Field("hello".to_string())], None),
     );
 
     check_path_selection(
         ".hello.world",
         PathSelection::from_slice(
             &[
-                Property::Field(Identifier { name: "hello" }),
-                Property::Field(Identifier { name: "world" }),
+                Property::Field("hello".to_string()),
+                Property::Field("world".to_string()),
             ],
             None,
         ),
@@ -479,15 +437,11 @@ fn test_path_selection() {
         ".hello.world { hello }",
         PathSelection::from_slice(
             &[
-                Property::Field(Identifier { name: "hello" }),
-                Property::Field(Identifier { name: "world" }),
+                Property::Field("hello".to_string()),
+                Property::Field("world".to_string()),
             ],
             Some(SubSelection {
-                selections: vec![NamedSelection::Field(
-                    None,
-                    Identifier { name: "hello" },
-                    None,
-                )],
+                selections: vec![NamedSelection::Field(None, "hello".to_string(), None)],
             }),
         ),
     );
@@ -496,10 +450,10 @@ fn test_path_selection() {
         ".nested.'string literal'.\"property\".name",
         PathSelection::from_slice(
             &[
-                Property::Field(Identifier { name: "nested" }),
+                Property::Field("nested".to_string()),
                 Property::Quoted("string literal".to_string()),
                 Property::Quoted("property".to_string()),
-                Property::Field(Identifier { name: "name" }),
+                Property::Field("name".to_string()),
             ],
             None,
         ),
@@ -509,13 +463,13 @@ fn test_path_selection() {
         ".nested.'string literal' { leggo: 'my ego' }",
         PathSelection::from_slice(
             &[
-                Property::Field(Identifier { name: "nested" }),
+                Property::Field("nested".to_string()),
                 Property::Quoted("string literal".to_string()),
             ],
             Some(SubSelection {
                 selections: vec![NamedSelection::Quoted(
                     Alias {
-                        name: Identifier { name: "leggo" },
+                        name: "leggo".to_string(),
                     },
                     "my ego".to_string(),
                     None,
@@ -528,12 +482,12 @@ fn test_path_selection() {
 // SubSelection ::= "{" NamedSelection+ "}"
 
 #[derive(Debug, PartialEq, Clone)]
-pub(self) struct SubSelection<'a> {
-    selections: Vec<NamedSelection<'a>>,
+pub(self) struct SubSelection {
+    selections: Vec<NamedSelection>,
 }
 
-impl<'a> SubSelection<'a> {
-    fn parse(input: &'a str) -> IResult<&str, Self> {
+impl SubSelection {
+    fn parse<'a>(input: &'a str) -> IResult<&str, Self> {
         tuple((
             multispace0,
             char('{'),
@@ -552,11 +506,7 @@ fn test_subselection() {
         Ok((
             "",
             SubSelection {
-                selections: vec![NamedSelection::Field(
-                    None,
-                    Identifier { name: "hello" },
-                    None
-                ),],
+                selections: vec![NamedSelection::Field(None, "hello".to_string(), None),],
             },
         )),
     );
@@ -566,11 +516,7 @@ fn test_subselection() {
         Ok((
             "",
             SubSelection {
-                selections: vec![NamedSelection::Field(
-                    None,
-                    Identifier { name: "hello" },
-                    None
-                ),],
+                selections: vec![NamedSelection::Field(None, "hello".to_string(), None),],
             },
         )),
     );
@@ -580,11 +526,7 @@ fn test_subselection() {
         Ok((
             "",
             SubSelection {
-                selections: vec![NamedSelection::Field(
-                    None,
-                    Identifier { name: "padded" },
-                    None
-                ),],
+                selections: vec![NamedSelection::Field(None, "padded".to_string(), None),],
             },
         )),
     );
@@ -595,8 +537,8 @@ fn test_subselection() {
             "",
             SubSelection {
                 selections: vec![
-                    NamedSelection::Field(None, Identifier { name: "hello" }, None),
-                    NamedSelection::Field(None, Identifier { name: "world" }, None),
+                    NamedSelection::Field(None, "hello".to_string(), None),
+                    NamedSelection::Field(None, "world".to_string(), None),
                 ],
             },
         )),
@@ -609,13 +551,9 @@ fn test_subselection() {
             SubSelection {
                 selections: vec![NamedSelection::Field(
                     None,
-                    Identifier { name: "hello" },
+                    "hello".to_string(),
                     Some(SubSelection {
-                        selections: vec![NamedSelection::Field(
-                            None,
-                            Identifier { name: "world" },
-                            None
-                        ),],
+                        selections: vec![NamedSelection::Field(None, "world".to_string(), None),],
                     })
                 ),],
             },
@@ -626,13 +564,13 @@ fn test_subselection() {
 // Alias ::= Identifier ":"
 
 #[derive(Debug, PartialEq, Clone)]
-pub(self) struct Alias<'a> {
-    name: Identifier<'a>,
+pub(self) struct Alias {
+    name: String,
 }
 
-impl<'a> Alias<'a> {
-    fn parse(input: &'a str) -> IResult<&'a str, Self> {
-        tuple((Identifier::parse, char(':'), multispace0))(input)
+impl Alias {
+    fn parse<'a>(input: &'a str) -> IResult<&'a str, Self> {
+        tuple((parse_identifier, char(':'), multispace0))(input)
             .map(|(input, (name, _, _))| (input, Self { name }))
     }
 }
@@ -644,7 +582,7 @@ fn test_alias() {
         Ok((
             "",
             Alias {
-                name: Identifier { name: "hello" },
+                name: "hello".to_string(),
             },
         )),
     );
@@ -654,7 +592,7 @@ fn test_alias() {
         Ok((
             "",
             Alias {
-                name: Identifier { name: "hello" },
+                name: "hello".to_string(),
             },
         )),
     );
@@ -664,7 +602,7 @@ fn test_alias() {
         Ok((
             "",
             Alias {
-                name: Identifier { name: "hello" },
+                name: "hello".to_string(),
             },
         )),
     );
@@ -674,7 +612,7 @@ fn test_alias() {
         Ok((
             "",
             Alias {
-                name: Identifier { name: "hello" },
+                name: "hello".to_string(),
             },
         )),
     );
@@ -684,7 +622,7 @@ fn test_alias() {
         Ok((
             "",
             Alias {
-                name: Identifier { name: "hello" },
+                name: "hello".to_string(),
             },
         )),
     );
@@ -693,15 +631,15 @@ fn test_alias() {
 // Property ::= Identifier | StringLiteral
 
 #[derive(Debug, PartialEq, Clone)]
-pub(self) enum Property<'a> {
-    Field(Identifier<'a>),
+pub(self) enum Property {
+    Field(String),
     Quoted(String),
 }
 
-impl<'a> Property<'a> {
-    fn parse(input: &'a str) -> IResult<&'a str, Self> {
+impl Property {
+    fn parse<'a>(input: &'a str) -> IResult<&'a str, Self> {
         alt((
-            map(Identifier::parse, Self::Field),
+            map(parse_identifier, Self::Field),
             map(parse_string_literal, Self::Quoted),
         ))(input)
     }
@@ -711,73 +649,46 @@ impl<'a> Property<'a> {
 fn test_property() {
     assert_eq!(
         Property::parse("hello"),
-        Ok(("", Property::Field(Identifier { name: "hello" }),)),
+        Ok(("", Property::Field("hello".to_string()))),
     );
 
     assert_eq!(
         Property::parse("'hello'"),
-        Ok(("", Property::Quoted("hello".to_string()),)),
+        Ok(("", Property::Quoted("hello".to_string()))),
     );
 }
 
 // Identifier ::= [a-zA-Z_][0-9a-zA-Z_]*
 
-#[derive(Debug, PartialEq, Clone)]
-pub(self) struct Identifier<'a> {
-    name: &'a str,
-}
-
-impl<'a> Identifier<'a> {
-    fn parse(input: &'a str) -> IResult<&'a str, Self> {
-        tuple((
-            multispace0,
-            recognize(pair(
-                one_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_"),
-                many0(one_of(
-                    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789",
-                )),
+fn parse_identifier<'a>(input: &'a str) -> IResult<&'a str, String> {
+    tuple((
+        multispace0,
+        recognize(pair(
+            one_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_"),
+            many0(one_of(
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789",
             )),
-            multispace0,
-        ))(input)
-        .map(|(input, (_, name, _))| (input, Self { name }))
-    }
-
-    fn name(&self) -> &str {
-        self.name
-    }
+        )),
+        multispace0,
+    ))(input)
+    .map(|(input, (_, name, _))| (input, name.to_string()))
 }
 
 #[test]
 fn test_identifier() {
+    assert_eq!(parse_identifier("hello"), Ok(("", "hello".to_string())),);
+
     assert_eq!(
-        Identifier::parse("hello"),
-        Ok(("", Identifier { name: "hello" })),
+        parse_identifier("hello_world"),
+        Ok(("", "hello_world".to_string())),
     );
 
     assert_eq!(
-        Identifier::parse("hello_world"),
-        Ok((
-            "",
-            Identifier {
-                name: "hello_world"
-            }
-        )),
+        parse_identifier("hello_world_123"),
+        Ok(("", "hello_world_123".to_string())),
     );
 
-    assert_eq!(
-        Identifier::parse("hello_world_123"),
-        Ok((
-            "",
-            Identifier {
-                name: "hello_world_123"
-            }
-        )),
-    );
-
-    assert_eq!(
-        Identifier::parse(" hello "),
-        Ok(("", Identifier { name: "hello" })),
-    );
+    assert_eq!(parse_identifier(" hello "), Ok(("", "hello".to_string())),);
 }
 
 // StringLiteral ::=

@@ -16,14 +16,19 @@ use nom::IResult;
 
 #[derive(Debug, PartialEq, Clone)]
 pub(self) enum Selection {
-    Named(Vec<NamedSelection>),
+    // Although we reuse the SubSelection type for the Selection::Named case, we
+    // parse it as a sequence of NamedSelection items without the {...} curly
+    // braces that SubSelection::parse expects.
+    Named(SubSelection),
     Path(PathSelection),
 }
 
 impl Selection {
     fn parse<'a>(input: &'a str) -> IResult<&str, Self> {
         alt((
-            map(many1(NamedSelection::parse), Self::Named),
+            map(many1(NamedSelection::parse), |selections| {
+                Self::Named(SubSelection { selections })
+            }),
             map(PathSelection::parse, Self::Path),
         ))(input)
     }
@@ -35,7 +40,9 @@ fn test_selection() {
         Selection::parse("hello"),
         Ok((
             "",
-            Selection::Named(vec![NamedSelection::Field(None, "hello".to_string(), None),]),
+            Selection::Named(SubSelection {
+                selections: vec![NamedSelection::Field(None, "hello".to_string(), None),]
+            }),
         )),
     );
 
@@ -54,28 +61,8 @@ fn test_selection() {
         Selection::parse("hi: .hello.world"),
         Ok((
             "",
-            Selection::Named(vec![NamedSelection::Path(
-                Alias {
-                    name: "hi".to_string(),
-                },
-                PathSelection::from_slice(
-                    &[
-                        Property::Field("hello".to_string()),
-                        Property::Field("world".to_string()),
-                    ],
-                    None
-                ),
-            )]),
-        )),
-    );
-
-    assert_eq!(
-        Selection::parse("before hi: .hello.world after"),
-        Ok((
-            "",
-            Selection::Named(vec![
-                NamedSelection::Field(None, "before".to_string(), None),
-                NamedSelection::Path(
+            Selection::Named(SubSelection {
+                selections: vec![NamedSelection::Path(
                     Alias {
                         name: "hi".to_string(),
                     },
@@ -86,35 +73,61 @@ fn test_selection() {
                         ],
                         None
                     ),
-                ),
-                NamedSelection::Field(None, "after".to_string(), None),
-            ]),
+                )]
+            }),
+        )),
+    );
+
+    assert_eq!(
+        Selection::parse("before hi: .hello.world after"),
+        Ok((
+            "",
+            Selection::Named(SubSelection {
+                selections: vec![
+                    NamedSelection::Field(None, "before".to_string(), None),
+                    NamedSelection::Path(
+                        Alias {
+                            name: "hi".to_string(),
+                        },
+                        PathSelection::from_slice(
+                            &[
+                                Property::Field("hello".to_string()),
+                                Property::Field("world".to_string()),
+                            ],
+                            None
+                        ),
+                    ),
+                    NamedSelection::Field(None, "after".to_string(), None),
+                ]
+            }),
         )),
     );
 
     let before_path_nested_after_result = Ok((
         "",
-        Selection::Named(vec![
-            NamedSelection::Field(None, "before".to_string(), None),
-            NamedSelection::Path(
-                Alias {
-                    name: "hi".to_string(),
-                },
-                PathSelection::from_slice(
-                    &[
-                        Property::Field("hello".to_string()),
-                        Property::Field("world".to_string()),
-                    ],
-                    Some(SubSelection {
-                        selections: vec![
-                            NamedSelection::Field(None, "nested".to_string(), None),
-                            NamedSelection::Field(None, "names".to_string(), None),
+        Selection::Named(SubSelection {
+            selections: vec![
+                NamedSelection::Field(None, "before".to_string(), None),
+                NamedSelection::Path(
+                    Alias {
+                        name: "hi".to_string(),
+                    },
+                    PathSelection::from_slice(
+                        &[
+                            Property::Field("hello".to_string()),
+                            Property::Field("world".to_string()),
                         ],
-                    }),
+                        Some(SubSelection {
+                            selections: vec![
+                                NamedSelection::Field(None, "nested".to_string(), None),
+                                NamedSelection::Field(None, "names".to_string(), None),
+                            ],
+                        }),
+                    ),
                 ),
-            ),
-            NamedSelection::Field(None, "after".to_string(), None),
-        ]),
+                NamedSelection::Field(None, "after".to_string(), None),
+            ],
+        }),
     ));
 
     assert_eq!(
@@ -143,59 +156,65 @@ fn test_selection() {
         ),
         Ok((
             "",
-            Selection::Named(vec![NamedSelection::Field(
-                Some(Alias {
-                    name: "topLevelAlias".to_string(),
-                }),
-                "topLevelField".to_string(),
-                Some(SubSelection {
-                    selections: vec![
-                        NamedSelection::Quoted(
-                            Alias {
-                                name: "nonIdentifier".to_string(),
-                            },
-                            "property name with spaces".to_string(),
-                            None,
-                        ),
-                        NamedSelection::Path(
-                            Alias {
-                                name: "pathSelection".to_string(),
-                            },
-                            PathSelection::from_slice(
-                                &[
-                                    Property::Field("some".to_string()),
-                                    Property::Field("nested".to_string()),
-                                    Property::Field("path".to_string()),
-                                ],
-                                Some(SubSelection {
-                                    selections: vec![
-                                        NamedSelection::Field(
-                                            Some(Alias {
-                                                name: "still".to_string(),
-                                            }),
-                                            "yet".to_string(),
-                                            None,
-                                        ),
-                                        NamedSelection::Field(None, "more".to_string(), None,),
-                                        NamedSelection::Field(None, "properties".to_string(), None,),
-                                    ],
-                                })
+            Selection::Named(SubSelection {
+                selections: vec![NamedSelection::Field(
+                    Some(Alias {
+                        name: "topLevelAlias".to_string(),
+                    }),
+                    "topLevelField".to_string(),
+                    Some(SubSelection {
+                        selections: vec![
+                            NamedSelection::Quoted(
+                                Alias {
+                                    name: "nonIdentifier".to_string(),
+                                },
+                                "property name with spaces".to_string(),
+                                None,
                             ),
-                        ),
-                        NamedSelection::Group(
-                            Alias {
-                                name: "siblingGroup".to_string(),
-                            },
-                            SubSelection {
-                                selections: vec![
-                                    NamedSelection::Field(None, "brother".to_string(), None,),
-                                    NamedSelection::Field(None, "sister".to_string(), None,),
-                                ],
-                            },
-                        ),
-                    ],
-                }),
-            ),]),
+                            NamedSelection::Path(
+                                Alias {
+                                    name: "pathSelection".to_string(),
+                                },
+                                PathSelection::from_slice(
+                                    &[
+                                        Property::Field("some".to_string()),
+                                        Property::Field("nested".to_string()),
+                                        Property::Field("path".to_string()),
+                                    ],
+                                    Some(SubSelection {
+                                        selections: vec![
+                                            NamedSelection::Field(
+                                                Some(Alias {
+                                                    name: "still".to_string(),
+                                                }),
+                                                "yet".to_string(),
+                                                None,
+                                            ),
+                                            NamedSelection::Field(None, "more".to_string(), None,),
+                                            NamedSelection::Field(
+                                                None,
+                                                "properties".to_string(),
+                                                None,
+                                            ),
+                                        ],
+                                    })
+                                ),
+                            ),
+                            NamedSelection::Group(
+                                Alias {
+                                    name: "siblingGroup".to_string(),
+                                },
+                                SubSelection {
+                                    selections: vec![
+                                        NamedSelection::Field(None, "brother".to_string(), None,),
+                                        NamedSelection::Field(None, "sister".to_string(), None,),
+                                    ],
+                                },
+                            ),
+                        ],
+                    }),
+                ),]
+            }),
         )),
     );
 }
@@ -272,7 +291,12 @@ fn test_named_selection() {
         assert_eq!(actual.unwrap().1.name(), name);
         assert_eq!(
             Selection::parse(input),
-            Ok(("", Selection::Named(vec![expected]))),
+            Ok((
+                "",
+                Selection::Named(SubSelection {
+                    selections: vec![expected],
+                })
+            ))
         );
     }
 

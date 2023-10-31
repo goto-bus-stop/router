@@ -1,3 +1,8 @@
+use std::hash::Hash;
+use std::hash::Hasher;
+
+use indexmap::IndexSet;
+
 use serde_json::json;
 use serde_json::Map;
 use serde_json::Value as JSON;
@@ -813,7 +818,10 @@ trait ApplyTo {
     // support).
     fn apply_to(&self, data: &JSON) -> (Option<JSON>, Vec<ApplyToError>) {
         let mut input_path = vec![];
-        self.apply_to_path(data, &mut input_path)
+        // Using IndexSet over HashSet to preserve the order of the errors.
+        let mut errors = IndexSet::new();
+        let value = self.apply_to_path(data, &mut input_path, &mut errors);
+        (value, errors.into_iter().collect())
     }
 
     // This is the trait method that should be implemented and called
@@ -822,7 +830,8 @@ trait ApplyTo {
         &self,
         data: &JSON,
         input_path: &mut Vec<Property>,
-    ) -> (Option<JSON>, Vec<ApplyToError>);
+        errors: &mut IndexSet<ApplyToError>,
+    ) -> Option<JSON>;
 
     // When array is encountered, the Self selection will be applied to each
     // element of the array, producing a new array.
@@ -830,28 +839,38 @@ trait ApplyTo {
         &self,
         data: &JSON,
         input_path: &mut Vec<Property>,
-    ) -> (Option<JSON>, Vec<ApplyToError>) {
+        errors: &mut IndexSet<ApplyToError>,
+    ) -> Option<JSON> {
         let data_array = data.as_array().unwrap();
         let mut output = Vec::with_capacity(data_array.len());
-        let mut errors = vec![];
 
         for (i, element) in data_array.iter().enumerate() {
             input_path.push(Property::Index(i));
-            let (value, mut element_errors) = self.apply_to_path(element, input_path);
+            let value = self.apply_to_path(element, input_path, errors);
             input_path.pop();
             // When building an Object, we can simply omit missing properties
             // and report an error, but when building an Array, we need to
             // insert null values to preserve the original array indices/length.
             output.push(value.unwrap_or(JSON::Null));
-            errors.append(&mut element_errors);
         }
 
-        (Some(JSON::Array(output)), errors)
+        Some(JSON::Array(output))
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 struct ApplyToError(JSON);
+
+impl Hash for ApplyToError {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        // Although serde_json::Value (aka JSON) does not implement the Hash
+        // trait, we can convert self.0 to a JSON string and hash that. To do
+        // this properly, we should ensure all object keys are serialized in
+        // lexicographic order before hashing, but the only object keys we use
+        // are "message" and "path", and they always appear in that order.
+        self.0.to_string().hash(hasher)
+    }
+}
 
 impl ApplyToError {
     fn new(message: &str, path: &Vec<Property>) -> Self {
@@ -887,13 +906,15 @@ impl ApplyTo for Selection {
         &self,
         data: &JSON,
         input_path: &mut Vec<Property>,
-    ) -> (Option<JSON>, Vec<ApplyToError>) {
+        errors: &mut IndexSet<ApplyToError>,
+    ) -> Option<JSON> {
         if data.is_array() {
-            return self.apply_to_array(data, input_path);
+            return self.apply_to_array(data, input_path, errors);
         }
 
         if !data.is_object() {
-            return (None, vec![ApplyToError::new("not an object", input_path)]);
+            errors.insert(ApplyToError::new("not an object", input_path));
+            return None;
         }
 
         match self {
@@ -902,8 +923,10 @@ impl ApplyTo for Selection {
             // if we represented Self::Named as a Vec<NamedSelection>, we could
             // still delegate to SubSelection::apply_to_path, but we would need
             // to create a temporary SubSelection to wrap the selections Vec.
-            Self::Named(named_selections) => named_selections.apply_to_path(data, input_path),
-            Self::Path(path_selection) => path_selection.apply_to_path(data, input_path),
+            Self::Named(named_selections) => {
+                named_selections.apply_to_path(data, input_path, errors)
+            }
+            Self::Path(path_selection) => path_selection.apply_to_path(data, input_path, errors),
         }
     }
 }
@@ -913,17 +936,18 @@ impl ApplyTo for NamedSelection {
         &self,
         data: &JSON,
         input_path: &mut Vec<Property>,
-    ) -> (Option<JSON>, Vec<ApplyToError>) {
+        errors: &mut IndexSet<ApplyToError>,
+    ) -> Option<JSON> {
         if data.is_array() {
-            return self.apply_to_array(data, input_path);
+            return self.apply_to_array(data, input_path, errors);
         }
 
         if !data.is_object() {
-            return (None, vec![ApplyToError::new("not an object", input_path)]);
+            errors.insert(ApplyToError::new("not an object", input_path));
+            return None;
         }
 
         let mut output = Map::new();
-        let mut errors = vec![];
 
         match self {
             Self::Field(alias, name, selection) => {
@@ -931,60 +955,56 @@ impl ApplyTo for NamedSelection {
                 if let Some(child) = data.get(name) {
                     let output_name = alias.as_ref().map_or(name, |alias| &alias.name);
                     if let Some(selection) = selection {
-                        let (value, mut selection_errors) =
-                            selection.apply_to_path(child, input_path);
+                        let value = selection.apply_to_path(child, input_path, errors);
                         if let Some(value) = value {
                             output.insert(output_name.clone(), value);
                         }
-                        errors.append(&mut selection_errors);
                     } else {
                         output.insert(output_name.clone(), child.clone());
                     }
                 } else {
-                    errors.push(ApplyToError::new(
+                    errors.insert(ApplyToError::new(
                         format!("{:?} not found", name).as_str(),
                         input_path,
                     ));
                 }
                 input_path.pop();
-                (Some(JSON::Object(output)), errors)
+                Some(JSON::Object(output))
             }
             Self::Quoted(alias, name, selection) => {
                 input_path.push(Property::Quoted(name.clone()));
                 if let Some(child) = data.get(name) {
                     let output_name = &alias.name;
                     if let Some(selection) = selection {
-                        let (value, mut selection_errors) =
-                            selection.apply_to_path(child, input_path);
+                        let value = selection.apply_to_path(child, input_path, errors);
                         if let Some(value) = value {
                             output.insert(output_name.clone(), value);
                         }
-                        errors.append(&mut selection_errors);
                     } else {
                         output.insert(output_name.clone(), child.clone());
                     }
                 } else {
-                    errors.push(ApplyToError::new(
+                    errors.insert(ApplyToError::new(
                         format!("{:?} not found", name).as_str(),
                         input_path,
                     ));
                 }
                 input_path.pop();
-                (Some(JSON::Object(output)), errors)
+                Some(JSON::Object(output))
             }
             Self::Path(alias, path_selection) => {
-                let (value, path_selection_errors) = path_selection.apply_to_path(data, input_path);
+                let value = path_selection.apply_to_path(data, input_path, errors);
                 if let Some(value) = value {
                     output.insert(alias.name.clone(), value);
                 }
-                (Some(JSON::Object(output)), path_selection_errors)
+                Some(JSON::Object(output))
             }
             Self::Group(alias, sub_selection) => {
-                let (value, sub_selection_errors) = sub_selection.apply_to_path(data, input_path);
+                let value = sub_selection.apply_to_path(data, input_path, errors);
                 if let Some(value) = value {
                     output.insert(alias.name.clone(), value);
                 }
-                (Some(JSON::Object(output)), sub_selection_errors)
+                Some(JSON::Object(output))
             }
         }
     }
@@ -995,15 +1015,17 @@ impl ApplyTo for PathSelection {
         &self,
         data: &JSON,
         input_path: &mut Vec<Property>,
-    ) -> (Option<JSON>, Vec<ApplyToError>) {
+        errors: &mut IndexSet<ApplyToError>,
+    ) -> Option<JSON> {
         if data.is_array() {
-            return self.apply_to_array(data, input_path);
+            return self.apply_to_array(data, input_path, errors);
         }
 
         match self {
             Self::Path(head, tail) => {
                 if !data.is_object() {
-                    return (None, vec![ApplyToError::new("not an object", input_path)]);
+                    errors.insert(ApplyToError::new("not an object", input_path));
+                    return None;
                 }
 
                 input_path.push(head.clone());
@@ -1012,7 +1034,7 @@ impl ApplyTo for PathSelection {
                     Property::Quoted(name) => data.get(name),
                     Property::Index(index) => data.get(index),
                 } {
-                    let result = tail.apply_to_path(child, input_path);
+                    let result = tail.apply_to_path(child, input_path, errors);
                     input_path.pop();
                     result
                 } else {
@@ -1021,20 +1043,20 @@ impl ApplyTo for PathSelection {
                         Property::Quoted(name) => format!("{:?} not found", name),
                         Property::Index(index) => format!("{:?} not found", index),
                     };
-                    let error = ApplyToError::new(message.as_str(), input_path);
+                    errors.insert(ApplyToError::new(message.as_str(), input_path));
                     input_path.pop();
-                    (None, vec![error])
+                    return None;
                 }
             }
             Self::Selection(selection) => {
                 // If data is not an object here, this recursive apply_to_path
                 // call will handle the error.
-                selection.apply_to_path(data, input_path)
+                selection.apply_to_path(data, input_path, errors)
             }
             Self::Empty => {
                 // If data is not an object here, we want to preserve its value
                 // without an error.
-                (Some(data.clone()), vec![])
+                Some(data.clone())
             }
         }
     }
@@ -1045,29 +1067,28 @@ impl ApplyTo for SubSelection {
         &self,
         data: &JSON,
         input_path: &mut Vec<Property>,
-    ) -> (Option<JSON>, Vec<ApplyToError>) {
+        errors: &mut IndexSet<ApplyToError>,
+    ) -> Option<JSON> {
         if data.is_array() {
-            return self.apply_to_array(data, input_path);
+            return self.apply_to_array(data, input_path, errors);
         }
 
         if !data.is_object() {
-            return (None, vec![ApplyToError::new("not an object", input_path)]);
+            errors.insert(ApplyToError::new("not an object", input_path));
+            return None;
         }
 
         let mut output = Map::new();
-        let mut errors = vec![];
 
         for named_selection in &self.selections {
-            let (value, mut named_selection_errors) =
-                named_selection.apply_to_path(data, input_path);
+            let value = named_selection.apply_to_path(data, input_path, errors);
             // If value is an object, extend output with its keys and their values.
             if let Some(JSON::Object(key_and_value)) = value {
                 output.extend(key_and_value);
             }
-            errors.append(&mut named_selection_errors);
         }
 
-        (Some(JSON::Object(output)), errors)
+        Some(JSON::Object(output))
     }
 }
 
@@ -1507,14 +1528,15 @@ fn test_apply_to_nested_arrays() {
                     "message": "not an object",
                     "path": ["arrayOfArrays", 4, 3],
                 })),
-                ApplyToError::from_json(&json!({
-                    "message": "not an object",
-                    "path": ["arrayOfArrays", 4, 0],
-                })),
-                ApplyToError::from_json(&json!({
-                    "message": "not an object",
-                    "path": ["arrayOfArrays", 4, 3],
-                })),
+                // These errors have already been reported along different paths, above.
+                // ApplyToError::from_json(&json!({
+                //     "message": "not an object",
+                //     "path": ["arrayOfArrays", 4, 0],
+                // })),
+                // ApplyToError::from_json(&json!({
+                //     "message": "not an object",
+                //     "path": ["arrayOfArrays", 4, 3],
+                // })),
             ],
         ),
     );

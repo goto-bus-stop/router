@@ -2,11 +2,6 @@ use std::hash::Hash;
 use std::hash::Hasher;
 
 use indexmap::IndexSet;
-
-use serde_json::json;
-use serde_json::Map;
-use serde_json::Value as JSON;
-
 use nom::branch::alt;
 use nom::character::complete::char;
 use nom::character::complete::multispace0;
@@ -20,6 +15,9 @@ use nom::sequence::pair;
 use nom::sequence::preceded;
 use nom::sequence::tuple;
 use nom::IResult;
+use serde_json::json;
+use serde_json::Map;
+use serde_json::Value as JSON;
 
 // Define a selection!("...") macro for convenience
 macro_rules! selection {

@@ -29,7 +29,7 @@ macro_rules! selection {
 // Selection ::= NamedSelection+ | PathSelection
 
 #[derive(Debug, PartialEq, Clone)]
-pub(self) enum Selection {
+enum Selection {
     // Although we reuse the SubSelection type for the Selection::Named case, we
     // parse it as a sequence of NamedSelection items without the {...} curly
     // braces that SubSelection::parse expects.
@@ -240,7 +240,7 @@ fn test_selection() {
 //     | Alias SubSelection
 
 #[derive(Debug, PartialEq, Clone)]
-pub(self) enum NamedSelection {
+enum NamedSelection {
     Field(Option<Alias>, String, Option<SubSelection>),
     Quoted(Alias, String, Option<SubSelection>),
     Path(Alias, PathSelection),
@@ -417,7 +417,7 @@ fn test_named_selection() {
 // PathSelection ::= ("." Property)+ SubSelection?
 
 #[derive(Debug, PartialEq, Clone)]
-pub(self) enum PathSelection {
+enum PathSelection {
     // We use a recursive structure here instead of a Vec<Property> to make
     // applying the selection to a JSON value easier.
     Path(Property, Box<PathSelection>),
@@ -520,7 +520,7 @@ fn test_path_selection() {
 // SubSelection ::= "{" NamedSelection+ "}"
 
 #[derive(Debug, PartialEq, Clone)]
-pub(self) struct SubSelection {
+struct SubSelection {
     selections: Vec<NamedSelection>,
 }
 
@@ -602,7 +602,7 @@ fn test_subselection() {
 // Alias ::= Identifier ":"
 
 #[derive(Debug, PartialEq, Clone)]
-pub(self) struct Alias {
+struct Alias {
     name: String,
 }
 
@@ -669,7 +669,7 @@ fn test_alias() {
 // Property ::= Identifier | StringLiteral
 
 #[derive(Debug, PartialEq, Clone)]
-pub(self) enum Property {
+enum Property {
     Field(String),
     Quoted(String),
     Index(usize),

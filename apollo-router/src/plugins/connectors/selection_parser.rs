@@ -886,13 +886,20 @@ impl ApplyToError {
 
     fn from_json(json: &JSON) -> Self {
         if let JSON::Object(error) = json {
-            if let Some(JSON::String(_)) = error.get("message") {
+            if let Some(JSON::String(message)) = error.get("message") {
                 if let Some(JSON::Array(path)) = error.get("path") {
                     if path.iter().all(|element| match element {
                         JSON::String(_) | JSON::Number(_) => true,
                         _ => false,
                     }) {
-                        return Self(json.clone());
+                        // Instead of simply returning Self(json.clone()), we
+                        // enforce that the "message" and "path" properties are
+                        // always in that order, as promised in the comment in
+                        // the hash method above.
+                        return Self(json!({
+                            "message": message,
+                            "path": path,
+                        }));
                     }
                 }
             }
@@ -1525,8 +1532,10 @@ fn test_apply_to_nested_arrays() {
                     "path": ["arrayOfArrays", 4, 2, "y"],
                 })),
                 ApplyToError::from_json(&json!({
-                    "message": "not an object",
+                    // Reversing the order of "path" and "message" here to make
+                    // sure that doesn't affect the deduplication logic.
                     "path": ["arrayOfArrays", 4, 3],
+                    "message": "not an object",
                 })),
                 // These errors have already been reported along different paths, above.
                 // ApplyToError::from_json(&json!({

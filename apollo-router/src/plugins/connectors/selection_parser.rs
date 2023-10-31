@@ -845,7 +845,7 @@ impl Hash for ApplyToError {
 }
 
 impl ApplyToError {
-    fn new(message: &str, path: &Vec<Property>) -> Self {
+    fn new(message: &str, path: &[Property]) -> Self {
         Self(json!({
             "message": message,
             "path": path.iter().map(|property| match property {
@@ -860,10 +860,10 @@ impl ApplyToError {
         if let JSON::Object(error) = json {
             if let Some(JSON::String(message)) = error.get("message") {
                 if let Some(JSON::Array(path)) = error.get("path") {
-                    if path.iter().all(|element| match element {
-                        JSON::String(_) | JSON::Number(_) => true,
-                        _ => false,
-                    }) {
+                    if path
+                        .iter()
+                        .all(|element| matches!(element, JSON::String(_) | JSON::Number(_)))
+                    {
                         // Instead of simply returning Self(json.clone()), we
                         // enforce that the "message" and "path" properties are
                         // always in that order, as promised in the comment in
@@ -1024,7 +1024,7 @@ impl ApplyTo for PathSelection {
                     };
                     errors.insert(ApplyToError::new(message.as_str(), input_path));
                     input_path.pop();
-                    return None;
+                    None
                 }
             }
             Self::Selection(selection) => {

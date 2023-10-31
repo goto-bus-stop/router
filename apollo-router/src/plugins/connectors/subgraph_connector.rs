@@ -2,10 +2,13 @@
 
 use std::collections::HashMap;
 use std::ops::ControlFlow;
+use std::ops::Deref;
 use std::sync::Arc;
 
-// use apollo_compiler::hir::Directive;
-// use apollo_compiler::hir::{Type, TypeDefinition, Value};
+use apollo_compiler::schema::Directive;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::Value;
+use apollo_compiler::Node;
 use http::uri::*;
 use http::Uri;
 use regex::Regex;
@@ -25,66 +28,60 @@ pub(crate) const HTTP_FIELD_DIRECTIVE_NAME: &str = "http_field";
 
 #[derive(Clone)]
 pub(crate) struct SubgraphConnector {
-    // metadata: HashMap<String, CallParams>,
+    // subgraph name -> callparams
+    metadata: HashMap<String, CallParams>,
     // TODO: Arc plz
-    // field_directives_for_type: HashMap<String, HashMap<String, Directive>>,
+    // type name -> (field name -> directive)
+    field_directives_for_type: Arc<HashMap<String, HashMap<String, Node<Directive>>>>,
 }
 
 impl SubgraphConnector {
     pub(crate) fn for_schema(schema: Arc<Schema>) -> Self {
-        todo!();
-        // let mut field_directives_for_type: HashMap<String, HashMap<String, Directive>> =
-        //     Default::default();
-        // let metadata = schema
-        //     .type_system
-        //     .type_definitions_by_name
-        //     .iter()
-        //     .filter_map(|(_, definition)| {
-        //         // TODO: Check against http_list_resource as well
-        //         definition
-        //             .directive_by_name(HTTP_RESOURCE_DIRECTIVE_NAME)
-        //             .and_then(|http_directive| {
-        //                 http_directive.argument_by_name("api").and_then(|api_name| {
-        //                     if let TypeDefinition::ObjectTypeDefinition(otd) = definition {
-        //                         let mut field_directives: HashMap<String, Directive> =
-        //                             Default::default();
+        let mut field_directives_for_type: HashMap<String, HashMap<String, Node<Directive>>> =
+            Default::default();
+        let mut metadata: HashMap<String, CallParams> = Default::default();
 
-        //                         for field in otd.fields() {
-        //                             field.directive_by_name(HTTP_FIELD_DIRECTIVE_NAME).map(
-        //                                 |directive| {
-        //                                     field_directives.insert(
-        //                                         field.name().to_string(),
-        //                                         directive.clone(),
-        //                                     );
-        //                                 },
-        //                             );
-        //                         }
+        for (typename, ty) in &schema.definitions.types {
+            // TODO: Check against http_list_resource as well
 
-        //                         field_directives_for_type
-        //                             .insert(otd.name().to_string(), field_directives);
-        //                     }
-        //                     if let Value::Enum { value, .. } = api_name {
-        //                         schema.subgraph_name(value.src()).map(|subgraph_name| {
-        //                             (
-        //                                 subgraph_name.clone(),
-        //                                 CallParams::from_api_and_definition(
-        //                                     schema.subgraph_url(subgraph_name).unwrap().clone(),
-        //                                     definition,
-        //                                 ),
-        //                             )
-        //                         })
-        //                     } else {
-        //                         None
-        //                     }
-        //                 })
-        //             })
-        //     })
-        //     .collect();
+            if let Some(api_name) = ty
+                .directives()
+                .get(HTTP_RESOURCE_DIRECTIVE_NAME)
+                .and_then(|http_directive| http_directive.argument_by_name("api"))
+            {
+                if let ExtendedType::Object(o) = &ty {
+                    let mut field_directives: HashMap<String, Node<Directive>> = Default::default();
 
-        // Self {
-        //     metadata,
-        //     field_directives_for_type,
-        // }
+                    for (fieldname, field) in &o.fields {
+                        field
+                            .directives
+                            .get(HTTP_FIELD_DIRECTIVE_NAME)
+                            .map(|directive| {
+                                field_directives.insert(fieldname.to_string(), directive.clone());
+                            });
+                    }
+
+                    field_directives_for_type.insert(typename.to_string(), field_directives);
+                }
+
+                if let Value::Enum(value) = api_name.deref() {
+                    if let Some(subgraph_name) = schema.subgraph_name(value.as_str()) {
+                        metadata.insert(
+                            subgraph_name.clone(),
+                            CallParams::from_api_and_definition(
+                                schema.subgraph_url(subgraph_name).unwrap().clone(),
+                                &ty,
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+
+        Self {
+            metadata,
+            field_directives_for_type: Arc::new(field_directives_for_type),
+        }
     }
 
     pub(crate) fn subgraph_service(
@@ -323,104 +320,103 @@ impl SubgraphConnector {
 //     (parts, body, type_name)
 // }
 
-// #[derive(Debug, Clone)]
-// struct CallParams {
-//     object: ObjectCallParams,
-//     list: Option<ListCallParams>,
-// }
+#[derive(Debug, Clone)]
+struct CallParams {
+    object: ObjectCallParams,
+    list: Option<ListCallParams>,
+}
 
-// #[derive(Debug, Clone)]
-// struct ObjectCallParams {
-//     method: http::Method,
-//     uri: http::Uri,
-// }
+#[derive(Debug, Clone)]
+struct ObjectCallParams {
+    method: http::Method,
+    uri: http::Uri,
+}
 
-// #[derive(Debug, Clone)]
-// struct ListCallParams {
-//     method: http::Method,
-//     uri: http::Uri,
-// }
+#[derive(Debug, Clone)]
+struct ListCallParams {
+    method: http::Method,
+    uri: http::Uri,
+}
 
-// impl ObjectCallParams {
-//     fn from_api_and_definition(api_url: Uri, definition: &TypeDefinition) -> Self {
-//         let http_resource = definition
-//             .directive_by_name(HTTP_RESOURCE_DIRECTIVE_NAME)
-//             .unwrap();
+impl ObjectCallParams {
+    fn from_api_and_definition(api_url: Uri, ty: &ExtendedType) -> Self {
+        let http_resource = ty.directives().get(HTTP_RESOURCE_DIRECTIVE_NAME).unwrap();
 
-//         let path = http_resource
-//             .argument_by_name("GET")
-//             .unwrap()
-//             .as_str()
-//             .unwrap();
-//         let method = http::Method::GET;
+        let path = http_resource
+            .argument_by_name("GET")
+            .unwrap()
+            .as_str()
+            .unwrap();
+        let method = http::Method::GET;
 
-//         let mut parts = Parts::default();
-//         parts.scheme = api_url.scheme().cloned();
-//         parts.authority = api_url.authority().cloned();
-//         parts.path_and_query = Some(path.parse().unwrap());
-//         let uri = Uri::from_parts(parts).unwrap();
+        let mut parts = Parts::default();
+        parts.scheme = api_url.scheme().cloned();
+        parts.authority = api_url.authority().cloned();
+        parts.path_and_query = Some(path.parse().unwrap());
+        let uri = Uri::from_parts(parts).unwrap();
 
-//         Self { method, uri }
-//     }
+        Self { method, uri }
+    }
 
-//     fn into_requests(
-//         &self,
-//         request: &http::Request<crate::graphql::Request>,
-//         field_directives_for_type: HashMap<String, Directive>,
-//     ) -> Vec<(hyper::Request<hyper::Body>, Option<String>)> {
-//         into_requests(
-//             self.uri.clone().to_string(),
-//             self.method.clone(),
-//             request,
-//             field_directives_for_type,
-//         )
-//     }
-// }
+    // fn into_requests(
+    //     &self,
+    //     request: &http::Request<crate::graphql::Request>,
+    //     field_directives_for_type: HashMap<String, Directive>,
+    // ) -> Vec<(hyper::Request<hyper::Body>, Option<String>)> {
+    //     into_requests(
+    //         self.uri.clone().to_string(),
+    //         self.method.clone(),
+    //         request,
+    //         field_directives_for_type,
+    //     )
+    // }
+}
 
-// impl ListCallParams {
-//     fn from_api_and_definition(api_url: Uri, definition: &TypeDefinition) -> Option<Self> {
-//         definition
-//             .directive_by_name(HTTP_LIST_RESOURCE_DIRECTIVE_NAME)
-//             .map(|http_resource| {
-//                 let path = http_resource
-//                     .argument_by_name("GET")
-//                     .unwrap()
-//                     .as_str()
-//                     .unwrap();
-//                 let method = http::Method::GET;
+impl ListCallParams {
+    fn from_api_and_definition(api_url: Uri, definition: &ExtendedType) -> Option<Self> {
+        definition
+            .directives()
+            .get(HTTP_LIST_RESOURCE_DIRECTIVE_NAME)
+            .map(|http_resource| {
+                let path = http_resource
+                    .argument_by_name("GET")
+                    .unwrap()
+                    .as_str()
+                    .unwrap();
+                let method = http::Method::GET;
 
-//                 let mut parts = Parts::default();
-//                 parts.scheme = api_url.scheme().cloned();
-//                 parts.authority = api_url.authority().cloned();
-//                 parts.path_and_query = Some(path.parse().unwrap());
-//                 let uri = Uri::from_parts(parts).unwrap();
+                let mut parts = Parts::default();
+                parts.scheme = api_url.scheme().cloned();
+                parts.authority = api_url.authority().cloned();
+                parts.path_and_query = Some(path.parse().unwrap());
+                let uri = Uri::from_parts(parts).unwrap();
 
-//                 Self { method, uri }
-//             })
-//     }
+                Self { method, uri }
+            })
+    }
 
-//     fn into_requests(
-//         &self,
-//         request: &http::Request<crate::graphql::Request>,
-//         field_directives_for_type: HashMap<String, Directive>,
-//     ) -> Vec<(hyper::Request<hyper::Body>, Option<String>)> {
-//         into_requests(
-//             self.uri.clone().to_string(),
-//             self.method.clone(),
-//             request,
-//             field_directives_for_type,
-//         )
-//     }
-// }
+    // fn into_requests(
+    //     &self,
+    //     request: &http::Request<crate::graphql::Request>,
+    //     field_directives_for_type: HashMap<String, Directive>,
+    // ) -> Vec<(hyper::Request<hyper::Body>, Option<String>)> {
+    //     into_requests(
+    //         self.uri.clone().to_string(),
+    //         self.method.clone(),
+    //         request,
+    //         field_directives_for_type,
+    //     )
+    // }
+}
 
-// impl CallParams {
-//     fn from_api_and_definition(api_url: Uri, definition: &TypeDefinition) -> Self {
-//         Self {
-//             object: ObjectCallParams::from_api_and_definition(api_url.clone(), definition),
-//             list: ListCallParams::from_api_and_definition(api_url, definition),
-//         }
-//     }
-// }
+impl CallParams {
+    fn from_api_and_definition(api_url: Uri, definition: &ExtendedType) -> Self {
+        Self {
+            object: ObjectCallParams::from_api_and_definition(api_url.clone(), definition),
+            list: ListCallParams::from_api_and_definition(api_url, definition),
+        }
+    }
+}
 
 // fn remove_extra_variables(uri: String) -> String {
 //     let re = Regex::new(r"\{.*?\}").unwrap();

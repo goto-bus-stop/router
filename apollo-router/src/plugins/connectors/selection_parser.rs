@@ -31,7 +31,7 @@ enum Selection {
 }
 
 impl Selection {
-    fn parse<'a>(input: &'a str) -> IResult<&str, Self> {
+    fn parse(input: &str) -> IResult<&str, Self> {
         alt((
             map(many1(NamedSelection::parse), |selections| {
                 Self::Named(SubSelection { selections })
@@ -228,7 +228,7 @@ enum NamedSelection {
 }
 
 impl NamedSelection {
-    fn parse<'a>(input: &'a str) -> IResult<&str, Self> {
+    fn parse(input: &str) -> IResult<&str, Self> {
         alt((
             Self::parse_field,
             Self::parse_quoted,
@@ -237,7 +237,7 @@ impl NamedSelection {
         ))(input)
     }
 
-    fn parse_field<'a>(input: &'a str) -> IResult<&str, Self> {
+    fn parse_field(input: &str) -> IResult<&str, Self> {
         tuple((
             opt(Alias::parse),
             parse_identifier,
@@ -246,17 +246,17 @@ impl NamedSelection {
         .map(|(input, (alias, name, selection))| (input, Self::Field(alias, name, selection)))
     }
 
-    fn parse_quoted<'a>(input: &'a str) -> IResult<&str, Self> {
+    fn parse_quoted(input: &str) -> IResult<&str, Self> {
         tuple((Alias::parse, parse_string_literal, opt(SubSelection::parse)))(input)
             .map(|(input, (alias, name, selection))| (input, Self::Quoted(alias, name, selection)))
     }
 
-    fn parse_path<'a>(input: &'a str) -> IResult<&str, Self> {
+    fn parse_path(input: &str) -> IResult<&str, Self> {
         tuple((Alias::parse, PathSelection::parse))(input)
             .map(|(input, (alias, path))| (input, Self::Path(alias, path)))
     }
 
-    fn parse_group<'a>(input: &'a str) -> IResult<&str, Self> {
+    fn parse_group(input: &str) -> IResult<&str, Self> {
         tuple((Alias::parse, SubSelection::parse))(input)
             .map(|(input, (alias, group))| (input, Self::Group(alias, group)))
     }
@@ -403,7 +403,7 @@ enum PathSelection {
 }
 
 impl PathSelection {
-    fn parse<'a>(input: &'a str) -> IResult<&str, Self> {
+    fn parse(input: &str) -> IResult<&str, Self> {
         tuple((
             multispace0,
             many1(preceded(char('.'), Property::parse)),
@@ -499,7 +499,7 @@ struct SubSelection {
 }
 
 impl SubSelection {
-    fn parse<'a>(input: &'a str) -> IResult<&str, Self> {
+    fn parse(input: &str) -> IResult<&str, Self> {
         tuple((
             multispace0,
             char('{'),
@@ -581,7 +581,7 @@ struct Alias {
 }
 
 impl Alias {
-    fn parse<'a>(input: &'a str) -> IResult<&'a str, Self> {
+    fn parse(input: &str) -> IResult<&str, Self> {
         tuple((parse_identifier, char(':'), multispace0))(input)
             .map(|(input, (name, _, _))| (input, Self { name }))
     }
@@ -650,7 +650,7 @@ enum Property {
 }
 
 impl Property {
-    fn parse<'a>(input: &'a str) -> IResult<&'a str, Self> {
+    fn parse(input: &str) -> IResult<&str, Self> {
         alt((
             map(parse_identifier, Self::Field),
             map(parse_string_literal, Self::Quoted),
@@ -673,7 +673,7 @@ fn test_property() {
 
 // Identifier ::= [a-zA-Z_][0-9a-zA-Z_]*
 
-fn parse_identifier<'a>(input: &'a str) -> IResult<&'a str, String> {
+fn parse_identifier(input: &str) -> IResult<&str, String> {
     tuple((
         multispace0,
         recognize(pair(
@@ -708,7 +708,7 @@ fn test_identifier() {
 //     | "'" ("\'" | [^'])* "'"
 //     | '"' ('\"' | [^"])* '"'
 
-fn parse_string_literal<'a>(input: &'a str) -> IResult<&'a str, String> {
+fn parse_string_literal(input: &str) -> IResult<&str, String> {
     let input = multispace0(input).map(|(input, _)| input)?;
     let mut input_char_indices = input.char_indices();
 

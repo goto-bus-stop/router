@@ -28,6 +28,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::authorization::UnauthorizedPaths;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
@@ -248,7 +249,10 @@ impl BridgeQueryPlanner {
             fragments,
             operations,
             filtered_query: None,
-            unauthorized_paths: vec![],
+            unauthorized: UnauthorizedPaths {
+                paths: vec![],
+                log_errors: AuthorizationPlugin::log_errors(&self.configuration),
+            },
             subselections,
             defer_stats,
             is_original: true,
@@ -524,7 +528,7 @@ impl BridgeQueryPlanner {
         mut doc: ParsedDocument,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let filter_res = if self.enable_authorization_directives {
-            match AuthorizationPlugin::filter_query(&key, &self.schema) {
+            match AuthorizationPlugin::filter_query(&self.configuration, &key, &self.schema) {
                 Err(QueryPlannerError::Unauthorized(unauthorized_paths)) => {
                     let response = graphql::Response::builder()
                         .data(Object::new())
@@ -565,7 +569,7 @@ impl BridgeQueryPlanner {
                 executable: new_doc.to_executable(&self.schema.api_schema().definitions),
                 ast: new_doc,
             });
-            selections.unauthorized_paths = unauthorized_paths;
+            selections.unauthorized.paths = unauthorized_paths;
         }
 
         if selections.contains_introspection() {

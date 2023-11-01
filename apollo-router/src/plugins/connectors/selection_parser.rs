@@ -1522,3 +1522,87 @@ fn test_apply_to_nested_arrays() {
         ),
     );
 }
+
+#[test]
+fn test_apply_to_non_identifier_properties() {
+    let data = json!({
+        "not an identifier": [
+            { "also.not.an.identifier": 0 },
+            { "also.not.an.identifier": 1 },
+            { "also.not.an.identifier": 2 },
+        ],
+        "another": {
+            "pesky string literal!": {
+                "identifier": 123,
+                "{ evil braces }": true,
+            },
+        },
+    });
+
+    assert_eq!(
+        // The grammar enforces that we must always provide identifier aliases
+        // for non-identifier properties, so the data we get back will always be
+        // GraphQL-safe.
+        selection!("alias: 'not an identifier' { safe: 'also.not.an.identifier' }").apply_to(&data),
+        (
+            Some(json!({
+                "alias": [
+                    { "safe": 0 },
+                    { "safe": 1 },
+                    { "safe": 2 },
+                ],
+            })),
+            vec![],
+        ),
+    );
+
+    assert_eq!(
+        selection!(".'not an identifier'.'also.not.an.identifier'").apply_to(&data),
+        (Some(json!([0, 1, 2])), vec![],),
+    );
+
+    assert_eq!(
+        selection!(".\"not an identifier\" { safe: \"also.not.an.identifier\" }").apply_to(&data),
+        (
+            Some(json!([
+                { "safe": 0 },
+                { "safe": 1 },
+                { "safe": 2 },
+            ])),
+            vec![],
+        ),
+    );
+
+    assert_eq!(
+        selection!(
+            "another {
+            pesky: 'pesky string literal!' {
+                identifier
+                evil: '{ evil braces }'
+            }
+        }"
+        )
+        .apply_to(&data),
+        (
+            Some(json!({
+                "another": {
+                    "pesky": {
+                        "identifier": 123,
+                        "evil": true,
+                    },
+                },
+            })),
+            vec![],
+        ),
+    );
+
+    assert_eq!(
+        selection!(".another.'pesky string literal!'.'{ evil braces }'").apply_to(&data),
+        (Some(json!(true)), vec![],),
+    );
+
+    assert_eq!(
+        selection!(".another.'pesky string literal!'.\"identifier\"").apply_to(&data),
+        (Some(json!(123)), vec![],),
+    );
+}

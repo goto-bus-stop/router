@@ -24,6 +24,112 @@ use serde_json::json;
 use serde_json::Map;
 use serde_json::Value as JSON;
 
+// Consumes any amount of whitespace and/or comments starting with # until the
+// end of the line.
+fn spaces_or_comments(input: &str) -> IResult<&str, &str> {
+    let mut suffix = input;
+    loop {
+        (suffix, _) = multispace0(suffix)?;
+        let mut chars = suffix.chars();
+        if let Some('#') = chars.next() {
+            while let Some(c) = chars.next() {
+                if c == '\n' {
+                    break;
+                }
+            }
+            suffix = chars.as_str();
+        } else {
+            return Ok((suffix, &input[0..input.len() - suffix.len()]));
+        }
+    }
+}
+
+#[test]
+fn test_spaces_or_comments() {
+    assert_eq!(spaces_or_comments(""), Ok(("", "")));
+    assert_eq!(spaces_or_comments(" "), Ok(("", " ")));
+    assert_eq!(spaces_or_comments("  "), Ok(("", "  ")));
+
+    assert_eq!(spaces_or_comments("#"), Ok(("", "#")));
+    assert_eq!(spaces_or_comments("# "), Ok(("", "# ")));
+    assert_eq!(spaces_or_comments(" # "), Ok(("", " # ")));
+    assert_eq!(spaces_or_comments(" #"), Ok(("", " #")));
+
+    assert_eq!(spaces_or_comments("#\n"), Ok(("", "#\n")));
+    assert_eq!(spaces_or_comments("# \n"), Ok(("", "# \n")));
+    assert_eq!(spaces_or_comments(" # \n"), Ok(("", " # \n")));
+    assert_eq!(spaces_or_comments(" #\n"), Ok(("", " #\n")));
+    assert_eq!(spaces_or_comments(" # \n "), Ok(("", " # \n ")));
+
+    assert_eq!(spaces_or_comments("hello"), Ok(("hello", "")));
+    assert_eq!(spaces_or_comments(" hello"), Ok(("hello", " ")));
+    assert_eq!(spaces_or_comments("hello "), Ok(("hello ", "")));
+    assert_eq!(spaces_or_comments("hello#"), Ok(("hello#", "")));
+    assert_eq!(spaces_or_comments("hello #"), Ok(("hello #", "")));
+    assert_eq!(spaces_or_comments("hello # "), Ok(("hello # ", "")));
+    assert_eq!(spaces_or_comments("   hello # "), Ok(("hello # ", "   ")));
+    assert_eq!(
+        spaces_or_comments("  hello # world "),
+        Ok(("hello # world ", "  "))
+    );
+
+    assert_eq!(spaces_or_comments("#comment"), Ok(("", "#comment")));
+    assert_eq!(spaces_or_comments(" #comment"), Ok(("", " #comment")));
+    assert_eq!(spaces_or_comments("#comment "), Ok(("", "#comment ")));
+    assert_eq!(spaces_or_comments("#comment#"), Ok(("", "#comment#")));
+    assert_eq!(spaces_or_comments("#comment #"), Ok(("", "#comment #")));
+    assert_eq!(spaces_or_comments("#comment # "), Ok(("", "#comment # ")));
+    assert_eq!(
+        spaces_or_comments("  #comment # world "),
+        Ok(("", "  #comment # world "))
+    );
+    assert_eq!(
+        spaces_or_comments("  # comment # world "),
+        Ok(("", "  # comment # world "))
+    );
+
+    assert_eq!(
+        spaces_or_comments("  # comment\nnot a comment"),
+        Ok(("not a comment", "  # comment\n"))
+    );
+    assert_eq!(
+        spaces_or_comments("  # comment\nnot a comment\n"),
+        Ok(("not a comment\n", "  # comment\n"))
+    );
+    assert_eq!(
+        spaces_or_comments("not a comment\n  # comment\nasdf"),
+        Ok(("not a comment\n  # comment\nasdf", ""))
+    );
+
+    #[rustfmt::skip]
+    assert_eq!(spaces_or_comments("
+      # This is a comment
+      # And so is this
+      not a comment
+    "), Ok(("not a comment\n    ", "
+      # This is a comment
+      # And so is this\n      ")));
+
+    #[rustfmt::skip]
+    assert_eq!(spaces_or_comments("
+        # This is a comment
+        # And so is this
+        not a comment
+    "), Ok(("not a comment\n    ", "
+        # This is a comment
+        # And so is this\n        ")));
+
+    #[rustfmt::skip]
+    assert_eq!(
+        spaces_or_comments("
+        # This is a comment
+        not a comment
+        # Another comment"),
+        Ok(("not a comment\n        # Another comment", "
+        # This is a comment\n        ")),
+    );
+}
+
 // Selection ::= NamedSelection+ | PathSelection
 
 #[derive(Debug, PartialEq, Clone)]
@@ -154,13 +260,22 @@ fn test_selection() {
 
     assert_eq!(
         selection!(
-            "topLevelAlias: topLevelField {
+            "
+            # Comments are supported because we parse them as whitespace
+            topLevelAlias: topLevelField {
+                # Non-identifier properties must be aliased as an identifier
                 nonIdentifier: 'property name with spaces'
+
+                # This extracts the value located at the given path and applies a
+                # selection set to it before renaming the result to pathSelection
                 pathSelection: .some.nested.path {
                     still: yet
                     more
                     properties
                 }
+
+                # An aliased SubSelection of fields nests the fields together
+                # under the given alias
                 siblingGroup: { brother sister }
             }"
         ),
@@ -414,11 +529,12 @@ enum PathSelection {
 impl PathSelection {
     fn parse(input: &str) -> IResult<&str, Self> {
         tuple((
-            multispace0,
+            spaces_or_comments,
             many1(preceded(char('.'), Property::parse)),
             opt(SubSelection::parse),
+            spaces_or_comments,
         ))(input)
-        .map(|(input, (_, path, selection))| (input, Self::from_slice(&path, selection)))
+        .map(|(input, (_, path, selection, _))| (input, Self::from_slice(&path, selection)))
     }
 
     fn from_slice(properties: &[Property], selection: Option<SubSelection>) -> Self {
@@ -510,11 +626,11 @@ struct SubSelection {
 impl SubSelection {
     fn parse(input: &str) -> IResult<&str, Self> {
         tuple((
-            multispace0,
+            spaces_or_comments,
             char('{'),
             many1(NamedSelection::parse),
             char('}'),
-            multispace0,
+            spaces_or_comments,
         ))(input)
         .map(|(input, (_, _, selections, _, _))| (input, Self { selections }))
     }
@@ -591,7 +707,7 @@ struct Alias {
 
 impl Alias {
     fn parse(input: &str) -> IResult<&str, Self> {
-        tuple((parse_identifier, char(':'), multispace0))(input)
+        tuple((parse_identifier, char(':'), spaces_or_comments))(input)
             .map(|(input, (name, _, _))| (input, Self { name }))
     }
 }
@@ -684,14 +800,14 @@ fn test_property() {
 
 fn parse_identifier(input: &str) -> IResult<&str, String> {
     tuple((
-        multispace0,
+        spaces_or_comments,
         recognize(pair(
             one_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_"),
             many0(one_of(
                 "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789",
             )),
         )),
-        multispace0,
+        spaces_or_comments,
     ))(input)
     .map(|(input, (_, name, _))| (input, name.to_string()))
 }
@@ -718,7 +834,7 @@ fn test_identifier() {
 //     | '"' ('\"' | [^"])* '"'
 
 fn parse_string_literal(input: &str) -> IResult<&str, String> {
-    let input = multispace0(input).map(|(input, _)| input)?;
+    let input = spaces_or_comments(input).map(|(input, _)| input)?;
     let mut input_char_indices = input.char_indices();
 
     match input_char_indices.next() {
@@ -741,7 +857,7 @@ fn parse_string_literal(input: &str) -> IResult<&str, String> {
                     continue;
                 }
                 if c == quote {
-                    remainder = Some(multispace0(&input[i + 1..])?.0);
+                    remainder = Some(spaces_or_comments(&input[i + 1..])?.0);
                     break;
                 }
                 chars.push(c);

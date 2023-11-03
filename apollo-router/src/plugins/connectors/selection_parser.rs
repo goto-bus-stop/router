@@ -928,64 +928,57 @@ impl ApplyTo for NamedSelection {
 
         let mut output = Map::new();
 
+        #[rustfmt::skip] // cargo fmt butchers this closure's formatting
+        let mut field_quoted_helper = |
+            alias: Option<&Alias>,
+            name: &String,
+            selection: &Option<SubSelection>,
+            input_path: &mut Vec<Property>,
+        | {
+            if let Some(child) = data.get(name) {
+                let output_name = alias.map_or(name, |alias| &alias.name);
+                if let Some(selection) = selection {
+                    let value = selection.apply_to_path(child, input_path, errors);
+                    if let Some(value) = value {
+                        output.insert(output_name.clone(), value);
+                    }
+                } else {
+                    output.insert(output_name.clone(), child.clone());
+                }
+            } else {
+                errors.insert(ApplyToError::new(
+                    format!("{:?} not found", name).as_str(),
+                    input_path,
+                ));
+            }
+        };
+
         match self {
             Self::Field(alias, name, selection) => {
                 input_path.push(Property::Field(name.clone()));
-                if let Some(child) = data.get(name) {
-                    let output_name = alias.as_ref().map_or(name, |alias| &alias.name);
-                    if let Some(selection) = selection {
-                        let value = selection.apply_to_path(child, input_path, errors);
-                        if let Some(value) = value {
-                            output.insert(output_name.clone(), value);
-                        }
-                    } else {
-                        output.insert(output_name.clone(), child.clone());
-                    }
-                } else {
-                    errors.insert(ApplyToError::new(
-                        format!("{:?} not found", name).as_str(),
-                        input_path,
-                    ));
-                }
+                field_quoted_helper(alias.as_ref(), name, selection, input_path);
                 input_path.pop();
-                Some(JSON::Object(output))
             }
             Self::Quoted(alias, name, selection) => {
                 input_path.push(Property::Quoted(name.clone()));
-                if let Some(child) = data.get(name) {
-                    let output_name = &alias.name;
-                    if let Some(selection) = selection {
-                        let value = selection.apply_to_path(child, input_path, errors);
-                        if let Some(value) = value {
-                            output.insert(output_name.clone(), value);
-                        }
-                    } else {
-                        output.insert(output_name.clone(), child.clone());
-                    }
-                } else {
-                    errors.insert(ApplyToError::new(
-                        format!("{:?} not found", name).as_str(),
-                        input_path,
-                    ));
-                }
+                field_quoted_helper(Some(alias), name, selection, input_path);
                 input_path.pop();
-                Some(JSON::Object(output))
             }
             Self::Path(alias, path_selection) => {
                 let value = path_selection.apply_to_path(data, input_path, errors);
                 if let Some(value) = value {
                     output.insert(alias.name.clone(), value);
                 }
-                Some(JSON::Object(output))
             }
             Self::Group(alias, sub_selection) => {
                 let value = sub_selection.apply_to_path(data, input_path, errors);
                 if let Some(value) = value {
                     output.insert(alias.name.clone(), value);
                 }
-                Some(JSON::Object(output))
             }
-        }
+        };
+
+        Some(JSON::Object(output))
     }
 }
 

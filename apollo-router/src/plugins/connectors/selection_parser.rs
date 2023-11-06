@@ -261,18 +261,18 @@ impl NamedSelection {
             .map(|(input, (alias, group))| (input, Self::Group(alias, group)))
     }
 
-    fn name(&self) -> &String {
+    fn name(&self) -> &str {
         match self {
             Self::Field(alias, name, _) => {
                 if let Some(alias) = alias {
-                    &alias.name
+                    alias.name.as_str()
                 } else {
-                    name
+                    name.as_str()
                 }
             }
-            Self::Quoted(alias, _, _) => &alias.name,
-            Self::Path(alias, _) => &alias.name,
-            Self::Group(alias, _) => &alias.name,
+            Self::Quoted(alias, _, _) => alias.name.as_str(),
+            Self::Path(alias, _) => alias.name.as_str(),
+            Self::Group(alias, _) => alias.name.as_str(),
         }
     }
 }

@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::fmt::Write;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -123,8 +124,63 @@ impl BridgeQueryPlanner {
 
         let planner = Arc::new(planner);
 
-        let api_schema = planner.api_schema().await?;
-        let api_schema = Schema::parse(&api_schema.schema, &configuration)?;
+        let api_schema_string = match configuration.experimental_api_schema_generation_mode {
+            crate::configuration::ApiSchemaMode::Legacy => {
+                let api_schema = planner.api_schema().await?;
+                api_schema.schema
+            }
+            crate::configuration::ApiSchemaMode::New => schema.create_api_schema(),
+
+            crate::configuration::ApiSchemaMode::Both => {
+                let api_schema = planner.api_schema().await?;
+                let new_api_schema = schema.create_api_schema();
+
+                if api_schema.schema != new_api_schema {
+                    tracing::warn!(
+                        monotonic_counter.apollo.router.api_schema = 1u64,
+                        generation.result = "failed",
+                        "API schema generation mismatch: apollo-federation and router-bridge write different schema"
+                    );
+
+                    let differences = diff::lines(&api_schema.schema, &new_api_schema);
+                    let mut output = String::new();
+                    for diff_line in differences {
+                        match diff_line {
+                            diff::Result::Left(l) => {
+                                let trimmed = l.trim();
+                                if !trimmed.starts_with('#') && !trimmed.is_empty() {
+                                    writeln!(&mut output, "-{l}").expect("write will never fail");
+                                } else {
+                                    writeln!(&mut output, " {l}").expect("write will never fail");
+                                }
+                            }
+                            diff::Result::Both(l, _) => {
+                                writeln!(&mut output, " {l}").expect("write will never fail");
+                            }
+                            diff::Result::Right(r) => {
+                                let trimmed = r.trim();
+                                if trimmed != "---" && !trimmed.is_empty() {
+                                    writeln!(&mut output, "+{r}").expect("write will never fail");
+                                }
+                            }
+                        }
+                    }
+                    tracing::debug!(
+                        "different API schema between apollo-federation and router-bridge:\n{}",
+                        output
+                    );
+                } else {
+                    tracing::warn!(
+                        monotonic_counter.apollo.router.api_schema = 1u64,
+                        generation.result = VALIDATION_MATCH,
+                    );
+                }
+                api_schema.schema
+            }
+        };
+        let api_schema = Schema::parse(&api_schema_string, &configuration)?;
+
+        let schema = Arc::new(schema.with_api_schema(api_schema));
 
         let subgraph_schema_strings = planner.subgraphs().await?;
         let mut subgraph_schemas = HashMap::with_capacity(subgraph_schema_strings.len());
@@ -132,7 +188,6 @@ impl BridgeQueryPlanner {
             subgraph_schemas.insert(name, Arc::new(Schema::parse(&schema, &configuration)?));
         }
 
-        let schema = Arc::new(schema.with_api_schema(api_schema));
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(Introspection::new(planner.clone()).await))
         } else {
@@ -251,7 +306,7 @@ impl BridgeQueryPlanner {
             filtered_query: None,
             unauthorized: UnauthorizedPaths {
                 paths: vec![],
-                log_errors: AuthorizationPlugin::log_errors(&self.configuration),
+                errors: AuthorizationPlugin::log_errors(&self.configuration),
             },
             subselections,
             defer_stats,

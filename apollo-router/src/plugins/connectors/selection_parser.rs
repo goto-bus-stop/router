@@ -1,3 +1,7 @@
+use std::hash::Hash;
+use std::hash::Hasher;
+
+use indexmap::IndexSet;
 use nom::branch::alt;
 use nom::character::complete::char;
 use nom::character::complete::multispace0;
@@ -11,130 +15,141 @@ use nom::sequence::pair;
 use nom::sequence::preceded;
 use nom::sequence::tuple;
 use nom::IResult;
+use serde_json::json;
+use serde_json::Map;
+use serde_json::Value as JSON;
 
 // Selection ::= NamedSelection+ | PathSelection
 
 #[derive(Debug, PartialEq, Clone)]
-pub(self) enum Selection<'a> {
-    Named(Vec<NamedSelection<'a>>),
-    Path(PathSelection<'a>),
+enum Selection {
+    // Although we reuse the SubSelection type for the Selection::Named case, we
+    // parse it as a sequence of NamedSelection items without the {...} curly
+    // braces that SubSelection::parse expects.
+    Named(SubSelection),
+    Path(PathSelection),
 }
 
-impl<'a> Selection<'a> {
-    fn parse(input: &'a str) -> IResult<&str, Self> {
+impl Selection {
+    fn parse(input: &str) -> IResult<&str, Self> {
         alt((
-            map(many1(NamedSelection::parse), Self::Named),
+            map(many1(NamedSelection::parse), |selections| {
+                Self::Named(SubSelection { selections })
+            }),
             map(PathSelection::parse, Self::Path),
         ))(input)
     }
 }
 
+// This macro is handy for tests, but it absolutely should never be used with
+// dynamic input at runtime, since it panics if the selection string fails to
+// parse for any reason.
+#[cfg(test)]
+macro_rules! selection {
+    ($input:expr) => {
+        if let Ok((remainder, parsed)) = Selection::parse($input) {
+            assert_eq!(remainder, "");
+            parsed
+        } else {
+            panic!("invalid selection: {:?}", $input);
+        }
+    };
+}
+
 #[test]
 fn test_selection() {
     assert_eq!(
-        Selection::parse("hello"),
-        Ok((
-            "",
-            Selection::Named(vec![NamedSelection::Field(
-                None,
-                Identifier { name: "hello" },
-                None
-            ),]),
+        selection!("hello"),
+        Selection::Named(SubSelection {
+            selections: vec![NamedSelection::Field(None, "hello".to_string(), None),]
+        }),
+    );
+
+    assert_eq!(
+        selection!(".hello"),
+        Selection::Path(PathSelection::from_slice(
+            &[Property::Field("hello".to_string()),],
+            None
         )),
     );
 
     assert_eq!(
-        Selection::parse(".hello"),
-        Ok((
-            "",
-            Selection::Path(PathSelection {
-                path: vec![Property::Field(Identifier { name: "hello" }),],
-                selection: None,
-            }),
-        )),
-    );
-
-    assert_eq!(
-        Selection::parse("hi: .hello.world"),
-        Ok((
-            "",
-            Selection::Named(vec![NamedSelection::Path(
+        selection!("hi: .hello.world"),
+        Selection::Named(SubSelection {
+            selections: vec![NamedSelection::Path(
                 Alias {
-                    name: Identifier { name: "hi" }
+                    name: "hi".to_string(),
                 },
-                PathSelection {
-                    path: vec![
-                        Property::Field(Identifier { name: "hello" }),
-                        Property::Field(Identifier { name: "world" }),
+                PathSelection::from_slice(
+                    &[
+                        Property::Field("hello".to_string()),
+                        Property::Field("world".to_string()),
                     ],
-                    selection: None,
-                },
-            ),]),
-        )),
+                    None
+                ),
+            )]
+        }),
     );
 
     assert_eq!(
-        Selection::parse("before hi: .hello.world after"),
-        Ok((
-            "",
-            Selection::Named(vec![
-                NamedSelection::Field(None, Identifier { name: "before" }, None),
+        selection!("before hi: .hello.world after"),
+        Selection::Named(SubSelection {
+            selections: vec![
+                NamedSelection::Field(None, "before".to_string(), None),
                 NamedSelection::Path(
                     Alias {
-                        name: Identifier { name: "hi" }
+                        name: "hi".to_string(),
                     },
-                    PathSelection {
-                        path: vec![
-                            Property::Field(Identifier { name: "hello" }),
-                            Property::Field(Identifier { name: "world" }),
+                    PathSelection::from_slice(
+                        &[
+                            Property::Field("hello".to_string()),
+                            Property::Field("world".to_string()),
                         ],
-                        selection: None,
-                    },
+                        None
+                    ),
                 ),
-                NamedSelection::Field(None, Identifier { name: "after" }, None),
-            ]),
-        )),
+                NamedSelection::Field(None, "after".to_string(), None),
+            ]
+        }),
     );
 
-    let before_path_nested_after_result = Ok((
-        "",
-        Selection::Named(vec![
-            NamedSelection::Field(None, Identifier { name: "before" }, None),
+    let before_path_nested_after_result = Selection::Named(SubSelection {
+        selections: vec![
+            NamedSelection::Field(None, "before".to_string(), None),
             NamedSelection::Path(
                 Alias {
-                    name: Identifier { name: "hi" },
+                    name: "hi".to_string(),
                 },
-                PathSelection {
-                    path: vec![
-                        Property::Field(Identifier { name: "hello" }),
-                        Property::Field(Identifier { name: "world" }),
+                PathSelection::from_slice(
+                    &[
+                        Property::Field("hello".to_string()),
+                        Property::Field("world".to_string()),
                     ],
-                    selection: Some(SubSelection {
+                    Some(SubSelection {
                         selections: vec![
-                            NamedSelection::Field(None, Identifier { name: "nested" }, None),
-                            NamedSelection::Field(None, Identifier { name: "names" }, None),
+                            NamedSelection::Field(None, "nested".to_string(), None),
+                            NamedSelection::Field(None, "names".to_string(), None),
                         ],
                     }),
-                },
+                ),
             ),
-            NamedSelection::Field(None, Identifier { name: "after" }, None),
-        ]),
-    ));
+            NamedSelection::Field(None, "after".to_string(), None),
+        ],
+    });
 
     assert_eq!(
-        Selection::parse("before hi: .hello.world { nested names } after"),
+        selection!("before hi: .hello.world { nested names } after"),
         before_path_nested_after_result,
     );
 
     assert_eq!(
-        Selection::parse("before hi:.hello.world{nested names}after"),
+        selection!("before hi:.hello.world{nested names}after"),
         before_path_nested_after_result,
     );
 
     assert_eq!(
-        Selection::parse(
-            "
-            topLevelAlias: topLevelField {
+        selection!(
+            "topLevelAlias: topLevelField {
                 nonIdentifier: 'property name with spaces'
                 pathSelection: .some.nested.path {
                     still: yet
@@ -142,91 +157,63 @@ fn test_selection() {
                     properties
                 }
                 siblingGroup: { brother sister }
-            }
-        "
+            }"
         ),
-        Ok((
-            "",
-            Selection::Named(vec![NamedSelection::Field(
+        Selection::Named(SubSelection {
+            selections: vec![NamedSelection::Field(
                 Some(Alias {
-                    name: Identifier {
-                        name: "topLevelAlias"
-                    }
+                    name: "topLevelAlias".to_string(),
                 }),
-                Identifier {
-                    name: "topLevelField"
-                },
+                "topLevelField".to_string(),
                 Some(SubSelection {
                     selections: vec![
                         NamedSelection::Quoted(
                             Alias {
-                                name: Identifier {
-                                    name: "nonIdentifier"
-                                }
+                                name: "nonIdentifier".to_string(),
                             },
                             "property name with spaces".to_string(),
                             None,
                         ),
                         NamedSelection::Path(
                             Alias {
-                                name: Identifier {
-                                    name: "pathSelection"
-                                }
+                                name: "pathSelection".to_string(),
                             },
-                            PathSelection {
-                                path: vec![
-                                    Property::Field(Identifier { name: "some" }),
-                                    Property::Field(Identifier { name: "nested" }),
-                                    Property::Field(Identifier { name: "path" }),
+                            PathSelection::from_slice(
+                                &[
+                                    Property::Field("some".to_string()),
+                                    Property::Field("nested".to_string()),
+                                    Property::Field("path".to_string()),
                                 ],
-                                selection: Some(SubSelection {
+                                Some(SubSelection {
                                     selections: vec![
                                         NamedSelection::Field(
                                             Some(Alias {
-                                                name: Identifier { name: "still" }
+                                                name: "still".to_string(),
                                             }),
-                                            Identifier { name: "yet" },
+                                            "yet".to_string(),
                                             None,
                                         ),
-                                        NamedSelection::Field(
-                                            None,
-                                            Identifier { name: "more" },
-                                            None,
-                                        ),
-                                        NamedSelection::Field(
-                                            None,
-                                            Identifier { name: "properties" },
-                                            None,
-                                        ),
+                                        NamedSelection::Field(None, "more".to_string(), None,),
+                                        NamedSelection::Field(None, "properties".to_string(), None,),
                                     ],
-                                }),
-                            },
+                                })
+                            ),
                         ),
                         NamedSelection::Group(
                             Alias {
-                                name: Identifier {
-                                    name: "siblingGroup"
-                                }
+                                name: "siblingGroup".to_string(),
                             },
                             SubSelection {
                                 selections: vec![
-                                    NamedSelection::Field(
-                                        None,
-                                        Identifier { name: "brother" },
-                                        None,
-                                    ),
-                                    NamedSelection::Field(
-                                        None,
-                                        Identifier { name: "sister" },
-                                        None,
-                                    ),
+                                    NamedSelection::Field(None, "brother".to_string(), None,),
+                                    NamedSelection::Field(None, "sister".to_string(), None,),
                                 ],
                             },
                         ),
                     ],
                 }),
-            ),]),
-        )),
+            ),]
+        }),
     );
 }
 
@@ -237,15 +224,15 @@ fn test_selection() {
 //     | Alias SubSelection
 
 #[derive(Debug, PartialEq, Clone)]
-pub(self) enum NamedSelection<'a> {
-    Field(Option<Alias<'a>>, Identifier<'a>, Option<SubSelection<'a>>),
-    Quoted(Alias<'a>, String, Option<SubSelection<'a>>),
-    Path(Alias<'a>, PathSelection<'a>),
-    Group(Alias<'a>, SubSelection<'a>),
+enum NamedSelection {
+    Field(Option<Alias>, String, Option<SubSelection>),
+    Quoted(Alias, String, Option<SubSelection>),
+    Path(Alias, PathSelection),
+    Group(Alias, SubSelection),
 }
 
-impl<'a> NamedSelection<'a> {
-    fn parse(input: &'a str) -> IResult<&str, Self> {
+impl NamedSelection {
+    fn parse(input: &str) -> IResult<&str, Self> {
         alt((
             Self::parse_field,
             Self::parse_quoted,
@@ -254,26 +241,26 @@ impl<'a> NamedSelection<'a> {
         ))(input)
     }
 
-    fn parse_field(input: &'a str) -> IResult<&str, Self> {
+    fn parse_field(input: &str) -> IResult<&str, Self> {
         tuple((
             opt(Alias::parse),
-            Identifier::parse,
+            parse_identifier,
             opt(SubSelection::parse),
         ))(input)
         .map(|(input, (alias, name, selection))| (input, Self::Field(alias, name, selection)))
     }
 
-    fn parse_quoted(input: &'a str) -> IResult<&str, Self> {
+    fn parse_quoted(input: &str) -> IResult<&str, Self> {
         tuple((Alias::parse, parse_string_literal, opt(SubSelection::parse)))(input)
             .map(|(input, (alias, name, selection))| (input, Self::Quoted(alias, name, selection)))
     }
 
-    fn parse_path(input: &'a str) -> IResult<&str, Self> {
+    fn parse_path(input: &str) -> IResult<&str, Self> {
         tuple((Alias::parse, PathSelection::parse))(input)
             .map(|(input, (alias, path))| (input, Self::Path(alias, path)))
     }
 
-    fn parse_group(input: &'a str) -> IResult<&str, Self> {
+    fn parse_group(input: &str) -> IResult<&str, Self> {
         tuple((Alias::parse, SubSelection::parse))(input)
             .map(|(input, (alias, group))| (input, Self::Group(alias, group)))
     }
@@ -282,14 +269,14 @@ impl<'a> NamedSelection<'a> {
         match self {
             Self::Field(alias, name, _) => {
                 if let Some(alias) = alias {
-                    alias.name.name
+                    alias.name.as_str()
                 } else {
-                    name.name
+                    name.as_str()
                 }
             }
-            Self::Quoted(alias, _, _) => alias.name.name,
-            Self::Path(alias, _) => alias.name.name,
-            Self::Group(alias, _) => alias.name.name,
+            Self::Quoted(alias, _, _) => alias.name.as_str(),
+            Self::Path(alias, _) => alias.name.as_str(),
+            Self::Group(alias, _) => alias.name.as_str(),
         }
     }
 }
@@ -301,14 +288,16 @@ fn test_named_selection() {
         assert_eq!(actual, Ok(("", expected.clone())));
         assert_eq!(actual.unwrap().1.name(), name);
         assert_eq!(
-            Selection::parse(input),
-            Ok(("", Selection::Named(vec![expected]))),
+            selection!(input),
+            Selection::Named(SubSelection {
+                selections: vec![expected],
+            }),
         );
     }
 
     assert_result_and_name(
         "hello",
-        NamedSelection::Field(None, Identifier { name: "hello" }, None),
+        NamedSelection::Field(None, "hello".to_string(), None),
         "hello",
     );
 
@@ -316,13 +305,9 @@ fn test_named_selection() {
         "hello { world }",
         NamedSelection::Field(
             None,
-            Identifier { name: "hello" },
+            "hello".to_string(),
             Some(SubSelection {
-                selections: vec![NamedSelection::Field(
-                    None,
-                    Identifier { name: "world" },
-                    None,
-                )],
+                selections: vec![NamedSelection::Field(None, "world".to_string(), None)],
             }),
         ),
         "hello",
@@ -332,9 +317,9 @@ fn test_named_selection() {
         "hi: hello",
         NamedSelection::Field(
             Some(Alias {
-                name: Identifier { name: "hi" },
+                name: "hi".to_string(),
             }),
-            Identifier { name: "hello" },
+            "hello".to_string(),
             None,
         ),
         "hi",
@@ -344,7 +329,7 @@ fn test_named_selection() {
         "hi: 'hello world'",
         NamedSelection::Quoted(
             Alias {
-                name: Identifier { name: "hi" },
+                name: "hi".to_string(),
             },
             "hello world".to_string(),
             None,
@@ -356,15 +341,11 @@ fn test_named_selection() {
         "hi: hello { world }",
         NamedSelection::Field(
             Some(Alias {
-                name: Identifier { name: "hi" },
+                name: "hi".to_string(),
             }),
-            Identifier { name: "hello" },
+            "hello".to_string(),
             Some(SubSelection {
-                selections: vec![NamedSelection::Field(
-                    None,
-                    Identifier { name: "world" },
-                    None,
-                )],
+                selections: vec![NamedSelection::Field(None, "world".to_string(), None)],
             }),
         ),
         "hi",
@@ -374,13 +355,13 @@ fn test_named_selection() {
         "hey: hello { world again }",
         NamedSelection::Field(
             Some(Alias {
-                name: Identifier { name: "hey" },
+                name: "hey".to_string(),
             }),
-            Identifier { name: "hello" },
+            "hello".to_string(),
             Some(SubSelection {
                 selections: vec![
-                    NamedSelection::Field(None, Identifier { name: "world" }, None),
-                    NamedSelection::Field(None, Identifier { name: "again" }, None),
+                    NamedSelection::Field(None, "world".to_string(), None),
+                    NamedSelection::Field(None, "again".to_string(), None),
                 ],
             }),
         ),
@@ -391,15 +372,11 @@ fn test_named_selection() {
         "hey: 'hello world' { again }",
         NamedSelection::Quoted(
             Alias {
-                name: Identifier { name: "hey" },
+                name: "hey".to_string(),
             },
             "hello world".to_string(),
             Some(SubSelection {
-                selections: vec![NamedSelection::Field(
-                    None,
-                    Identifier { name: "again" },
-                    None,
-                )],
+                selections: vec![NamedSelection::Field(None, "again".to_string(), None)],
             }),
         ),
         "hey",
@@ -409,7 +386,7 @@ fn test_named_selection() {
         "leggo: 'my ego'",
         NamedSelection::Quoted(
             Alias {
-                name: Identifier { name: "leggo" },
+                name: "leggo".to_string(),
             },
             "my ego".to_string(),
             None,
@@ -421,19 +398,31 @@ fn test_named_selection() {
 // PathSelection ::= ("." Property)+ SubSelection?
 
 #[derive(Debug, PartialEq, Clone)]
-pub(self) struct PathSelection<'a> {
-    path: Vec<Property<'a>>,
-    selection: Option<SubSelection<'a>>,
+enum PathSelection {
+    // We use a recursive structure here instead of a Vec<Property> to make
+    // applying the selection to a JSON value easier.
+    Path(Property, Box<PathSelection>),
+    Selection(SubSelection),
+    Empty,
 }
 
-impl<'a> PathSelection<'a> {
-    fn parse(input: &'a str) -> IResult<&str, Self> {
+impl PathSelection {
+    fn parse(input: &str) -> IResult<&str, Self> {
         tuple((
             multispace0,
             many1(preceded(char('.'), Property::parse)),
             opt(SubSelection::parse),
         ))(input)
-        .map(|(input, (_, path, selection))| (input, Self { path, selection }))
+        .map(|(input, (_, path, selection))| (input, Self::from_slice(&path, selection)))
+    }
+
+    fn from_slice(properties: &[Property], selection: Option<SubSelection>) -> Self {
+        match properties {
+            [] => selection.map_or(Self::Empty, Self::Selection),
+            [head, tail @ ..] => {
+                Self::Path(head.clone(), Box::new(Self::from_slice(tail, selection)))
+            }
+        }
     }
 }
 
@@ -441,90 +430,80 @@ impl<'a> PathSelection<'a> {
 fn test_path_selection() {
     fn check_path_selection(input: &str, expected: PathSelection) {
         assert_eq!(PathSelection::parse(input), Ok(("", expected.clone())));
-        assert_eq!(
-            Selection::parse(input),
-            Ok(("", Selection::Path(expected.clone())))
-        );
+        assert_eq!(selection!(input), Selection::Path(expected.clone()));
     }
 
     check_path_selection(
         ".hello",
-        PathSelection {
-            path: vec![Property::Field(Identifier { name: "hello" })],
-            selection: None,
-        },
+        PathSelection::from_slice(&[Property::Field("hello".to_string())], None),
     );
 
     check_path_selection(
         ".hello.world",
-        PathSelection {
-            path: vec![
-                Property::Field(Identifier { name: "hello" }),
-                Property::Field(Identifier { name: "world" }),
+        PathSelection::from_slice(
+            &[
+                Property::Field("hello".to_string()),
+                Property::Field("world".to_string()),
             ],
-            selection: None,
-        },
+            None,
+        ),
     );
 
     check_path_selection(
         ".hello.world { hello }",
-        PathSelection {
-            path: vec![
-                Property::Field(Identifier { name: "hello" }),
-                Property::Field(Identifier { name: "world" }),
+        PathSelection::from_slice(
+            &[
+                Property::Field("hello".to_string()),
+                Property::Field("world".to_string()),
             ],
-            selection: Some(SubSelection {
-                selections: vec![NamedSelection::Field(
-                    None,
-                    Identifier { name: "hello" },
-                    None,
-                )],
+            Some(SubSelection {
+                selections: vec![NamedSelection::Field(None, "hello".to_string(), None)],
             }),
-        },
+        ),
     );
 
     check_path_selection(
         ".nested.'string literal'.\"property\".name",
-        PathSelection {
-            path: vec![
-                Property::Field(Identifier { name: "nested" }),
+        PathSelection::from_slice(
+            &[
+                Property::Field("nested".to_string()),
                 Property::Quoted("string literal".to_string()),
                 Property::Quoted("property".to_string()),
-                Property::Field(Identifier { name: "name" }),
+                Property::Field("name".to_string()),
             ],
-            selection: None,
-        },
+            None,
+        ),
     );
 
     check_path_selection(
         ".nested.'string literal' { leggo: 'my ego' }",
-        PathSelection {
-            path: vec![
-                Property::Field(Identifier { name: "nested" }),
+        PathSelection::from_slice(
+            &[
+                Property::Field("nested".to_string()),
                 Property::Quoted("string literal".to_string()),
             ],
-            selection: Some(SubSelection {
+            Some(SubSelection {
                 selections: vec![NamedSelection::Quoted(
                     Alias {
-                        name: Identifier { name: "leggo" },
+                        name: "leggo".to_string(),
                     },
                     "my ego".to_string(),
                     None,
                 )],
             }),
-        },
+        ),
     );
 }
 
 // SubSelection ::= "{" NamedSelection+ "}"
 
 #[derive(Debug, PartialEq, Clone)]
-pub(self) struct SubSelection<'a> {
-    selections: Vec<NamedSelection<'a>>,
+struct SubSelection {
+    selections: Vec<NamedSelection>,
 }
 
-impl<'a> SubSelection<'a> {
-    fn parse(input: &'a str) -> IResult<&str, Self> {
+impl SubSelection {
+    fn parse(input: &str) -> IResult<&str, Self> {
         tuple((
             multispace0,
             char('{'),
@@ -543,11 +522,7 @@ fn test_subselection() {
         Ok((
             "",
             SubSelection {
-                selections: vec![NamedSelection::Field(
-                    None,
-                    Identifier { name: "hello" },
-                    None
-                ),],
+                selections: vec![NamedSelection::Field(None, "hello".to_string(), None),],
             },
         )),
     );
@@ -557,11 +532,7 @@ fn test_subselection() {
         Ok((
             "",
             SubSelection {
-                selections: vec![NamedSelection::Field(
-                    None,
-                    Identifier { name: "hello" },
-                    None
-                ),],
+                selections: vec![NamedSelection::Field(None, "hello".to_string(), None),],
             },
         )),
     );
@@ -571,11 +542,7 @@ fn test_subselection() {
         Ok((
             "",
             SubSelection {
-                selections: vec![NamedSelection::Field(
-                    None,
-                    Identifier { name: "padded" },
-                    None
-                ),],
+                selections: vec![NamedSelection::Field(None, "padded".to_string(), None),],
             },
         )),
     );
@@ -586,8 +553,8 @@ fn test_subselection() {
             "",
             SubSelection {
                 selections: vec![
-                    NamedSelection::Field(None, Identifier { name: "hello" }, None),
-                    NamedSelection::Field(None, Identifier { name: "world" }, None),
+                    NamedSelection::Field(None, "hello".to_string(), None),
+                    NamedSelection::Field(None, "world".to_string(), None),
                 ],
             },
         )),
@@ -600,13 +567,9 @@ fn test_subselection() {
             SubSelection {
                 selections: vec![NamedSelection::Field(
                     None,
-                    Identifier { name: "hello" },
+                    "hello".to_string(),
                     Some(SubSelection {
-                        selections: vec![NamedSelection::Field(
-                            None,
-                            Identifier { name: "world" },
-                            None
-                        ),],
+                        selections: vec![NamedSelection::Field(None, "world".to_string(), None),],
                     })
                 ),],
             },
@@ -617,13 +580,13 @@ fn test_subselection() {
 // Alias ::= Identifier ":"
 
 #[derive(Debug, PartialEq, Clone)]
-pub(self) struct Alias<'a> {
-    name: Identifier<'a>,
+struct Alias {
+    name: String,
 }
 
-impl<'a> Alias<'a> {
-    fn parse(input: &'a str) -> IResult<&'a str, Self> {
-        tuple((Identifier::parse, char(':'), multispace0))(input)
+impl Alias {
+    fn parse(input: &str) -> IResult<&str, Self> {
+        tuple((parse_identifier, char(':'), multispace0))(input)
             .map(|(input, (name, _, _))| (input, Self { name }))
     }
 }
@@ -635,7 +598,7 @@ fn test_alias() {
         Ok((
             "",
             Alias {
-                name: Identifier { name: "hello" },
+                name: "hello".to_string(),
             },
         )),
     );
@@ -645,7 +608,7 @@ fn test_alias() {
         Ok((
             "",
             Alias {
-                name: Identifier { name: "hello" },
+                name: "hello".to_string(),
             },
         )),
     );
@@ -655,7 +618,7 @@ fn test_alias() {
         Ok((
             "",
             Alias {
-                name: Identifier { name: "hello" },
+                name: "hello".to_string(),
             },
         )),
     );
@@ -665,7 +628,7 @@ fn test_alias() {
         Ok((
             "",
             Alias {
-                name: Identifier { name: "hello" },
+                name: "hello".to_string(),
             },
         )),
     );
@@ -675,7 +638,7 @@ fn test_alias() {
         Ok((
             "",
             Alias {
-                name: Identifier { name: "hello" },
+                name: "hello".to_string(),
             },
         )),
     );
@@ -684,15 +647,16 @@ fn test_alias() {
 // Property ::= Identifier | StringLiteral
 
 #[derive(Debug, PartialEq, Clone)]
-pub(self) enum Property<'a> {
-    Field(Identifier<'a>),
+enum Property {
+    Field(String),
     Quoted(String),
+    Index(usize),
 }
 
-impl<'a> Property<'a> {
-    fn parse(input: &'a str) -> IResult<&'a str, Self> {
+impl Property {
+    fn parse(input: &str) -> IResult<&str, Self> {
         alt((
-            map(Identifier::parse, Self::Field),
+            map(parse_identifier, Self::Field),
             map(parse_string_literal, Self::Quoted),
         ))(input)
     }
@@ -702,80 +666,53 @@ impl<'a> Property<'a> {
 fn test_property() {
     assert_eq!(
         Property::parse("hello"),
-        Ok(("", Property::Field(Identifier { name: "hello" }),)),
+        Ok(("", Property::Field("hello".to_string()))),
     );
 
     assert_eq!(
         Property::parse("'hello'"),
-        Ok(("", Property::Quoted("hello".to_string()),)),
+        Ok(("", Property::Quoted("hello".to_string()))),
     );
 }
 
 // Identifier ::= [a-zA-Z_][0-9a-zA-Z_]*
 
-#[derive(Debug, PartialEq, Clone)]
-pub(self) struct Identifier<'a> {
-    name: &'a str,
-}
-
-impl<'a> Identifier<'a> {
-    fn parse(input: &'a str) -> IResult<&'a str, Self> {
-        tuple((
-            multispace0,
-            recognize(pair(
-                one_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_"),
-                many0(one_of(
-                    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789",
-                )),
+fn parse_identifier(input: &str) -> IResult<&str, String> {
+    tuple((
+        multispace0,
+        recognize(pair(
+            one_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_"),
+            many0(one_of(
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789",
             )),
-            multispace0,
-        ))(input)
-        .map(|(input, (_, name, _))| (input, Self { name }))
-    }
-
-    fn name(&self) -> &str {
-        self.name
-    }
+        )),
+        multispace0,
+    ))(input)
+    .map(|(input, (_, name, _))| (input, name.to_string()))
 }
 
 #[test]
 fn test_identifier() {
+    assert_eq!(parse_identifier("hello"), Ok(("", "hello".to_string())),);
+
     assert_eq!(
-        Identifier::parse("hello"),
-        Ok(("", Identifier { name: "hello" })),
+        parse_identifier("hello_world"),
+        Ok(("", "hello_world".to_string())),
     );
 
     assert_eq!(
-        Identifier::parse("hello_world"),
-        Ok((
-            "",
-            Identifier {
-                name: "hello_world"
-            }
-        )),
+        parse_identifier("hello_world_123"),
+        Ok(("", "hello_world_123".to_string())),
     );
 
-    assert_eq!(
-        Identifier::parse("hello_world_123"),
-        Ok((
-            "",
-            Identifier {
-                name: "hello_world_123"
-            }
-        )),
-    );
-
-    assert_eq!(
-        Identifier::parse(" hello "),
-        Ok(("", Identifier { name: "hello" })),
-    );
+    assert_eq!(parse_identifier(" hello "), Ok(("", "hello".to_string())),);
 }
 
 // StringLiteral ::=
 //     | "'" ("\'" | [^'])* "'"
 //     | '"' ('\"' | [^"])* '"'
 
-fn parse_string_literal<'a>(input: &'a str) -> IResult<&'a str, String> {
+fn parse_string_literal(input: &str) -> IResult<&str, String> {
     let input = multispace0(input).map(|(input, _)| input)?;
     let mut input_char_indices = input.char_indices();
 
@@ -843,5 +780,826 @@ fn test_string_literal() {
     assert_eq!(
         parse_string_literal("'hello \\'world\\''"),
         Ok(("", "hello 'world'".to_string())),
+    );
+}
+
+/// ApplyTo is a trait for applying a Selection to a JSON value, collecting
+/// any/all errors encountered in the process.
+
+trait ApplyTo {
+    // Applying a selection to a JSON value produces a new JSON value, along
+    // with any/all errors encountered in the process. The value is represented
+    // as an Option to allow for undefined/missing values (which JSON does not
+    // explicitly support), which are distinct from null values (which it does
+    // support).
+    fn apply_to(&self, data: &JSON) -> (Option<JSON>, Vec<ApplyToError>) {
+        let mut input_path = vec![];
+        // Using IndexSet over HashSet to preserve the order of the errors.
+        let mut errors = IndexSet::new();
+        let value = self.apply_to_path(data, &mut input_path, &mut errors);
+        (value, errors.into_iter().collect())
+    }
+
+    // This is the trait method that should be implemented and called
+    // recursively by the various Selection types.
+    fn apply_to_path(
+        &self,
+        data: &JSON,
+        input_path: &mut Vec<Property>,
+        errors: &mut IndexSet<ApplyToError>,
+    ) -> Option<JSON>;
+
+    // When array is encountered, the Self selection will be applied to each
+    // element of the array, producing a new array.
+    fn apply_to_array(
+        &self,
+        data: &JSON,
+        input_path: &mut Vec<Property>,
+        errors: &mut IndexSet<ApplyToError>,
+    ) -> Option<JSON> {
+        let data_array = data.as_array().unwrap();
+        let mut output = Vec::with_capacity(data_array.len());
+
+        for (i, element) in data_array.iter().enumerate() {
+            input_path.push(Property::Index(i));
+            let value = self.apply_to_path(element, input_path, errors);
+            input_path.pop();
+            // When building an Object, we can simply omit missing properties
+            // and report an error, but when building an Array, we need to
+            // insert null values to preserve the original array indices/length.
+            output.push(value.unwrap_or(JSON::Null));
+        }
+
+        Some(JSON::Array(output))
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+struct ApplyToError(JSON);
+
+impl Hash for ApplyToError {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        // Although serde_json::Value (aka JSON) does not implement the Hash
+        // trait, we can convert self.0 to a JSON string and hash that. To do
+        // this properly, we should ensure all object keys are serialized in
+        // lexicographic order before hashing, but the only object keys we use
+        // are "message" and "path", and they always appear in that order.
+        self.0.to_string().hash(hasher)
+    }
+}
+
+impl ApplyToError {
+    fn new(message: &str, path: &[Property]) -> Self {
+        Self(json!({
+            "message": message,
+            "path": path.iter().map(|property| match property {
+                Property::Field(name) => json!(name),
+                Property::Quoted(name) => json!(name),
+                Property::Index(index) => json!(index),
+            }).collect::<Vec<JSON>>(),
+        }))
+    }
+
+    fn from_json(json: &JSON) -> Self {
+        if let JSON::Object(error) = json {
+            if let Some(JSON::String(message)) = error.get("message") {
+                if let Some(JSON::Array(path)) = error.get("path") {
+                    if path
+                        .iter()
+                        .all(|element| matches!(element, JSON::String(_) | JSON::Number(_)))
+                    {
+                        // Instead of simply returning Self(json.clone()), we
+                        // enforce that the "message" and "path" properties are
+                        // always in that order, as promised in the comment in
+                        // the hash method above.
+                        return Self(json!({
+                            "message": message,
+                            "path": path,
+                        }));
+                    }
+                }
+            }
+        }
+        panic!("invalid ApplyToError JSON: {:?}", json);
+    }
+}
+
+impl ApplyTo for Selection {
+    fn apply_to_path(
+        &self,
+        data: &JSON,
+        input_path: &mut Vec<Property>,
+        errors: &mut IndexSet<ApplyToError>,
+    ) -> Option<JSON> {
+        if data.is_array() {
+            return self.apply_to_array(data, input_path, errors);
+        }
+
+        if !data.is_object() {
+            errors.insert(ApplyToError::new("not an object", input_path));
+            return None;
+        }
+
+        match self {
+            // Because we represent a Selection::Named as a SubSelection, we can
+            // fully delegate apply_to_path to SubSelection::apply_to_path. Even
+            // if we represented Self::Named as a Vec<NamedSelection>, we could
+            // still delegate to SubSelection::apply_to_path, but we would need
+            // to create a temporary SubSelection to wrap the selections Vec.
+            Self::Named(named_selections) => {
+                named_selections.apply_to_path(data, input_path, errors)
+            }
+            Self::Path(path_selection) => path_selection.apply_to_path(data, input_path, errors),
+        }
+    }
+}
+
+impl ApplyTo for NamedSelection {
+    fn apply_to_path(
+        &self,
+        data: &JSON,
+        input_path: &mut Vec<Property>,
+        errors: &mut IndexSet<ApplyToError>,
+    ) -> Option<JSON> {
+        if data.is_array() {
+            return self.apply_to_array(data, input_path, errors);
+        }
+
+        if !data.is_object() {
+            errors.insert(ApplyToError::new("not an object", input_path));
+            return None;
+        }
+
+        let mut output = Map::new();
+
+        #[rustfmt::skip] // cargo fmt butchers this closure's formatting
+        let mut field_quoted_helper = |
+            alias: Option<&Alias>,
+            name: &String,
+            selection: &Option<SubSelection>,
+            input_path: &mut Vec<Property>,
+        | {
+            if let Some(child) = data.get(name) {
+                let output_name = alias.map_or(name, |alias| &alias.name);
+                if let Some(selection) = selection {
+                    let value = selection.apply_to_path(child, input_path, errors);
+                    if let Some(value) = value {
+                        output.insert(output_name.clone(), value);
+                    }
+                } else {
+                    output.insert(output_name.clone(), child.clone());
+                }
+            } else {
+                errors.insert(ApplyToError::new(
+                    format!("{:?} not found", name).as_str(),
+                    input_path,
+                ));
+            }
+        };
+
+        match self {
+            Self::Field(alias, name, selection) => {
+                input_path.push(Property::Field(name.clone()));
+                field_quoted_helper(alias.as_ref(), name, selection, input_path);
+                input_path.pop();
+            }
+            Self::Quoted(alias, name, selection) => {
+                input_path.push(Property::Quoted(name.clone()));
+                field_quoted_helper(Some(alias), name, selection, input_path);
+                input_path.pop();
+            }
+            Self::Path(alias, path_selection) => {
+                let value = path_selection.apply_to_path(data, input_path, errors);
+                if let Some(value) = value {
+                    output.insert(alias.name.clone(), value);
+                }
+            }
+            Self::Group(alias, sub_selection) => {
+                let value = sub_selection.apply_to_path(data, input_path, errors);
+                if let Some(value) = value {
+                    output.insert(alias.name.clone(), value);
+                }
+            }
+        };
+
+        Some(JSON::Object(output))
+    }
+}
+
+impl ApplyTo for PathSelection {
+    fn apply_to_path(
+        &self,
+        data: &JSON,
+        input_path: &mut Vec<Property>,
+        errors: &mut IndexSet<ApplyToError>,
+    ) -> Option<JSON> {
+        if data.is_array() {
+            return self.apply_to_array(data, input_path, errors);
+        }
+
+        match self {
+            Self::Path(head, tail) => {
+                if !data.is_object() {
+                    errors.insert(ApplyToError::new("not an object", input_path));
+                    return None;
+                }
+
+                input_path.push(head.clone());
+                if let Some(child) = match head {
+                    Property::Field(name) => data.get(name),
+                    Property::Quoted(name) => data.get(name),
+                    Property::Index(index) => data.get(index),
+                } {
+                    let result = tail.apply_to_path(child, input_path, errors);
+                    input_path.pop();
+                    result
+                } else {
+                    let message = match head {
+                        Property::Field(name) => format!("{:?} not found", name),
+                        Property::Quoted(name) => format!("{:?} not found", name),
+                        Property::Index(index) => format!("{:?} not found", index),
+                    };
+                    errors.insert(ApplyToError::new(message.as_str(), input_path));
+                    input_path.pop();
+                    None
+                }
+            }
+            Self::Selection(selection) => {
+                // If data is not an object here, this recursive apply_to_path
+                // call will handle the error.
+                selection.apply_to_path(data, input_path, errors)
+            }
+            Self::Empty => {
+                // If data is not an object here, we want to preserve its value
+                // without an error.
+                Some(data.clone())
+            }
+        }
+    }
+}
+
+impl ApplyTo for SubSelection {
+    fn apply_to_path(
+        &self,
+        data: &JSON,
+        input_path: &mut Vec<Property>,
+        errors: &mut IndexSet<ApplyToError>,
+    ) -> Option<JSON> {
+        if data.is_array() {
+            return self.apply_to_array(data, input_path, errors);
+        }
+
+        if !data.is_object() {
+            errors.insert(ApplyToError::new("not an object", input_path));
+            return None;
+        }
+
+        let mut output = Map::new();
+
+        for named_selection in &self.selections {
+            let value = named_selection.apply_to_path(data, input_path, errors);
+            // If value is an object, extend output with its keys and their values.
+            if let Some(JSON::Object(key_and_value)) = value {
+                output.extend(key_and_value);
+            }
+        }
+
+        Some(JSON::Object(output))
+    }
+}
+
+#[test]
+fn test_apply_to_selection() {
+    let data = json!({
+        "hello": "world",
+        "nested": {
+            "hello": "world",
+            "world": "hello",
+        },
+        "array": [
+            { "hello": "world 0" },
+            { "hello": "world 1" },
+            { "hello": "world 2" },
+        ],
+    });
+
+    let check_ok = |selection: Selection, expected_json: JSON| {
+        let (actual_json, errors) = selection.apply_to(&data);
+        assert_eq!(actual_json, Some(expected_json));
+        assert_eq!(errors, vec![]);
+    };
+
+    check_ok(selection!("hello"), json!({"hello": "world"}));
+
+    check_ok(
+        selection!("nested"),
+        json!({
+            "nested": {
+                "hello": "world",
+                "world": "hello",
+            },
+        }),
+    );
+
+    check_ok(selection!(".nested.hello"), json!("world"));
+
+    check_ok(selection!(".nested.world"), json!("hello"));
+
+    check_ok(
+        selection!("nested hello"),
+        json!({
+            "hello": "world",
+            "nested": {
+                "hello": "world",
+                "world": "hello",
+            },
+        }),
+    );
+
+    check_ok(
+        selection!("array { hello }"),
+        json!({
+            "array": [
+                { "hello": "world 0" },
+                { "hello": "world 1" },
+                { "hello": "world 2" },
+            ],
+        }),
+    );
+
+    check_ok(
+        selection!("greetings: array { hello }"),
+        json!({
+            "greetings": [
+                { "hello": "world 0" },
+                { "hello": "world 1" },
+                { "hello": "world 2" },
+            ],
+        }),
+    );
+
+    check_ok(
+        selection!(".array { hello }"),
+        json!([
+            { "hello": "world 0" },
+            { "hello": "world 1" },
+            { "hello": "world 2" },
+        ]),
+    );
+
+    check_ok(
+        selection!("worlds: .array.hello"),
+        json!({
+            "worlds": [
+                "world 0",
+                "world 1",
+                "world 2",
+            ],
+        }),
+    );
+
+    check_ok(
+        selection!(".array.hello"),
+        json!(["world 0", "world 1", "world 2",]),
+    );
+
+    check_ok(
+        selection!("nested grouped: { hello worlds: .array.hello }"),
+        json!({
+            "nested": {
+                "hello": "world",
+                "world": "hello",
+            },
+            "grouped": {
+                "hello": "world",
+                "worlds": [
+                    "world 0",
+                    "world 1",
+                    "world 2",
+                ],
+            },
+        }),
+    );
+}
+
+#[test]
+fn test_apply_to_errors() {
+    let data = json!({
+        "hello": "world",
+        "nested": {
+            "hello": 123,
+            "world": true,
+        },
+        "array": [
+            { "hello": 1, "goodbye": "farewell" },
+            { "hello": "two" },
+            { "hello": 3.0, "smello": "yellow" },
+        ],
+    });
+
+    assert_eq!(
+        selection!("hello").apply_to(&data),
+        (Some(json!({"hello": "world"})), vec![],)
+    );
+
+    assert_eq!(
+        selection!("yellow").apply_to(&data),
+        (
+            Some(json!({})),
+            vec![ApplyToError::from_json(&json!({
+                "message": "\"yellow\" not found",
+                "path": ["yellow"],
+            })),],
+        )
+    );
+
+    assert_eq!(
+        selection!(".nested.hello").apply_to(&data),
+        (Some(json!(123)), vec![],)
+    );
+
+    assert_eq!(
+        selection!(".nested.'yellow'").apply_to(&data),
+        (
+            None,
+            vec![ApplyToError::from_json(&json!({
+                "message": "\"yellow\" not found",
+                "path": ["nested", "yellow"],
+            })),],
+        )
+    );
+
+    assert_eq!(
+        selection!(".nested { hola yellow world }").apply_to(&data),
+        (
+            Some(json!({
+                "world": true,
+            })),
+            vec![
+                ApplyToError::from_json(&json!({
+                    "message": "\"hola\" not found",
+                    "path": ["nested", "hola"],
+                })),
+                ApplyToError::from_json(&json!({
+                    "message": "\"yellow\" not found",
+                    "path": ["nested", "yellow"],
+                })),
+            ],
+        )
+    );
+
+    assert_eq!(
+        selection!("partial: .array { hello goodbye }").apply_to(&data),
+        (
+            Some(json!({
+                "partial": [
+                    { "hello": 1, "goodbye": "farewell" },
+                    { "hello": "two" },
+                    { "hello": 3.0 },
+                ],
+            })),
+            vec![
+                ApplyToError::from_json(&json!({
+                    "message": "\"goodbye\" not found",
+                    "path": ["array", 1, "goodbye"],
+                })),
+                ApplyToError::from_json(&json!({
+                    "message": "\"goodbye\" not found",
+                    "path": ["array", 2, "goodbye"],
+                })),
+            ],
+        )
+    );
+
+    assert_eq!(
+        selection!("good: .array.hello bad: .array.smello").apply_to(&data),
+        (
+            Some(json!({
+                "good": [
+                    1,
+                    "two",
+                    3.0,
+                ],
+                "bad": [
+                    null,
+                    null,
+                    "yellow",
+                ],
+            })),
+            vec![
+                ApplyToError::from_json(&json!({
+                    "message": "\"smello\" not found",
+                    "path": ["array", 0, "smello"],
+                })),
+                ApplyToError::from_json(&json!({
+                    "message": "\"smello\" not found",
+                    "path": ["array", 1, "smello"],
+                })),
+            ],
+        )
+    );
+
+    assert_eq!(
+        selection!("array { hello smello }").apply_to(&data),
+        (
+            Some(json!({
+                "array": [
+                    { "hello": 1 },
+                    { "hello": "two" },
+                    { "hello": 3.0, "smello": "yellow" },
+                ],
+            })),
+            vec![
+                ApplyToError::from_json(&json!({
+                    "message": "\"smello\" not found",
+                    "path": ["array", 0, "smello"],
+                })),
+                ApplyToError::from_json(&json!({
+                    "message": "\"smello\" not found",
+                    "path": ["array", 1, "smello"],
+                })),
+            ],
+        )
+    );
+
+    assert_eq!(
+        selection!(".nested { grouped: { hello smelly world } }").apply_to(&data),
+        (
+            Some(json!({
+                "grouped": {
+                    "hello": 123,
+                    "world": true,
+                },
+            })),
+            vec![ApplyToError::from_json(&json!({
+                "message": "\"smelly\" not found",
+                "path": ["nested", "smelly"],
+            })),],
+        )
+    );
+
+    assert_eq!(
+        selection!("alias: .nested { grouped: { hello smelly world } }").apply_to(&data),
+        (
+            Some(json!({
+                "alias": {
+                    "grouped": {
+                        "hello": 123,
+                        "world": true,
+                    },
+                },
+            })),
+            vec![ApplyToError::from_json(&json!({
+                "message": "\"smelly\" not found",
+                "path": ["nested", "smelly"],
+            })),],
+        )
+    );
+}
+
+#[test]
+fn test_apply_to_nested_arrays() {
+    let data = json!({
+        "arrayOfArrays": [
+            [
+                { "x": 0, "y": 0 },
+            ],
+            [
+                { "x": 1, "y": 0 },
+                { "x": 1, "y": 1 },
+                { "x": 1, "y": 2 },
+            ],
+            [
+                { "x": 2, "y": 0 },
+                { "x": 2, "y": 1 },
+            ],
+            [],
+            [
+                null,
+                { "x": 4, "y": 1 },
+                { "x": 4, "why": 2 },
+                null,
+                { "x": 4, "y": 4 },
+            ]
+        ],
+    });
+
+    assert_eq!(
+        selection!(".arrayOfArrays.x").apply_to(&data),
+        (
+            Some(json!([[0], [1, 1, 1], [2, 2], [], [null, 4, 4, null, 4],])),
+            vec![
+                ApplyToError::from_json(&json!({
+                    "message": "not an object",
+                    "path": ["arrayOfArrays", 4, 0],
+                })),
+                ApplyToError::from_json(&json!({
+                    "message": "not an object",
+                    "path": ["arrayOfArrays", 4, 3],
+                })),
+            ],
+        ),
+    );
+
+    assert_eq!(
+        selection!(".arrayOfArrays.y").apply_to(&data),
+        (
+            Some(json!([
+                [0],
+                [0, 1, 2],
+                [0, 1],
+                [],
+                [null, 1, null, null, 4],
+            ])),
+            vec![
+                ApplyToError::from_json(&json!({
+                    "message": "not an object",
+                    "path": ["arrayOfArrays", 4, 0],
+                })),
+                ApplyToError::from_json(&json!({
+                    "message": "\"y\" not found",
+                    "path": ["arrayOfArrays", 4, 2, "y"],
+                })),
+                ApplyToError::from_json(&json!({
+                    "message": "not an object",
+                    "path": ["arrayOfArrays", 4, 3],
+                })),
+            ],
+        ),
+    );
+
+    assert_eq!(
+        selection!("alias: arrayOfArrays { x y }").apply_to(&data),
+        (
+            Some(json!({
+                "alias": [
+                    [
+                        { "x": 0, "y": 0 },
+                    ],
+                    [
+                        { "x": 1, "y": 0 },
+                        { "x": 1, "y": 1 },
+                        { "x": 1, "y": 2 },
+                    ],
+                    [
+                        { "x": 2, "y": 0 },
+                        { "x": 2, "y": 1 },
+                    ],
+                    [],
+                    [
+                        null,
+                        { "x": 4, "y": 1 },
+                        { "x": 4 },
+                        null,
+                        { "x": 4, "y": 4 },
+                    ]
+                ],
+            })),
+            vec![
+                ApplyToError::from_json(&json!({
+                    "message": "not an object",
+                    "path": ["arrayOfArrays", 4, 0],
+                })),
+                ApplyToError::from_json(&json!({
+                    "message": "\"y\" not found",
+                    "path": ["arrayOfArrays", 4, 2, "y"],
+                })),
+                ApplyToError::from_json(&json!({
+                    "message": "not an object",
+                    "path": ["arrayOfArrays", 4, 3],
+                })),
+            ],
+        ),
+    );
+
+    assert_eq!(
+        selection!("ys: .arrayOfArrays.y xs: .arrayOfArrays.x").apply_to(&data),
+        (
+            Some(json!({
+                "ys": [
+                    [0],
+                    [0, 1, 2],
+                    [0, 1],
+                    [],
+                    [null, 1, null, null, 4],
+                ],
+                "xs": [
+                    [0],
+                    [1, 1, 1],
+                    [2, 2],
+                    [],
+                    [null, 4, 4, null, 4],
+                ],
+            })),
+            vec![
+                ApplyToError::from_json(&json!({
+                    "message": "not an object",
+                    "path": ["arrayOfArrays", 4, 0],
+                })),
+                ApplyToError::from_json(&json!({
+                    "message": "\"y\" not found",
+                    "path": ["arrayOfArrays", 4, 2, "y"],
+                })),
+                ApplyToError::from_json(&json!({
+                    // Reversing the order of "path" and "message" here to make
+                    // sure that doesn't affect the deduplication logic.
+                    "path": ["arrayOfArrays", 4, 3],
+                    "message": "not an object",
+                })),
+                // These errors have already been reported along different paths, above.
+                // ApplyToError::from_json(&json!({
+                //     "message": "not an object",
+                //     "path": ["arrayOfArrays", 4, 0],
+                // })),
+                // ApplyToError::from_json(&json!({
+                //     "message": "not an object",
+                //     "path": ["arrayOfArrays", 4, 3],
+                // })),
+            ],
+        ),
+    );
+}
+
+#[test]
+fn test_apply_to_non_identifier_properties() {
+    let data = json!({
+        "not an identifier": [
+            { "also.not.an.identifier": 0 },
+            { "also.not.an.identifier": 1 },
+            { "also.not.an.identifier": 2 },
+        ],
+        "another": {
+            "pesky string literal!": {
+                "identifier": 123,
+                "{ evil braces }": true,
+            },
+        },
+    });
+
+    assert_eq!(
+        // The grammar enforces that we must always provide identifier aliases
+        // for non-identifier properties, so the data we get back will always be
+        // GraphQL-safe.
+        selection!("alias: 'not an identifier' { safe: 'also.not.an.identifier' }").apply_to(&data),
+        (
+            Some(json!({
+                "alias": [
+                    { "safe": 0 },
+                    { "safe": 1 },
+                    { "safe": 2 },
+                ],
+            })),
+            vec![],
+        ),
+    );
+
+    assert_eq!(
+        selection!(".'not an identifier'.'also.not.an.identifier'").apply_to(&data),
+        (Some(json!([0, 1, 2])), vec![],),
+    );
+
+    assert_eq!(
+        selection!(".\"not an identifier\" { safe: \"also.not.an.identifier\" }").apply_to(&data),
+        (
+            Some(json!([
+                { "safe": 0 },
+                { "safe": 1 },
+                { "safe": 2 },
+            ])),
+            vec![],
+        ),
+    );
+
+    assert_eq!(
+        selection!(
+            "another {
+            pesky: 'pesky string literal!' {
+                identifier
+                evil: '{ evil braces }'
+            }
+        }"
+        )
+        .apply_to(&data),
+        (
+            Some(json!({
+                "another": {
+                    "pesky": {
+                        "identifier": 123,
+                        "evil": true,
+                    },
+                },
+            })),
+            vec![],
+        ),
+    );
+
+    assert_eq!(
+        selection!(".another.'pesky string literal!'.'{ evil braces }'").apply_to(&data),
+        (Some(json!(true)), vec![],),
+    );
+
+    assert_eq!(
+        selection!(".another.'pesky string literal!'.\"identifier\"").apply_to(&data),
+        (Some(json!(123)), vec![],),
     );
 }

@@ -106,7 +106,7 @@ impl Schema {
 
         let mut subgraphs = HashMap::new();
         let mut subgraph_definition_and_names = HashMap::new();
-        if let Some(join_enum) = definitions.get_enum("join__Graph".into()) {
+        if let Some(join_enum) = definitions.get_enum("join__Graph") {
             for (subgraph_name, name, url) in join_enum.values.values().filter_map(|value| {
                 let subgraph_name = value.value.to_string();
                 let join_directive = value
@@ -217,7 +217,7 @@ impl Schema {
         self.subgraphs.get(service_name)
     }
 
-    pub(crate) fn subgraph_name(&self, subgraph_definition: &str) -> Option<&String> {
+    pub(crate) fn subgraph_name(&self, _subgraph_definition: &str) -> Option<&String> {
         // TODO[igni]: update to apollo compiler 1
         todo!();
         // self.subgraph_definition_and_names.get(subgraph_definition)

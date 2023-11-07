@@ -1,5 +1,10 @@
 //! Authorization plugin
 
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(clippy::needless_borrow)]
+#![allow(clippy::extra_unused_lifetimes)]
+
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::ops::Deref;
@@ -53,12 +58,9 @@ impl SubgraphConnector {
                     let mut field_directives: HashMap<String, Node<Directive>> = Default::default();
 
                     for (fieldname, field) in &o.fields {
-                        field
-                            .directives
-                            .get(HTTP_FIELD_DIRECTIVE_NAME)
-                            .map(|directive| {
-                                field_directives.insert(fieldname.to_string(), directive.clone());
-                            });
+                        if let Some(directive) = field.directives.get(HTTP_FIELD_DIRECTIVE_NAME) {
+                            field_directives.insert(fieldname.to_string(), directive.clone());
+                        }
                     }
 
                     field_directives_for_type.insert(typename.to_string(), field_directives);
@@ -89,7 +91,7 @@ impl SubgraphConnector {
         subgraph_name: &str,
         service: subgraph::BoxService,
     ) -> subgraph::BoxService {
-        if let Some(call_parameters) = self.metadata.get(subgraph_name) {
+        if let Some(_call_parameters) = self.metadata.get(subgraph_name) {
             todo!();
             //     let call_parameters: CallParams = call_parameters.clone();
             //     let service_name = subgraph_name.to_string();

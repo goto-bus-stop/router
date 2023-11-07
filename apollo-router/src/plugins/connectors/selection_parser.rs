@@ -41,6 +41,10 @@ impl Selection {
     }
 }
 
+// This macro is handy for tests, but it absolutely should never be used with
+// dynamic input at runtime, since it panics if the selection string fails to
+// parse for any reason.
+#[cfg(test)]
 macro_rules! selection {
     ($input:expr) => {
         if let Ok((remainder, parsed)) = Selection::parse($input) {

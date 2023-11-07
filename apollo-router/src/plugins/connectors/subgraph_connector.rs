@@ -1,5 +1,6 @@
 //! Authorization plugin
 
+// To remove once the commented code is out
 #![allow(dead_code)]
 #![allow(unused_imports)]
 #![allow(clippy::needless_borrow)]

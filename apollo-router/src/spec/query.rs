@@ -279,6 +279,7 @@ impl Query {
         Arc::new(ParsedDocumentInner { ast, executable })
     }
 
+    #[cfg(test)]
     pub(crate) fn parse(
         query: impl Into<String>,
         schema: &Schema,

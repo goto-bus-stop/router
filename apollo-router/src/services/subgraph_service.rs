@@ -889,7 +889,7 @@ async fn call_http(
     }
 
     let resp = http::Response::from_parts(parts, graphql_response);
-    Ok(dbg!(SubgraphResponse::new_from_response(resp, context)))
+    Ok(SubgraphResponse::new_from_response(resp, context))
 }
 
 enum ContentType {

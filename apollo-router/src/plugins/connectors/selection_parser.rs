@@ -1,3 +1,8 @@
+// This will be removed once ben's PR lands
+#![allow(clippy::needless_pub_self)]
+#![allow(dead_code)]
+#![allow(clippy::needless_lifetimes)]
+
 use std::hash::Hash;
 use std::hash::Hasher;
 

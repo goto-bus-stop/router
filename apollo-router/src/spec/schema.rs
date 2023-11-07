@@ -105,28 +105,31 @@ impl Schema {
         }
 
         let mut subgraphs = HashMap::new();
-        // TODO[igni]: update it for apollo compiler 1.0
-        // let mut subgraph_definition_and_names = HashMap::new();
-        // if let Some(join_enum) = definitions.get_enum("join__Graph") {
-        //     for (name, url) in join_enum.values.iter().filter_map(|(_name, value)| {
-        //         let join_directive = value.directives.get("join__graph")?;
-        //         let name = join_directive.argument_by_name("name")?.as_str()?;
-        //         let url = join_directive.argument_by_name("url")?.as_str()?;
-        //         Some((subgraph_name, name, url))
-        //     }) {
-        //         if url.is_empty() {
-        //             return Err(SchemaError::MissingSubgraphUrl(name.to_string()));
-        //         }
-        //         let url = Uri::from_str(url)
-        //             .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?;
-        //         if subgraphs.insert(name.to_string(), url).is_some() {
-        //             return Err(SchemaError::Api(format!(
-        //                 "must not have several subgraphs with same name '{name}'"
-        //             )));
-        //         }
-        //         subgraph_definition_and_names.insert(subgraph_name, name.to_string());
-        //     }
-        // }
+        let mut subgraph_definition_and_names = HashMap::new();
+        if let Some(join_enum) = definitions.get_enum("join__Graph".into()) {
+            for (subgraph_name, name, url) in join_enum.values.values().filter_map(|value| {
+                let subgraph_name = value.value.to_string();
+                let join_directive = value
+                    .directives
+                    .iter()
+                    .find(|directive| directive.name.eq_ignore_ascii_case("join__graph"))?;
+                let name = join_directive.argument_by_name("name")?.as_str()?;
+                let url = join_directive.argument_by_name("url")?.as_str()?;
+                Some((subgraph_name, name, url))
+            }) {
+                if url.is_empty() {
+                    return Err(SchemaError::MissingSubgraphUrl(name.to_string()));
+                }
+                let url = Uri::from_str(url)
+                    .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?;
+                if subgraphs.insert(name.to_string(), url).is_some() {
+                    return Err(SchemaError::Api(format!(
+                        "must not have several subgraphs with same name '{name}'"
+                    )));
+                }
+                subgraph_definition_and_names.insert(subgraph_name, name.to_string());
+            }
+        }
 
         let mut hasher = Sha256::new();
         hasher.update(sdl.as_bytes());

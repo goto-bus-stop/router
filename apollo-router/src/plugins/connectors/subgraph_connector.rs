@@ -89,201 +89,201 @@ impl SubgraphConnector {
         subgraph_name: &str,
         service: subgraph::BoxService,
     ) -> subgraph::BoxService {
-        todo!();
-        // if let Some(call_parameters) = self.metadata.get(subgraph_name) {
-        //     let call_parameters: CallParams = call_parameters.clone();
-        //     let service_name = subgraph_name.to_string();
-        //     let field_directives_for_types = self.field_directives_for_type.clone();
-        //     ServiceBuilder::new()
-        //     .checkpoint_async(move |request: subgraph::Request| {
-        //             println!("subgraph request \n{}", serde_json::to_string_pretty(&request.subgraph_request.body()).unwrap());
-        //             let service_name = service_name.clone();
+        if let Some(call_parameters) = self.metadata.get(subgraph_name) {
+            todo!();
+            //     let call_parameters: CallParams = call_parameters.clone();
+            //     let service_name = subgraph_name.to_string();
+            //     let field_directives_for_types = self.field_directives_for_type.clone();
+            //     ServiceBuilder::new()
+            //     .checkpoint_async(move |request: subgraph::Request| {
+            //             println!("subgraph request \n{}", serde_json::to_string_pretty(&request.subgraph_request.body()).unwrap());
+            //             let service_name = service_name.clone();
 
-        //             let query = request.subgraph_request.body().query.clone().unwrap();
+            //             let query = request.subgraph_request.body().query.clone().unwrap();
 
-        //             let relevant_schemas = request
-        //                 .context
-        //                 .private_entries
-        //                 .lock()
-        //                 .get::<Arc<HashMap<String, Arc<Schema>>>>()
-        //                 .cloned();
+            //             let relevant_schemas = request
+            //                 .context
+            //                 .private_entries
+            //                 .lock()
+            //                 .get::<Arc<HashMap<String, Arc<Schema>>>>()
+            //                 .cloned();
 
-        //             let query = Query::parse(
-        //                 query,
-        //                 relevant_schemas.unwrap().get(&service_name).unwrap(),
-        //                 &Default::default(),
-        //             )
-        //             .unwrap();
+            //             let query = Query::parse(
+            //                 query,
+            //                 relevant_schemas.unwrap().get(&service_name).unwrap(),
+            //                 &Default::default(),
+            //             )
+            //             .unwrap();
 
-        //             let root_field = query
-        //                 .operations
-        //                 .first()
-        //                 .unwrap()
-        //                 .selection_set
-        //                 .first()
-        //                 .unwrap();
+            //             let root_field = query
+            //                 .operations
+            //                 .first()
+            //                 .unwrap()
+            //                 .selection_set
+            //                 .first()
+            //                 .unwrap();
 
-        //             let mut fragment_root = None;
-        //             let mut root_is_list = false;
-        //             let (root_field_name, root_field_type) = if let Selection::Field {
-        //                 name,
-        //                 field_type,
-        //                 selection_set,
-        //                 ..
-        //             } = root_field
-        //             {
-        //                 let field_type = selection_set.as_ref().and_then(|selection_set| {
-        //                     selection_set
-        //                         .iter()
-        //                         .any(|selection| {
-        //                             if let Selection::Field {
-        //                                 name,
-        //                                 ..
-        //                             } = selection
-        //                             {
-        //                                 name.as_str() == "__typename"
-        //                             } else {
-        //                                 false
-        //                             }
-        //                         })
-        //                         .then(|| {
-        //                             match &field_type.0 {
-        //                                 Type::List{..} => {
-        //                                     root_is_list = true;
-        //                                 }
-        //                                 Type::NonNull {
-        //                                     ty,..
-        //                                 } => {
-        //                                     root_is_list = ty.is_list()
-        //                                 }
-        //                                 _ => {}
-        //                             }
-        //                             hir_type_name(&field_type.0).to_string()
-        //                         })
-        //                 });
+            //             let mut fragment_root = None;
+            //             let mut root_is_list = false;
+            //             let (root_field_name, root_field_type) = if let Selection::Field {
+            //                 name,
+            //                 field_type,
+            //                 selection_set,
+            //                 ..
+            //             } = root_field
+            //             {
+            //                 let field_type = selection_set.as_ref().and_then(|selection_set| {
+            //                     selection_set
+            //                         .iter()
+            //                         .any(|selection| {
+            //                             if let Selection::Field {
+            //                                 name,
+            //                                 ..
+            //                             } = selection
+            //                             {
+            //                                 name.as_str() == "__typename"
+            //                             } else {
+            //                                 false
+            //                             }
+            //                         })
+            //                         .then(|| {
+            //                             match &field_type.0 {
+            //                                 Type::List{..} => {
+            //                                     root_is_list = true;
+            //                                 }
+            //                                 Type::NonNull {
+            //                                     ty,..
+            //                                 } => {
+            //                                     root_is_list = ty.is_list()
+            //                                 }
+            //                                 _ => {}
+            //                             }
+            //                             hir_type_name(&field_type.0).to_string()
+            //                         })
+            //                 });
 
-        //                 if "_entities" == name.as_str() {
-        //                     fragment_root = selection_set.as_ref().and_then(|selection_set| {
-        //                         selection_set.first().and_then(|selection| {
-        //                             if let Selection::InlineFragment { selection_set, .. } =
-        //                                 selection
-        //                             {
-        //                                 selection_set.first().and_then(|selection| {
-        //                                     if let Selection::Field {
-        //                                         name, field_type, ..
-        //                                     } = selection
-        //                                     {
-        //                                         match &field_type.0 {
-        //                                             Type::List{..} => {
-        //                                                 root_is_list = true;
-        //                                             }
-        //                                             Type::NonNull {
-        //                                                 ty,..
-        //                                             } => {
-        //                                                 root_is_list = ty.is_list()
-        //                                             }
-        //                                             _ => {}
-        //                                         }
-        //                                         Some((
-        //                                             name.as_str().to_string(),
-        //                                             hir_type_name(&field_type.0).to_string(),
-        //                                         ))
-        //                                     } else {
-        //                                         None
-        //                                     }
-        //                                 })
-        //                             } else {
-        //                                 None
-        //                             }
-        //                         })
-        //                     });
-        //                 }
-        //                 (name.as_str().to_string(), field_type)
-        //             } else {
-        //                 // TODO: maybe don't panic
-        //                 panic!("no root field?! Oo");
-        //             };
+            //                 if "_entities" == name.as_str() {
+            //                     fragment_root = selection_set.as_ref().and_then(|selection_set| {
+            //                         selection_set.first().and_then(|selection| {
+            //                             if let Selection::InlineFragment { selection_set, .. } =
+            //                                 selection
+            //                             {
+            //                                 selection_set.first().and_then(|selection| {
+            //                                     if let Selection::Field {
+            //                                         name, field_type, ..
+            //                                     } = selection
+            //                                     {
+            //                                         match &field_type.0 {
+            //                                             Type::List{..} => {
+            //                                                 root_is_list = true;
+            //                                             }
+            //                                             Type::NonNull {
+            //                                                 ty,..
+            //                                             } => {
+            //                                                 root_is_list = ty.is_list()
+            //                                             }
+            //                                             _ => {}
+            //                                         }
+            //                                         Some((
+            //                                             name.as_str().to_string(),
+            //                                             hir_type_name(&field_type.0).to_string(),
+            //                                         ))
+            //                                     } else {
+            //                                         None
+            //                                     }
+            //                                 })
+            //                             } else {
+            //                                 None
+            //                             }
+            //                         })
+            //                     });
+            //                 }
+            //                 (name.as_str().to_string(), field_type)
+            //             } else {
+            //                 // TODO: maybe don't panic
+            //                 panic!("no root field?! Oo");
+            //             };
 
-        //             let mut requests_to_send = if root_is_list {
-        //                 let call_parameters = call_parameters.list.clone().expect("we should have a list endpoint here...");
-        //                 call_parameters.into_requests(&request.subgraph_request, root_field_type.as_ref().and_then(|f| field_directives_for_types.get(f).cloned()).unwrap_or_default())
-        //             } else {
-        //                 let call_parameters = &call_parameters.object;
-        //                call_parameters.into_requests(&request.subgraph_request, root_field_type.as_ref().and_then(|f| field_directives_for_types.get(f).cloned()).unwrap_or_default())
-        //             };
+            //             let mut requests_to_send = if root_is_list {
+            //                 let call_parameters = call_parameters.list.clone().expect("we should have a list endpoint here...");
+            //                 call_parameters.into_requests(&request.subgraph_request, root_field_type.as_ref().and_then(|f| field_directives_for_types.get(f).cloned()).unwrap_or_default())
+            //             } else {
+            //                 let call_parameters = &call_parameters.object;
+            //                call_parameters.into_requests(&request.subgraph_request, root_field_type.as_ref().and_then(|f| field_directives_for_types.get(f).cloned()).unwrap_or_default())
+            //             };
 
-        //             // TODO: traverse query roots!
+            //             // TODO: traverse query roots!
 
-        //             async move {
-        //                 let (parts, body) = if requests_to_send.len() > 1 {
+            //             async move {
+            //                 let (parts, body) = if requests_to_send.len() > 1 {
 
-        //                     let stuff = futures::future::join_all(requests_to_send.into_iter().map(|(request, type_name)| make_request(request, root_field_type.clone(), type_name))).await;
+            //                     let stuff = futures::future::join_all(requests_to_send.into_iter().map(|(request, type_name)| make_request(request, root_field_type.clone(), type_name))).await;
 
-        //                     // let (all_parts, all_bodies, type_name): (Vec<http::response::Parts>, Vec<serde_json::Value>, Option<String>) = stuff.unzip();
+            //                     // let (all_parts, all_bodies, type_name): (Vec<http::response::Parts>, Vec<serde_json::Value>, Option<String>) = stuff.unzip();
 
-        //                     let mut value = if root_is_list {
-        //                         serde_json_bytes::Value::Array(Vec::with_capacity(stuff.len()))
-        //                     } else {
-        //                         serde_json_bytes::Value::Null
-        //                     };
+            //                     let mut value = if root_is_list {
+            //                         serde_json_bytes::Value::Array(Vec::with_capacity(stuff.len()))
+            //                     } else {
+            //                         serde_json_bytes::Value::Null
+            //                     };
 
-        //                     // todo: figure this out
-        //                     let mut parts = None;
+            //                     // todo: figure this out
+            //                     let mut parts = None;
 
-        //                     for (p, mut body, t) in stuff {
-        //                         parts = Some(p);
+            //                     for (p, mut body, t) in stuff {
+            //                         parts = Some(p);
 
-        //                         if body.is_array() {
-        //                             for item in body.as_array_mut().unwrap() {
-        //                                 item["__typename"] = t.clone().into();
-        //                             }
-        //                         } else {
-        //                             body["__typename"] = t.clone().into();
-        //                         }
-        //                         use crate::json_ext::ValueExt;
-        //                         value.deep_merge(body);
-        //                     }
+            //                         if body.is_array() {
+            //                             for item in body.as_array_mut().unwrap() {
+            //                                 item["__typename"] = t.clone().into();
+            //                             }
+            //                         } else {
+            //                             body["__typename"] = t.clone().into();
+            //                         }
+            //                         use crate::json_ext::ValueExt;
+            //                         value.deep_merge(body);
+            //                     }
 
-        //                     let value = if root_field_name == "_entities" {
-        //                             serde_json::json! {{ root_field_name: [
-        //                                 { fragment_root.unwrap().0 : value }
-        //                             ] }}
-        //                         } else {
-        //                             serde_json::json! {{ root_field_name: value }}
-        //                         };
+            //                     let value = if root_field_name == "_entities" {
+            //                             serde_json::json! {{ root_field_name: [
+            //                                 { fragment_root.unwrap().0 : value }
+            //                             ] }}
+            //                         } else {
+            //                             serde_json::json! {{ root_field_name: value }}
+            //                         };
 
-        //                     (parts.unwrap(), value)
-        //                 } else {
-        //                     let (request_to_send, type_name) = requests_to_send.pop().expect("there should be at least 1 request to send");
-        //                    let (parts, value, _) = make_request(request_to_send , root_field_type.clone(), type_name).await;
+            //                     (parts.unwrap(), value)
+            //                 } else {
+            //                     let (request_to_send, type_name) = requests_to_send.pop().expect("there should be at least 1 request to send");
+            //                    let (parts, value, _) = make_request(request_to_send , root_field_type.clone(), type_name).await;
 
-        //                     let value = if root_field_name == "_entities" {
-        //                         serde_json::json! {{ root_field_name: [{ fragment_root.unwrap().0 : value }] }}
-        //                     } else {
-        //                         serde_json::json! {{ root_field_name: value }}
-        //                     };
+            //                     let value = if root_field_name == "_entities" {
+            //                         serde_json::json! {{ root_field_name: [{ fragment_root.unwrap().0 : value }] }}
+            //                     } else {
+            //                         serde_json::json! {{ root_field_name: value }}
+            //                     };
 
-        //                     (parts, value)
-        //                 };
+            //                     (parts, value)
+            //                 };
 
-        //                 let graphql_response =
-        //                     crate::graphql::Response::builder().data(body).build();
+            //                 let graphql_response =
+            //                     crate::graphql::Response::builder().data(body).build();
 
-        //                 let resp = http::Response::from_parts(parts, graphql_response);
-        //                 Ok(ControlFlow::Break(
-        //                     crate::services::SubgraphResponse::new_from_response(
-        //                         resp,
-        //                         request.context,
-        //                     ),
-        //                 ))
-        //             }
-        //         })
-        //         .buffered()
-        //         .service(service)
-        //         .boxed()
-        // } else {
-        //     service
-        // }
+            //                 let resp = http::Response::from_parts(parts, graphql_response);
+            //                 Ok(ControlFlow::Break(
+            //                     crate::services::SubgraphResponse::new_from_response(
+            //                         resp,
+            //                         request.context,
+            //                     ),
+            //                 ))
+            //             }
+            //         })
+            //         .buffered()
+            //         .service(service)
+            //         .boxed()
+        } else {
+            service
+        }
     }
 }
 

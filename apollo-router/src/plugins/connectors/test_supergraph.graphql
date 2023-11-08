@@ -1,0 +1,149 @@
+schema
+  @core(feature: "https://specs.apollo.dev/core/v0.1")
+  @core(feature: "https://specs.apollo.dev/join/v0.1") {
+  query: Query
+}
+
+directive @core(feature: String!) repeatable on SCHEMA
+
+directive @join__field(
+  graph: join__Graph
+  requires: join__FieldSet
+  provides: join__FieldSet
+) on FIELD_DEFINITION
+
+directive @join__type(
+  graph: join__Graph!
+  key: join__FieldSet
+) repeatable on OBJECT | INTERFACE
+
+directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+scalar join__FieldSet
+
+enum join__Graph {
+  CONTACTS @join__graph(name: "contacts", url: "http://localhost:4002")
+  NOTES @join__graph(name: "notes", url: "http://localhost:4002")
+}
+
+############ CONNECTORS STUFF
+
+scalar URLPathTemplate # @specifiedBy(url: "https://specs.apollo.dev/source/v1.0")
+scalar JSONSelection # @specifiedBy(url: "https://specs.apollo.dev/source/v1.0")
+scalar JSON
+
+directive @source_api(name: String!, http: HTTPSourceAPI) on ENUM_VALUE
+
+input HTTPSourceAPI {
+  base_url: String!
+  default: Boolean
+  headers: [HTTPHeaderMapping!]
+}
+
+input HTTPHeaderMapping {
+  name: String!
+  as: String
+  value: String
+}
+
+directive @source_type(
+  api: String
+  http: HTTPSourceType
+  selection: JSONSelection
+  key_type_map: KeyTypeMap
+) repeatable on OBJECT | INTERFACE | UNION
+
+input HTTPSourceType {
+  GET: URLPathTemplate
+  POST: URLPathTemplate
+  headers: [HTTPHeaderMapping!]
+  body: JSONSelection
+}
+
+input KeyTypeMap {
+  key: String!
+  type_map: JSON
+}
+
+directive @source_field(
+  api: String
+  http: HTTPSourceField
+  selection: JSONSelection
+) repeatable on FIELD_DEFINITION
+
+input HTTPSourceField {
+  GET: URLPathTemplate
+  POST: URLPathTemplate
+  PUT: URLPathTemplate
+  PATCH: URLPathTemplate
+  DELETE: URLPathTemplate
+  headers: [HTTPHeaderMapping!]
+  body: JSONSelection
+}
+
+########### COMPOSED STUFF
+
+enum SOURCE_API {
+  CONTACTS
+    @source_api(
+      name: "rest_contacts"
+      http: {
+        base_url: "http://localhost:4002/contacts/"
+        default: true
+        headers: [{ name: "x-test", value: "test1234" }]
+      }
+    )
+  NOTES
+    @source_api(
+      name: "rest_notes"
+      http: { base_url: "http://localhost:4002/notes/" }
+    )
+  LEGACY_CONTACTS
+    @source_api(
+      name: "legacy_contacts"
+      http: { base_url: "http://localhost:4002/legacy/contacts/" }
+    )
+}
+
+############ ACTUAL SUPERGRAPH
+
+type Query {
+  contact(id: ID!): Contact @join__field(graph: CONTACTS)
+  contacts: [Contact]!
+    @join__field(graph: CONTACTS)
+    @source_field(api: CONTACTS, http: { GET: "/contacts" })
+}
+
+type Contact
+  @join__owner(graph: CONTACTS)
+  @join__type(graph: CONTACTS, key: "id")
+  @join__type(graph: NOTES, key: "id")
+  @source_type(api: CONTACTS, http: { GET: "/contacts/{contactId}" }) {
+  id: ID! @join__field(graph: CONTACTS)
+  name: String
+  email: String
+  notes: [Note]
+    @join__field(graph: NOTES)
+    @source_field(api: NOTES, http: { GET: "/contacts/{contactId}/notes" })
+  note(noteId: ID!): Note @join__field(graph: NOTES)
+}
+
+type Note
+  @join__owner(graph: NOTES)
+  @join__type(graph: NOTES, key: "id")
+  @source_type(
+    api: NOTES
+    http: { GET: "/contacts/{contactId}/notes/{noteId}" }
+  ) {
+  contact: Contact @join__field(graph: CONTACTS)
+  id: ID! @join__field(graph: NOTES)
+  title: String
+  text: String
+  contactName: String
+    @source_field(
+      api: LEGACY_CONTACTS
+      http: { GET: "/notes?id={noteId}", body: ".contact.name" }
+    )
+}

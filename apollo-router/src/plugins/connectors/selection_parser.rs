@@ -11,6 +11,7 @@ use nom::branch::alt;
 use nom::character::complete::char;
 use nom::character::complete::multispace0;
 use nom::character::complete::one_of;
+use nom::combinator::all_consuming;
 use nom::combinator::map;
 use nom::combinator::opt;
 use nom::combinator::recognize;
@@ -24,7 +25,113 @@ use serde_json::json;
 use serde_json::Map;
 use serde_json::Value as JSON;
 
-// Selection ::= NamedSelection+ | PathSelection
+// Consumes any amount of whitespace and/or comments starting with # until the
+// end of the line.
+fn spaces_or_comments(input: &str) -> IResult<&str, &str> {
+    let mut suffix = input;
+    loop {
+        (suffix, _) = multispace0(suffix)?;
+        let mut chars = suffix.chars();
+        if let Some('#') = chars.next() {
+            for c in chars.by_ref() {
+                if c == '\n' {
+                    break;
+                }
+            }
+            suffix = chars.as_str();
+        } else {
+            return Ok((suffix, &input[0..input.len() - suffix.len()]));
+        }
+    }
+}
+
+#[test]
+fn test_spaces_or_comments() {
+    assert_eq!(spaces_or_comments(""), Ok(("", "")));
+    assert_eq!(spaces_or_comments(" "), Ok(("", " ")));
+    assert_eq!(spaces_or_comments("  "), Ok(("", "  ")));
+
+    assert_eq!(spaces_or_comments("#"), Ok(("", "#")));
+    assert_eq!(spaces_or_comments("# "), Ok(("", "# ")));
+    assert_eq!(spaces_or_comments(" # "), Ok(("", " # ")));
+    assert_eq!(spaces_or_comments(" #"), Ok(("", " #")));
+
+    assert_eq!(spaces_or_comments("#\n"), Ok(("", "#\n")));
+    assert_eq!(spaces_or_comments("# \n"), Ok(("", "# \n")));
+    assert_eq!(spaces_or_comments(" # \n"), Ok(("", " # \n")));
+    assert_eq!(spaces_or_comments(" #\n"), Ok(("", " #\n")));
+    assert_eq!(spaces_or_comments(" # \n "), Ok(("", " # \n ")));
+
+    assert_eq!(spaces_or_comments("hello"), Ok(("hello", "")));
+    assert_eq!(spaces_or_comments(" hello"), Ok(("hello", " ")));
+    assert_eq!(spaces_or_comments("hello "), Ok(("hello ", "")));
+    assert_eq!(spaces_or_comments("hello#"), Ok(("hello#", "")));
+    assert_eq!(spaces_or_comments("hello #"), Ok(("hello #", "")));
+    assert_eq!(spaces_or_comments("hello # "), Ok(("hello # ", "")));
+    assert_eq!(spaces_or_comments("   hello # "), Ok(("hello # ", "   ")));
+    assert_eq!(
+        spaces_or_comments("  hello # world "),
+        Ok(("hello # world ", "  "))
+    );
+
+    assert_eq!(spaces_or_comments("#comment"), Ok(("", "#comment")));
+    assert_eq!(spaces_or_comments(" #comment"), Ok(("", " #comment")));
+    assert_eq!(spaces_or_comments("#comment "), Ok(("", "#comment ")));
+    assert_eq!(spaces_or_comments("#comment#"), Ok(("", "#comment#")));
+    assert_eq!(spaces_or_comments("#comment #"), Ok(("", "#comment #")));
+    assert_eq!(spaces_or_comments("#comment # "), Ok(("", "#comment # ")));
+    assert_eq!(
+        spaces_or_comments("  #comment # world "),
+        Ok(("", "  #comment # world "))
+    );
+    assert_eq!(
+        spaces_or_comments("  # comment # world "),
+        Ok(("", "  # comment # world "))
+    );
+
+    assert_eq!(
+        spaces_or_comments("  # comment\nnot a comment"),
+        Ok(("not a comment", "  # comment\n"))
+    );
+    assert_eq!(
+        spaces_or_comments("  # comment\nnot a comment\n"),
+        Ok(("not a comment\n", "  # comment\n"))
+    );
+    assert_eq!(
+        spaces_or_comments("not a comment\n  # comment\nasdf"),
+        Ok(("not a comment\n  # comment\nasdf", ""))
+    );
+
+    #[rustfmt::skip]
+    assert_eq!(spaces_or_comments("
+      # This is a comment
+      # And so is this
+      not a comment
+    "), Ok(("not a comment\n    ", "
+      # This is a comment
+      # And so is this\n      ")));
+
+    #[rustfmt::skip]
+    assert_eq!(spaces_or_comments("
+        # This is a comment
+        # And so is this
+        not a comment
+    "), Ok(("not a comment\n    ", "
+        # This is a comment
+        # And so is this\n        ")));
+
+    #[rustfmt::skip]
+    assert_eq!(
+        spaces_or_comments("
+        # This is a comment
+        not a comment
+        # Another comment"),
+        Ok(("not a comment\n        # Another comment", "
+        # This is a comment\n        ")),
+    );
+}
+
+// Selection ::= NamedSelection* StarSelection? | PathSelection
 
 #[derive(Debug, PartialEq, Clone)]
 pub(super) enum Selection {
@@ -38,10 +145,19 @@ pub(super) enum Selection {
 impl Selection {
     fn parse(input: &str) -> IResult<&str, Self> {
         alt((
-            map(many1(NamedSelection::parse), |selections| {
-                Self::Named(SubSelection { selections })
-            }),
-            map(PathSelection::parse, Self::Path),
+            all_consuming(map(
+                tuple((
+                    many0(NamedSelection::parse),
+                    // When a * selection is used, it must be the last selection
+                    // in the sequence, since it is not a NamedSelection.
+                    opt(StarSelection::parse),
+                    // In case there were no named selections and no * selection, we
+                    // still want to consume any space before the end of the input.
+                    spaces_or_comments,
+                )),
+                |(selections, star, _)| Self::Named(SubSelection { selections, star }),
+            )),
+            all_consuming(map(PathSelection::parse, Self::Path)),
         ))(input)
     }
 }
@@ -64,9 +180,26 @@ macro_rules! selection {
 #[test]
 fn test_selection() {
     assert_eq!(
+        selection!(""),
+        Selection::Named(SubSelection {
+            selections: vec![],
+            star: None,
+        }),
+    );
+
+    assert_eq!(
+        selection!("   "),
+        Selection::Named(SubSelection {
+            selections: vec![],
+            star: None,
+        }),
+    );
+
+    assert_eq!(
         selection!("hello"),
         Selection::Named(SubSelection {
-            selections: vec![NamedSelection::Field(None, "hello".to_string(), None),]
+            selections: vec![NamedSelection::Field(None, "hello".to_string(), None),],
+            star: None,
         }),
     );
 
@@ -92,7 +225,8 @@ fn test_selection() {
                     ],
                     None
                 ),
-            )]
+            )],
+            star: None,
         }),
     );
 
@@ -114,7 +248,8 @@ fn test_selection() {
                     ),
                 ),
                 NamedSelection::Field(None, "after".to_string(), None),
-            ]
+            ],
+            star: None,
         }),
     );
 
@@ -135,11 +270,13 @@ fn test_selection() {
                             NamedSelection::Field(None, "nested".to_string(), None),
                             NamedSelection::Field(None, "names".to_string(), None),
                         ],
+                        star: None,
                     }),
                 ),
             ),
             NamedSelection::Field(None, "after".to_string(), None),
         ],
+        star: None,
     });
 
     assert_eq!(
@@ -154,13 +291,22 @@ fn test_selection() {
 
     assert_eq!(
         selection!(
-            "topLevelAlias: topLevelField {
+            "
+            # Comments are supported because we parse them as whitespace
+            topLevelAlias: topLevelField {
+                # Non-identifier properties must be aliased as an identifier
                 nonIdentifier: 'property name with spaces'
+
+                # This extracts the value located at the given path and applies a
+                # selection set to it before renaming the result to pathSelection
                 pathSelection: .some.nested.path {
                     still: yet
                     more
                     properties
                 }
+
+                # An aliased SubSelection of fields nests the fields together
+                # under the given alias
                 siblingGroup: { brother sister }
             }"
         ),
@@ -201,6 +347,7 @@ fn test_selection() {
                                         NamedSelection::Field(None, "more".to_string(), None,),
                                         NamedSelection::Field(None, "properties".to_string(), None,),
                                     ],
+                                    star: None,
                                 })
                             ),
                         ),
@@ -213,11 +360,14 @@ fn test_selection() {
                                     NamedSelection::Field(None, "brother".to_string(), None,),
                                     NamedSelection::Field(None, "sister".to_string(), None,),
                                 ],
+                                star: None,
                             },
                         ),
                     ],
+                    star: None,
                 }),
-            ),]
+            )],
+            star: None,
         }),
     );
 }
@@ -296,6 +446,7 @@ fn test_named_selection() {
             selection!(input),
             Selection::Named(SubSelection {
                 selections: vec![expected],
+                star: None,
             }),
         );
     }
@@ -313,6 +464,7 @@ fn test_named_selection() {
             "hello".to_string(),
             Some(SubSelection {
                 selections: vec![NamedSelection::Field(None, "world".to_string(), None)],
+                star: None,
             }),
         ),
         "hello",
@@ -351,6 +503,7 @@ fn test_named_selection() {
             "hello".to_string(),
             Some(SubSelection {
                 selections: vec![NamedSelection::Field(None, "world".to_string(), None)],
+                star: None,
             }),
         ),
         "hi",
@@ -368,6 +521,7 @@ fn test_named_selection() {
                     NamedSelection::Field(None, "world".to_string(), None),
                     NamedSelection::Field(None, "again".to_string(), None),
                 ],
+                star: None,
             }),
         ),
         "hey",
@@ -382,6 +536,7 @@ fn test_named_selection() {
             "hello world".to_string(),
             Some(SubSelection {
                 selections: vec![NamedSelection::Field(None, "again".to_string(), None)],
+                star: None,
             }),
         ),
         "hey",
@@ -414,11 +569,12 @@ pub(super) enum PathSelection {
 impl PathSelection {
     fn parse(input: &str) -> IResult<&str, Self> {
         tuple((
-            multispace0,
+            spaces_or_comments,
             many1(preceded(char('.'), Property::parse)),
             opt(SubSelection::parse),
+            spaces_or_comments,
         ))(input)
-        .map(|(input, (_, path, selection))| (input, Self::from_slice(&path, selection)))
+        .map(|(input, (_, path, selection, _))| (input, Self::from_slice(&path, selection)))
     }
 
     fn from_slice(properties: &[Property], selection: Option<SubSelection>) -> Self {
@@ -463,6 +619,7 @@ fn test_path_selection() {
             ],
             Some(SubSelection {
                 selections: vec![NamedSelection::Field(None, "hello".to_string(), None)],
+                star: None,
             }),
         ),
     );
@@ -495,39 +652,59 @@ fn test_path_selection() {
                     "my ego".to_string(),
                     None,
                 )],
+                star: None,
             }),
         ),
     );
 }
 
-// SubSelection ::= "{" NamedSelection+ "}"
+// SubSelection ::= "{" NamedSelection* StarSelection? "}"
 
 #[derive(Debug, PartialEq, Clone)]
 pub(super) struct SubSelection {
     selections: Vec<NamedSelection>,
+    star: Option<StarSelection>,
 }
 
 impl SubSelection {
     fn parse(input: &str) -> IResult<&str, Self> {
         tuple((
-            multispace0,
+            spaces_or_comments,
             char('{'),
-            many1(NamedSelection::parse),
+            many0(NamedSelection::parse),
+            // Note that when a * selection is used, it must be the last
+            // selection in the SubSelection, since it does not count as a
+            // NamedSelection, and is stored as a separate field from the
+            // selections vector.
+            opt(StarSelection::parse),
+            spaces_or_comments,
             char('}'),
-            multispace0,
+            spaces_or_comments,
         ))(input)
-        .map(|(input, (_, _, selections, _, _))| (input, Self { selections }))
+        .map(|(input, (_, _, selections, star, _, _, _))| (input, Self { selections, star }))
     }
 }
 
 #[test]
 fn test_subselection() {
     assert_eq!(
+        SubSelection::parse(" { \n } "),
+        Ok((
+            "",
+            SubSelection {
+                selections: vec![],
+                star: None,
+            },
+        )),
+    );
+
+    assert_eq!(
         SubSelection::parse("{hello}"),
         Ok((
             "",
             SubSelection {
                 selections: vec![NamedSelection::Field(None, "hello".to_string(), None),],
+                star: None,
             },
         )),
     );
@@ -538,6 +715,7 @@ fn test_subselection() {
             "",
             SubSelection {
                 selections: vec![NamedSelection::Field(None, "hello".to_string(), None),],
+                star: None,
             },
         )),
     );
@@ -548,6 +726,7 @@ fn test_subselection() {
             "",
             SubSelection {
                 selections: vec![NamedSelection::Field(None, "padded".to_string(), None),],
+                star: None,
             },
         )),
     );
@@ -561,6 +740,7 @@ fn test_subselection() {
                     NamedSelection::Field(None, "hello".to_string(), None),
                     NamedSelection::Field(None, "world".to_string(), None),
                 ],
+                star: None,
             },
         )),
     );
@@ -575,10 +755,172 @@ fn test_subselection() {
                     "hello".to_string(),
                     Some(SubSelection {
                         selections: vec![NamedSelection::Field(None, "world".to_string(), None),],
+                        star: None,
                     })
                 ),],
+                star: None,
             },
         )),
+    );
+}
+
+// StarSelection ::= Alias? "*" SubSelection?
+
+#[derive(Debug, PartialEq, Clone)]
+struct StarSelection(Option<Alias>, Option<Box<SubSelection>>);
+
+impl StarSelection {
+    fn parse(input: &str) -> IResult<&str, Self> {
+        tuple((
+            // The spaces_or_comments separators are necessary here because
+            // Alias::parse and SubSelection::parse only consume surrounding
+            // spaces when they match, and they are both optional here.
+            opt(Alias::parse),
+            spaces_or_comments,
+            char('*'),
+            spaces_or_comments,
+            opt(SubSelection::parse),
+        ))(input)
+        .map(|(remainder, (alias, _, _, _, selection))| {
+            (remainder, Self(alias, selection.map(Box::new)))
+        })
+    }
+}
+
+#[test]
+fn test_star_selection() {
+    assert_eq!(
+        StarSelection::parse("rest: *"),
+        Ok((
+            "",
+            StarSelection(
+                Some(Alias {
+                    name: "rest".to_string(),
+                }),
+                None
+            ),
+        )),
+    );
+
+    assert_eq!(
+        StarSelection::parse("*"),
+        Ok(("", StarSelection(None, None),)),
+    );
+
+    assert_eq!(
+        StarSelection::parse(" * "),
+        Ok(("", StarSelection(None, None),)),
+    );
+
+    assert_eq!(
+        StarSelection::parse(" * { hello } "),
+        Ok((
+            "",
+            StarSelection(
+                None,
+                Some(Box::new(SubSelection {
+                    selections: vec![NamedSelection::Field(None, "hello".to_string(), None),],
+                    star: None,
+                }))
+            ),
+        )),
+    );
+
+    assert_eq!(
+        StarSelection::parse("hi: * { hello }"),
+        Ok((
+            "",
+            StarSelection(
+                Some(Alias {
+                    name: "hi".to_string(),
+                }),
+                Some(Box::new(SubSelection {
+                    selections: vec![NamedSelection::Field(None, "hello".to_string(), None),],
+                    star: None,
+                }))
+            ),
+        )),
+    );
+
+    assert_eq!(
+        StarSelection::parse("alias: * { x y z rest: * }"),
+        Ok((
+            "",
+            StarSelection(
+                Some(Alias {
+                    name: "alias".to_string()
+                }),
+                Some(Box::new(SubSelection {
+                    selections: vec![
+                        NamedSelection::Field(None, "x".to_string(), None),
+                        NamedSelection::Field(None, "y".to_string(), None),
+                        NamedSelection::Field(None, "z".to_string(), None),
+                    ],
+                    star: Some(StarSelection(
+                        Some(Alias {
+                            name: "rest".to_string(),
+                        }),
+                        None
+                    )),
+                })),
+            ),
+        )),
+    );
+
+    assert_eq!(
+        selection!(" before alias: * { * { a b c } } "),
+        Selection::Named(SubSelection {
+            selections: vec![NamedSelection::Field(None, "before".to_string(), None),],
+            star: Some(StarSelection(
+                Some(Alias {
+                    name: "alias".to_string()
+                }),
+                Some(Box::new(SubSelection {
+                    selections: vec![],
+                    star: Some(StarSelection(
+                        None,
+                        Some(Box::new(SubSelection {
+                            selections: vec![
+                                NamedSelection::Field(None, "a".to_string(), None),
+                                NamedSelection::Field(None, "b".to_string(), None),
+                                NamedSelection::Field(None, "c".to_string(), None),
+                            ],
+                            star: None,
+                        }))
+                    )),
+                })),
+            )),
+        }),
+    );
+
+    assert_eq!(
+        selection!(" before group: { * { a b c } } after "),
+        Selection::Named(SubSelection {
+            selections: vec![
+                NamedSelection::Field(None, "before".to_string(), None),
+                NamedSelection::Group(
+                    Alias {
+                        name: "group".to_string(),
+                    },
+                    SubSelection {
+                        selections: vec![],
+                        star: Some(StarSelection(
+                            None,
+                            Some(Box::new(SubSelection {
+                                selections: vec![
+                                    NamedSelection::Field(None, "a".to_string(), None),
+                                    NamedSelection::Field(None, "b".to_string(), None),
+                                    NamedSelection::Field(None, "c".to_string(), None),
+                                ],
+                                star: None,
+                            }))
+                        )),
+                    },
+                ),
+                NamedSelection::Field(None, "after".to_string(), None),
+            ],
+            star: None,
+        }),
     );
 }
 
@@ -591,7 +933,7 @@ struct Alias {
 
 impl Alias {
     fn parse(input: &str) -> IResult<&str, Self> {
-        tuple((parse_identifier, char(':'), multispace0))(input)
+        tuple((parse_identifier, char(':'), spaces_or_comments))(input)
             .map(|(input, (name, _, _))| (input, Self { name }))
     }
 }
@@ -684,14 +1026,14 @@ fn test_property() {
 
 fn parse_identifier(input: &str) -> IResult<&str, String> {
     tuple((
-        multispace0,
+        spaces_or_comments,
         recognize(pair(
             one_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_"),
             many0(one_of(
                 "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789",
             )),
         )),
-        multispace0,
+        spaces_or_comments,
     ))(input)
     .map(|(input, (_, name, _))| (input, name.to_string()))
 }
@@ -718,7 +1060,7 @@ fn test_identifier() {
 //     | '"' ('\"' | [^"])* '"'
 
 fn parse_string_literal(input: &str) -> IResult<&str, String> {
-    let input = multispace0(input).map(|(input, _)| input)?;
+    let input = spaces_or_comments(input).map(|(input, _)| input)?;
     let mut input_char_indices = input.char_indices();
 
     match input_char_indices.next() {
@@ -741,7 +1083,7 @@ fn parse_string_literal(input: &str) -> IResult<&str, String> {
                     continue;
                 }
                 if c == quote {
-                    remainder = Some(multispace0(&input[i + 1..])?.0);
+                    remainder = Some(spaces_or_comments(&input[i + 1..])?.0);
                     break;
                 }
                 chars.push(c);
@@ -1060,14 +1402,98 @@ impl ApplyTo for SubSelection {
         }
 
         let mut output = Map::new();
+        let mut input_names = IndexSet::new();
 
         for named_selection in &self.selections {
             let value = named_selection.apply_to_path(data, input_path, errors);
+
             // If value is an object, extend output with its keys and their values.
             if let Some(JSON::Object(key_and_value)) = value {
                 output.extend(key_and_value);
             }
+
+            // If there is a star selection, we need to keep track of the
+            // *original* names of the fields that were explicitly selected,
+            // because we will need to omit them from what the * matches.
+            if self.star.is_some() {
+                match named_selection {
+                    NamedSelection::Field(_, name, _) => {
+                        input_names.insert(name.as_str());
+                    }
+                    NamedSelection::Quoted(_, name, _) => {
+                        input_names.insert(name.as_str());
+                    }
+                    NamedSelection::Path(_, path_selection) => {
+                        if let PathSelection::Path(head, _) = path_selection {
+                            match head {
+                                Property::Field(name) | Property::Quoted(name) => {
+                                    input_names.insert(name.as_str());
+                                }
+                                // While Property::Index may be used to
+                                // represent the input_path during apply_to_path
+                                // when arrays are encountered, it will never be
+                                // used to represent the parsed structure of any
+                                // actual selection string, becase arrays are
+                                // processed automatically/implicitly and their
+                                // indices are never explicitly selected. This
+                                // means the numeric Property::Index case cannot
+                                // affect the keys selected by * selections, so
+                                // input_names does not need updating here.
+                                Property::Index(_) => {}
+                            };
+                        }
+                    }
+                    // The contents of groups do not affect the keys matched by
+                    // * selections in the parent object (outside the group).
+                    NamedSelection::Group(_, _) => {}
+                };
+            }
         }
+
+        match &self.star {
+            // Aliased but not subselected, e.g. "a b c rest: *"
+            Some(StarSelection(Some(alias), None)) => {
+                let mut star_output = Map::new();
+                for (key, value) in data.as_object().unwrap() {
+                    if !input_names.contains(key.as_str()) {
+                        star_output.insert(key.clone(), value.clone());
+                    }
+                }
+                output.insert(alias.name.clone(), JSON::Object(star_output));
+            }
+            // Aliased and subselected, e.g. "alias: * { hello }"
+            Some(StarSelection(Some(alias), Some(selection))) => {
+                let mut star_output = Map::new();
+                for (key, value) in data.as_object().unwrap() {
+                    if !input_names.contains(key.as_str()) {
+                        if let Some(selected) = selection.apply_to_path(value, input_path, errors) {
+                            star_output.insert(key.clone(), selected);
+                        }
+                    }
+                }
+                output.insert(alias.name.clone(), JSON::Object(star_output));
+            }
+            // Not aliased but subselected, e.g. "parent { * { hello } }"
+            Some(StarSelection(None, Some(selection))) => {
+                for (key, value) in data.as_object().unwrap() {
+                    if !input_names.contains(key.as_str()) {
+                        if let Some(selected) = selection.apply_to_path(value, input_path, errors) {
+                            output.insert(key.clone(), selected);
+                        }
+                    }
+                }
+            }
+            // Neither aliased nor subselected, e.g. "parent { * }" or just "*"
+            Some(StarSelection(None, None)) => {
+                for (key, value) in data.as_object().unwrap() {
+                    if !input_names.contains(key.as_str()) {
+                        output.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+            // No * selection present, e.g. "parent { just some properties }"
+            None => {}
+        };
 
         Some(JSON::Object(output))
     }
@@ -1182,6 +1608,179 @@ fn test_apply_to_selection() {
                     "world 1",
                     "world 2",
                 ],
+            },
+        }),
+    );
+}
+
+#[test]
+fn test_apply_to_star_selections() {
+    let data = json!({
+        "englishAndGreekLetters": {
+            "a": { "en": "ay", "gr": "alpha" },
+            "b": { "en": "bee", "gr": "beta" },
+            "c": { "en": "see", "gr": "gamma" },
+            "d": { "en": "dee", "gr": "delta" },
+            "e": { "en": "ee", "gr": "epsilon" },
+            "f": { "en": "eff", "gr": "phi" },
+        },
+        "englishAndSpanishNumbers": [
+            { "en": "one", "es": "uno" },
+            { "en": "two", "es": "dos" },
+            { "en": "three", "es": "tres" },
+            { "en": "four", "es": "cuatro" },
+            { "en": "five", "es": "cinco" },
+            { "en": "six", "es": "seis" },
+        ],
+        "asciiCharCodes": {
+            "A": 65,
+            "B": 66,
+            "C": 67,
+            "D": 68,
+            "E": 69,
+            "F": 70,
+            "G": 71,
+        },
+        "books": {
+            "9780262533751": {
+                "title": "The Geometry of Meaning",
+                "author": "Peter Gärdenfors",
+            },
+            "978-1492674313": {
+                "title": "P is for Pterodactyl: The Worst Alphabet Book Ever",
+                "author": "Raj Haldar",
+            },
+            "9780262542456": {
+                "title": "A Biography of the Pixel",
+                "author": "Alvy Ray Smith",
+            },
+        }
+    });
+
+    let check_ok = |selection: Selection, expected_json: JSON| {
+        let (actual_json, errors) = selection.apply_to(&data);
+        assert_eq!(actual_json, Some(expected_json));
+        assert_eq!(errors, vec![]);
+    };
+
+    check_ok(
+        selection!("englishAndGreekLetters { * { en }}"),
+        json!({
+            "englishAndGreekLetters": {
+                "a": { "en": "ay" },
+                "b": { "en": "bee" },
+                "c": { "en": "see" },
+                "d": { "en": "dee" },
+                "e": { "en": "ee" },
+                "f": { "en": "eff" },
+            },
+        }),
+    );
+
+    check_ok(
+        selection!("englishAndGreekLetters { C: .c.en * { gr }}"),
+        json!({
+            "englishAndGreekLetters": {
+                "a": { "gr": "alpha" },
+                "b": { "gr": "beta" },
+                "C": "see",
+                "d": { "gr": "delta" },
+                "e": { "gr": "epsilon" },
+                "f": { "gr": "phi" },
+            },
+        }),
+    );
+
+    check_ok(
+        selection!("englishAndGreekLetters { A: a B: b rest: * }"),
+        json!({
+            "englishAndGreekLetters": {
+                "A": { "en": "ay", "gr": "alpha" },
+                "B": { "en": "bee", "gr": "beta" },
+                "rest": {
+                    "c": { "en": "see", "gr": "gamma" },
+                    "d": { "en": "dee", "gr": "delta" },
+                    "e": { "en": "ee", "gr": "epsilon" },
+                    "f": { "en": "eff", "gr": "phi" },
+                },
+            },
+        }),
+    );
+
+    check_ok(
+        selection!(".'englishAndSpanishNumbers' { en rest: * }"),
+        json!([
+            { "en": "one", "rest": { "es": "uno" } },
+            { "en": "two", "rest": { "es": "dos" } },
+            { "en": "three", "rest": { "es": "tres" } },
+            { "en": "four", "rest": { "es": "cuatro" } },
+            { "en": "five", "rest": { "es": "cinco" } },
+            { "en": "six", "rest": { "es": "seis" } },
+        ]),
+    );
+
+    // To include/preserve all remaining properties from an object in the output
+    // object, we support a naked * selection (no alias or subselection). This
+    // is useful when the values of the properties are scalar, so a subselection
+    // isn't possible, and we want to preserve all properties of the original
+    // object. These unnamed properties may not be useful for GraphQL unless the
+    // whole object is considered as opaque JSON scalar data, but we still need
+    // to support preserving JSON when it has scalar properties.
+    check_ok(
+        selection!("asciiCharCodes { ay: A bee: B * }"),
+        json!({
+            "asciiCharCodes": {
+                "ay": 65,
+                "bee": 66,
+                "C": 67,
+                "D": 68,
+                "E": 69,
+                "F": 70,
+                "G": 71,
+            },
+        }),
+    );
+
+    check_ok(
+        selection!("asciiCharCodes { * } gee: .asciiCharCodes.G"),
+        json!({
+            "asciiCharCodes": data.get("asciiCharCodes").unwrap(),
+            "gee": 71,
+        }),
+    );
+
+    check_ok(
+        selection!("books { * { title } }"),
+        json!({
+            "books": {
+                "9780262533751": {
+                    "title": "The Geometry of Meaning",
+                },
+                "978-1492674313": {
+                    "title": "P is for Pterodactyl: The Worst Alphabet Book Ever",
+                },
+                "9780262542456": {
+                    "title": "A Biography of the Pixel",
+                },
+            },
+        }),
+    );
+
+    check_ok(
+        selection!("books { authorsByISBN: * { author } }"),
+        json!({
+            "books": {
+                "authorsByISBN": {
+                    "9780262533751": {
+                        "author": "Peter Gärdenfors",
+                    },
+                    "978-1492674313": {
+                        "author": "Raj Haldar",
+                    },
+                    "9780262542456": {
+                        "author": "Alvy Ray Smith",
+                    },
+                },
             },
         }),
     );

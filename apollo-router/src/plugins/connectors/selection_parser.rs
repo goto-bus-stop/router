@@ -27,7 +27,7 @@ use serde_json::Value as JSON;
 // Selection ::= NamedSelection+ | PathSelection
 
 #[derive(Debug, PartialEq, Clone)]
-enum Selection {
+pub(super) enum Selection {
     // Although we reuse the SubSelection type for the Selection::Named case, we
     // parse it as a sequence of NamedSelection items without the {...} curly
     // braces that SubSelection::parse expects.
@@ -403,7 +403,7 @@ fn test_named_selection() {
 // PathSelection ::= ("." Property)+ SubSelection?
 
 #[derive(Debug, PartialEq, Clone)]
-enum PathSelection {
+pub(super) enum PathSelection {
     // We use a recursive structure here instead of a Vec<Property> to make
     // applying the selection to a JSON value easier.
     Path(Property, Box<PathSelection>),
@@ -503,7 +503,7 @@ fn test_path_selection() {
 // SubSelection ::= "{" NamedSelection+ "}"
 
 #[derive(Debug, PartialEq, Clone)]
-struct SubSelection {
+pub(super) struct SubSelection {
     selections: Vec<NamedSelection>,
 }
 
@@ -652,7 +652,7 @@ fn test_alias() {
 // Property ::= Identifier | StringLiteral
 
 #[derive(Debug, PartialEq, Clone)]
-enum Property {
+pub(super) enum Property {
     Field(String),
     Quoted(String),
     Index(usize),

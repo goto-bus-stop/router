@@ -1415,7 +1415,7 @@ impl ApplyTo for SubSelection {
             // If there is a star selection, we need to keep track of the
             // *original* names of the fields that were explicitly selected,
             // because we will need to omit them from what the * matches.
-            if let Some(star) = &self.star {
+            if self.star.is_some() {
                 match named_selection {
                     NamedSelection::Field(_, name, _) => {
                         input_names.insert(name.as_str());

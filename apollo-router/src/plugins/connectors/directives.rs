@@ -73,14 +73,37 @@ impl HTTPSourceAPI {
 #[derive(Debug)]
 pub(super) struct HTTPHeaderMapping {
     name: String,
-    r#as: Option<bool>,
+    r#as: Option<String>,
     value: Option<String>,
 }
 
 impl HTTPHeaderMapping {
     // TODO: maybe a result?
     pub(super) fn from_header_arguments(argument: &Node<Value>) -> Vec<Self> {
-        vec![]
+        argument
+            .as_list()
+            .map(|arguments| arguments.iter().map(|arg| Self::from_value(arg)).collect())
+            .unwrap_or_default()
+    }
+    // TODO: 100% a result, the name is mandatory!
+    fn from_value(argument: &Node<Value>) -> Self {
+        let header_arguments = argument.as_object().unwrap();
+        let mut name = Default::default();
+        let mut r#as = Default::default();
+        let mut value = Default::default();
+
+        header_arguments.iter().for_each(|(node_name, arg)| {
+            let as_string = arg.as_str().map(|s| s.to_string());
+            match node_name.as_str() {
+                // TODO: error handling plz ^^'
+                "name" => name = as_string.expect("name is mandatory"),
+                "as" => r#as = as_string,
+                "value" => value = as_string,
+                other => todo!("graceful error handling {other} {value:?}"),
+            }
+        });
+
+        Self { name, r#as, value }
     }
 }
 

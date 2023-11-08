@@ -3,6 +3,16 @@ source: apollo-router/src/plugins/connectors/subgraph_connector.rs
 expression: source_apis_from_schema
 ---
 {
+    "LEGACY_CONTACTS": SourceAPI {
+        name: "LEGACY_CONTACTS",
+        http: Some(
+            HTTPSourceAPI {
+                base_url: "http://localhost:4002/legacy/contacts/",
+                default: None,
+                headers: [],
+            },
+        ),
+    },
     "CONTACTS": SourceAPI {
         name: "CONTACTS",
         http: Some(
@@ -11,7 +21,31 @@ expression: source_apis_from_schema
                 default: Some(
                     true,
                 ),
-                headers: [],
+                headers: [
+                    HTTPHeaderMapping {
+                        name: "x-test",
+                        as: None,
+                        value: Some(
+                            "test1234",
+                        ),
+                    },
+                    HTTPHeaderMapping {
+                        name: "x-before-rename-test",
+                        as: Some(
+                            "x-after-rename-test",
+                        ),
+                        value: None,
+                    },
+                    HTTPHeaderMapping {
+                        name: "x-before-rename-and-with-value-test",
+                        as: Some(
+                            "x-after-rename-and-with-value-test",
+                        ),
+                        value: Some(
+                            "test5678",
+                        ),
+                    },
+                ],
             },
         ),
     },
@@ -20,16 +54,6 @@ expression: source_apis_from_schema
         http: Some(
             HTTPSourceAPI {
                 base_url: "http://localhost:4002/notes/",
-                default: None,
-                headers: [],
-            },
-        ),
-    },
-    "LEGACY_CONTACTS": SourceAPI {
-        name: "LEGACY_CONTACTS",
-        http: Some(
-            HTTPSourceAPI {
-                base_url: "http://localhost:4002/legacy/contacts/",
                 default: None,
                 headers: [],
             },

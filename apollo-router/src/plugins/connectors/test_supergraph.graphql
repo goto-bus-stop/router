@@ -92,7 +92,15 @@ enum SOURCE_API {
       http: {
         base_url: "http://localhost:4002/contacts/"
         default: true
-        headers: [{ name: "x-test", value: "test1234" }]
+        headers: [
+          { name: "x-test", value: "test1234" }
+          { name: "x-before-rename-test", as: "x-after-rename-test" }
+          {
+            name: "x-before-rename-and-with-value-test"
+            as: "x-after-rename-and-with-value-test"
+            value: "test5678"
+          }
+        ]
       }
     )
   NOTES

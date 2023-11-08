@@ -28,6 +28,8 @@ use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::Selection;
 
+use super::directives::SourceApi;
+
 pub(crate) const HTTP_RESOURCE_DIRECTIVE_NAME: &str = "http_resource";
 pub(crate) const HTTP_LIST_RESOURCE_DIRECTIVE_NAME: &str = "http_list_resource";
 pub(crate) const HTTP_FIELD_DIRECTIVE_NAME: &str = "http_field";
@@ -587,3 +589,141 @@ impl CallParams {
 //         ),
 //     }
 // }
+
+fn source_apis_from_schema(schema: &Schema) -> SourceApi {
+    todo!();
+}
+
+#[cfg(test)]
+mod tests {
+    const SCHEMA: &str = r#"
+  schema
+    @core(feature: "https://specs.apollo.dev/core/v0.1")
+    @core(feature: "https://specs.apollo.dev/join/v0.1") {
+    query: Query
+  }
+  
+  directive @core(feature: String!) repeatable on SCHEMA
+  
+  directive @join__field(
+    graph: join__Graph
+    requires: join__FieldSet
+    provides: join__FieldSet
+  ) on FIELD_DEFINITION
+  
+  directive @join__type(
+    graph: join__Graph!
+    key: join__FieldSet
+  ) repeatable on OBJECT | INTERFACE
+  
+  directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+  
+  directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+  
+  scalar join__FieldSet
+  
+  enum join__Graph {
+    CONTACTS @join__graph(name: "contacts", url: "http://localhost:4002")
+    NOTES @join__graph(name: "notes", url: "http://localhost:4002")
+  }
+  
+  enum SOURCE_API {
+    CONTACTS @source_api(base_url: "http://localhost:4002")
+    NOTES @source_api(base_url: "http://localhost:4002")
+    LEGACY_CONTACTS @source_api(base_url: "http://localhost:4002")
+  }
+  
+  directive @source_api(
+    # The base hostname/prefix to use, like "https://my-rest-api.net/api/v2"
+    base_url: String!
+  
+    # Whether to use this API as the default when unspecified
+    default: Boolean
+  
+    # List of HTTP header names from the subgraph GraphQL HTTP request
+    # to be forwarded with any REST HTTP requests to this API
+    headers: [HTTPHeaderMapping!]
+  
+    # Many more API configuration options can be added here in the future!
+  ) on ENUM_VALUE
+  
+  directive @http_field(
+    # Type-safe, as before
+    api: SOURCE_API
+  
+    # For JSON field renaming and nested value extraction
+    json_path: [String]
+  
+    # A string representation of argument names to include in the JSON body
+    # of the HTTP request, such as "title text" for createNote (below).
+    body: String
+  
+    # HTTP methods
+    GET: String
+    POST: String
+    PUT: String
+    PATCH: String
+    DELETE: String
+  ) repeatable on FIELD_DEFINITION
+  
+  directive @http_resource(
+    # Allows any SOURCE_API enum value, but only those values.
+    api: SOURCE_API
+  
+    # The URL path template used to retrieve this resource, such as
+    # GET: "/contacts/{contactId}/notes/{noteId}"
+    GET: String!
+  ) repeatable on OBJECT
+  
+  # this directive behaves the same as @http_resource,
+  # except it applies to queries which return type is a list
+  directive @http_list_resource(
+    # Allows any SOURCE_API enum value, but only those values.
+    api: SOURCE_API
+  
+    # The URL path template used to retrieve this list of resources, such as
+    # GET: "/contacts"
+    GET: String!
+  ) repeatable on OBJECT
+  
+  type Query {
+    contact(id: ID!): Contact @join__field(graph: CONTACTS)
+    contacts: [Contact]!
+      @join__field(graph: CONTACTS)
+      @http_field(GET: "/contacts")
+  }
+  
+  type Contact
+    @join__owner(graph: CONTACTS)
+    @join__type(graph: CONTACTS, key: "id")
+    @join__type(graph: NOTES, key: "id")
+    @http_resource(api: CONTACTS, GET: "/contacts/{contactId}") {
+    id: ID! @join__field(graph: CONTACTS)
+    name: String
+    email: String
+    notes: [Note]
+      @join__field(graph: NOTES)
+      @http_field(GET: "/contacts/{contactId}/notes")
+    note(noteId: ID!): Note @join__field(graph: NOTES)
+  }
+  
+  type Note
+    @join__owner(graph: NOTES)
+    @join__type(graph: NOTES, key: "id")
+    @http_resource(api: NOTES, GET: "/contacts/{contactId}/notes/{noteId}") {
+    contact: Contact @join__field(graph: CONTACTS)
+    id: ID! @join__field(graph: NOTES)
+    title: String
+    text: String
+    contactName: String
+      @http_field(
+        api: LEGACY_CONTACTS
+        GET: "/notes?id={noteId}"
+        json_path: ["contact", "name"]
+      )
+  }
+"#;
+
+    #[test]
+    fn test_source_api() {}
+}

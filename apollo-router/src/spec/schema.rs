@@ -30,6 +30,7 @@ pub(crate) struct Schema {
     pub(crate) implementers_map: HashMap<ast::Name, HashSet<ast::Name>>,
     api_schema: Option<Box<Schema>>,
     pub(crate) schema_id: Option<String>,
+    pub(crate) subgraph_definition_and_names: HashMap<String, String>,
 }
 
 #[cfg(test)]
@@ -148,6 +149,7 @@ impl Schema {
             implementers_map,
             api_schema: None,
             schema_id,
+            subgraph_definition_and_names,
         })
     }
 
@@ -217,10 +219,8 @@ impl Schema {
         self.subgraphs.get(service_name)
     }
 
-    pub(crate) fn subgraph_name(&self, _subgraph_definition: &str) -> Option<&String> {
-        // TODO[igni]: update to apollo compiler 1
-        todo!();
-        // self.subgraph_definition_and_names.get(subgraph_definition)
+    pub(crate) fn subgraph_name(&self, subgraph_definition: &str) -> Option<&String> {
+        self.subgraph_definition_and_names.get(subgraph_definition)
     }
 
     pub(crate) fn api_schema(&self) -> &Schema {

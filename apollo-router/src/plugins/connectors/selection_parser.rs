@@ -33,7 +33,7 @@ fn spaces_or_comments(input: &str) -> IResult<&str, &str> {
         (suffix, _) = multispace0(suffix)?;
         let mut chars = suffix.chars();
         if let Some('#') = chars.next() {
-            while let Some(c) = chars.next() {
+            for c in chars.by_ref() {
                 if c == '\n' {
                     break;
                 }

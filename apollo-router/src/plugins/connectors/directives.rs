@@ -2,25 +2,30 @@
 
 use std::collections::HashMap;
 
+use apollo_compiler::schema::{Component, Directive, EnumValueDefinition, Value};
+use apollo_compiler::Node;
+
 use super::selection_parser::Selection as JSONSelection;
 use super::url_path_parser::Template as URLPathTemplate;
 
+pub(super) const SOURCE_API_DIRECTIVE_NAME: &str = "source_api";
+const HTTP_ARGUMENT_NAME: &str = "http";
+
 #[derive(Debug)]
-pub(super) struct SourceApi {
+pub(super) struct SourceAPI {
     name: String,
-    http: HTTPSourceAPI,
+    http: Option<HTTPSourceAPI>,
 }
 
-impl SourceApi {
-    pub(super) fn new(name: String) -> Self {
-        Self {
-            name,
-            http: HTTPSourceAPI {
-                base_url: "".to_string(),
-                default: None,
-                headers: vec![],
-            },
-        }
+impl SourceAPI {
+    pub(super) fn from_directive(name: String, component: &Component<EnumValueDefinition>) -> Self {
+        let http = component
+            .directives
+            .0
+            .iter()
+            .find(|d| d.name == SOURCE_API_DIRECTIVE_NAME)
+            .map(|directive| HTTPSourceAPI::from_directive(directive));
+        Self { name, http }
     }
 }
 
@@ -31,11 +36,52 @@ pub(super) struct HTTPSourceAPI {
     headers: Vec<HTTPHeaderMapping>,
 }
 
+impl HTTPSourceAPI {
+    // todo: probably a result instead of unwraps ^^
+    pub(super) fn from_directive(directive: &Node<Directive>) -> Self {
+        let mut base_url = Default::default();
+        let mut default = Default::default();
+        let mut headers = Default::default();
+
+        directive
+            .arguments
+            .iter()
+            .find(|argument| argument.name == HTTP_ARGUMENT_NAME)
+            // TODO: error handling plz ^^'
+            .unwrap()
+            .value
+            .as_object()
+            // TODO: error handling plz ^^'
+            .unwrap()
+            .iter()
+            .for_each(|(name, node)| match name.as_str() {
+                // TODO: error handling plz ^^'
+                "base_url" => base_url = node.as_str().unwrap().to_string(),
+                "default" => default = node.to_bool(),
+                "headers" => headers = HTTPHeaderMapping::from_header_arguments(node),
+                other => todo!("graceful error handling {other}"),
+            });
+
+        Self {
+            base_url: base_url,
+            default,
+            headers,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(super) struct HTTPHeaderMapping {
     name: String,
     r#as: Option<bool>,
     value: Option<String>,
+}
+
+impl HTTPHeaderMapping {
+    // TODO: maybe a result?
+    pub(super) fn from_header_arguments(argument: &Node<Value>) -> Vec<Self> {
+        vec![]
+    }
 }
 
 #[derive(Debug)]

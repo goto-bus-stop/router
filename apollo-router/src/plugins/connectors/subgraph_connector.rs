@@ -28,7 +28,9 @@ use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::Selection;
 
-use super::directives::SourceApi;
+use super::directives::HTTPSourceAPI;
+use super::directives::SourceAPI;
+use super::directives::SOURCE_API_DIRECTIVE_NAME;
 
 pub(crate) const HTTP_RESOURCE_DIRECTIVE_NAME: &str = "http_resource";
 pub(crate) const HTTP_LIST_RESOURCE_DIRECTIVE_NAME: &str = "http_list_resource";
@@ -37,7 +39,7 @@ pub(crate) const SOURCE_API_ENUM_NAME: &str = "SOURCE_API";
 
 #[derive(Clone)]
 pub(crate) struct SubgraphConnector {
-    source_apis: Arc<HashMap<String, SourceApi>>,
+    source_apis: Arc<HashMap<String, SourceAPI>>,
     // subgraph name -> callparams
     metadata: HashMap<String, CallParams>,
     // TODO: Arc plz
@@ -594,7 +596,7 @@ impl CallParams {
 // }
 
 // Given a valid schema, returns `SourceApi`` directive parameters for each of the relevant subgraphs.
-fn source_apis_from_schema(schema: &Schema) -> HashMap<String, SourceApi> {
+fn source_apis_from_schema(schema: &Schema) -> HashMap<String, SourceAPI> {
     // SOURCE_API is an enum available at the root,
     // it contains variants, that have @source_api metadata attached to them
     schema
@@ -608,10 +610,10 @@ fn source_apis_from_schema(schema: &Schema) -> HashMap<String, SourceApi> {
                 .map(|(node, value)| {
                     // the node contains the name,
                     // let's craft a SourceApi from the directive metadata
-                    dbg!(&value);
+
                     (
                         node.as_str().to_string(),
-                        SourceApi::new(node.as_str().to_string()),
+                        SourceAPI::from_directive(node.as_str().to_string(), value),
                     )
                 })
                 .collect::<HashMap<_, _>>()

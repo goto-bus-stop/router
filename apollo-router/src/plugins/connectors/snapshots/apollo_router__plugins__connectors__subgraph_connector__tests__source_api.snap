@@ -1,0 +1,38 @@
+---
+source: apollo-router/src/plugins/connectors/subgraph_connector.rs
+expression: source_apis_from_schema
+---
+{
+    "CONTACTS": SourceAPI {
+        name: "CONTACTS",
+        http: Some(
+            HTTPSourceAPI {
+                base_url: "http://localhost:4002/contacts/",
+                default: Some(
+                    true,
+                ),
+                headers: [],
+            },
+        ),
+    },
+    "NOTES": SourceAPI {
+        name: "NOTES",
+        http: Some(
+            HTTPSourceAPI {
+                base_url: "http://localhost:4002/notes/",
+                default: None,
+                headers: [],
+            },
+        ),
+    },
+    "LEGACY_CONTACTS": SourceAPI {
+        name: "LEGACY_CONTACTS",
+        http: Some(
+            HTTPSourceAPI {
+                base_url: "http://localhost:4002/legacy/contacts/",
+                default: None,
+                headers: [],
+            },
+        ),
+    },
+}

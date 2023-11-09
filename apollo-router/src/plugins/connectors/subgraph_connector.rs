@@ -595,8 +595,9 @@ impl CallParams {
 //     }
 // }
 
-// Given a valid schema, returns `SourceApi`` directive parameters for each of the relevant subgraphs.
-fn source_apis_from_schema(schema: &Schema) -> HashMap<String, SourceAPI> {
+// Given a valid schema with a SOURCE_API enum,
+// returns `SourceApi` directive parameters for each of the relevant subgraphs.
+fn source_apis_from_root_enum(schema: &Schema) -> HashMap<String, SourceAPI> {
     // SOURCE_API is an enum available at the root,
     // it contains variants, that have @source_api metadata attached to them
     schema
@@ -621,22 +622,82 @@ fn source_apis_from_schema(schema: &Schema) -> HashMap<String, SourceAPI> {
         .unwrap_or_default()
 }
 
+// Given a valid schema with a @source_api directive applied to the SCHEMA section,
+// returns `SourceApi` directive parameters for each of the relevant subgraphs.
+fn source_apis_from_schema_directive(schema: &Schema) -> HashMap<String, SourceAPI> {
+    // `source_api` is an directive that applies to schema
+    schema
+        .definitions
+        .schema_definition
+        .directives
+        .iter()
+        .filter(|d| d.name == SOURCE_API_DIRECTIVE_NAME)
+        .map(|source_api_directive| {
+            let connector_name = source_api_directive
+                .argument_by_name("name")
+                .as_ref()
+                .map(|name| name.as_str().unwrap().to_string())
+                .unwrap_or_default();
+            // for each of the applied directives, let's get the name, and create a SourceApi item.
+            (
+                connector_name,
+                SourceAPI::from_schema_directive(source_api_directive),
+            )
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use insta::assert_debug_snapshot;
+    use insta::{assert_json_snapshot, with_settings};
 
     use super::*;
     use crate::Configuration;
 
-    const SCHEMA: &str = include_str!("./test_supergraph.graphql");
+    const SCHEMA_DIRECTIVE: &str = include_str!("./test_supergraph_schema_directive.graphql");
+    const SCHEMA_ENUM: &str = include_str!("./test_supergraph_root_enum.graphql");
 
     #[test]
-    fn test_source_api() {
+    fn test_schema_directive_has_no_errors() {
+        let schema = Schema::parse(
+            SCHEMA_DIRECTIVE,
+            &Configuration::fake_builder().build().unwrap(),
+        )
+        .unwrap();
+
+        assert!(!schema.has_errors());
+    }
+    #[test]
+    fn test_source_api_directive() {
+        let schema = Schema::parse(
+            SCHEMA_DIRECTIVE,
+            &Configuration::fake_builder().build().unwrap(),
+        )
+        .unwrap();
+
+        let source_apis_from_schema = source_apis_from_schema_directive(&schema);
+
+        insta::with_settings!({sort_maps => true}, {
+            assert_json_snapshot!(source_apis_from_schema);
+        });
+    }
+
+    #[test]
+    fn test_schema_enum_has_no_errors() {
         let schema =
-            Schema::parse(SCHEMA, &Configuration::fake_builder().build().unwrap()).unwrap();
+            Schema::parse(SCHEMA_ENUM, &Configuration::fake_builder().build().unwrap()).unwrap();
 
-        let source_apis_from_schema = source_apis_from_schema(&schema);
+        assert!(!schema.has_errors());
+    }
 
-        assert_debug_snapshot!(source_apis_from_schema);
+    #[test]
+    fn test_source_api_enum() {
+        let schema =
+            Schema::parse(SCHEMA_ENUM, &Configuration::fake_builder().build().unwrap()).unwrap();
+
+        let source_apis_from_schema = source_apis_from_root_enum(&schema);
+        insta::with_settings!({sort_maps => true}, {
+            assert_json_snapshot!(source_apis_from_schema);
+        });
     }
 }

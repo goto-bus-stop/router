@@ -1,0 +1,158 @@
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(
+  graph: join__Graph
+  requires: join__FieldSet
+  provides: join__FieldSet
+  type: String
+  external: Boolean
+  override: String
+  usedOverridden: Boolean
+) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(
+  graph: join__Graph!
+  interface: String!
+) repeatable on OBJECT | INTERFACE
+
+directive @join__type(
+  graph: join__Graph!
+  key: join__FieldSet
+  extension: Boolean! = false
+  resolvable: Boolean! = true
+  isInterfaceObject: Boolean! = false
+) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(
+  graph: join__Graph!
+  member: String!
+) repeatable on UNION
+
+directive @link(
+  url: String
+  as: String
+  for: link__Purpose
+  import: [link__Import]
+) repeatable on SCHEMA
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar join__FieldSet
+
+enum join__Graph {
+  CONTACTS @join__graph(name: "contacts", url: "http://localhost:4002")
+}
+
+############ CONNECTORS STUFF
+
+scalar URLPathTemplate @join__type(graph: CONTACTS) # @specifiedBy(url: "https://specs.apollo.dev/source/v1.0")
+scalar JSONSelection @join__type(graph: CONTACTS) # @specifiedBy(url: "https://specs.apollo.dev/source/v1.0")
+scalar JSON @join__type(graph: CONTACTS)
+
+directive @source_api(name: String!, http: HTTPSourceAPI) repeatable on SCHEMA
+
+input HTTPSourceAPI @join__type(graph: CONTACTS) {
+  base_url: String!
+  default: Boolean
+  headers: [HTTPHeaderMapping!]
+}
+
+input HTTPHeaderMapping @join__type(graph: CONTACTS) {
+  name: String!
+  as: String
+  value: String
+}
+
+directive @source_type(
+  api: String
+  http: HTTPSourceType
+  selection: JSONSelection
+  key_type_map: KeyTypeMap
+) repeatable on OBJECT | INTERFACE | UNION
+
+input HTTPSourceType @join__type(graph: CONTACTS) {
+  GET: URLPathTemplate
+  POST: URLPathTemplate
+  headers: [HTTPHeaderMapping!]
+  body: JSONSelection
+}
+
+input KeyTypeMap @join__type(graph: CONTACTS) {
+  key: String!
+  type_map: JSON
+}
+
+directive @source_field(
+  api: String
+  http: HTTPSourceField
+  selection: JSONSelection
+) repeatable on FIELD_DEFINITION
+
+input HTTPSourceField @join__type(graph: CONTACTS) {
+  GET: URLPathTemplate
+  POST: URLPathTemplate
+  PUT: URLPathTemplate
+  PATCH: URLPathTemplate
+  DELETE: URLPathTemplate
+  headers: [HTTPHeaderMapping!]
+  body: JSONSelection
+}
+
+########### COMPOSED STUFF
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  @source_api(
+    name: "CONTACTS"
+    http: {
+      base_url: "http://localhost:4002/contacts/"
+      default: true
+      headers: [
+        { name: "x-test", value: "test1234" }
+        { name: "x-before-rename-test", as: "x-after-rename-test" }
+        {
+          name: "x-before-rename-and-with-value-test"
+          as: "x-after-rename-and-with-value-test"
+          value: "test5678"
+        }
+      ]
+    }
+  )
+  @source_api(name: "NOTES", http: { base_url: "http://localhost:4002/notes/" })
+  @source_api(
+    name: "LEGACY_CONTACTS"
+    http: { base_url: "http://localhost:4002/legacy/contacts/" }
+  ) {
+  query: Query
+}
+
+############ ACTUAL SUPERGRAPH
+
+type Query @join__type(graph: CONTACTS) {
+  contact(id: ID!): Contact @join__field(graph: CONTACTS)
+  contacts: [Contact]!
+    @join__field(graph: CONTACTS)
+    @source_field(api: CONTACTS, http: { GET: "/contacts" })
+}
+
+type Contact
+  @join__type(graph: CONTACTS, key: "id")
+  @source_type(api: "CONTACTS", http: { GET: "/contacts/{contactId}" }) {
+  id: ID! @join__field(graph: CONTACTS)
+  name: String
+  email: String
+}

@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use apollo_compiler::schema::{Component, Directive, EnumValueDefinition, Value};
 use apollo_compiler::Node;
+use serde::Serialize;
 
 use super::selection_parser::Selection as JSONSelection;
 use super::url_path_parser::Template as URLPathTemplate;
@@ -11,12 +12,13 @@ use super::url_path_parser::Template as URLPathTemplate;
 pub(super) const SOURCE_API_DIRECTIVE_NAME: &str = "source_api";
 const HTTP_ARGUMENT_NAME: &str = "http";
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub(super) struct SourceAPI {
     name: String,
     http: Option<HTTPSourceAPI>,
 }
 
+// TODO: remove one of both once we land on the directive position
 impl SourceAPI {
     pub(super) fn from_directive(name: String, component: &Component<EnumValueDefinition>) -> Self {
         let http = component
@@ -27,9 +29,21 @@ impl SourceAPI {
             .map(|directive| HTTPSourceAPI::from_directive(directive));
         Self { name, http }
     }
+
+    pub(super) fn from_schema_directive(schema_directive: &Component<Directive>) -> Self {
+        let name = schema_directive
+            .argument_by_name("name")
+            .as_ref()
+            .map(|name| name.as_str().unwrap().to_string())
+            .unwrap_or_default();
+
+        let http = Some(HTTPSourceAPI::from_directive(schema_directive));
+
+        Self { name, http }
+    }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub(super) struct HTTPSourceAPI {
     base_url: String,
     default: Option<bool>,
@@ -70,7 +84,7 @@ impl HTTPSourceAPI {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub(super) struct HTTPHeaderMapping {
     name: String,
     r#as: Option<String>,
@@ -107,7 +121,7 @@ impl HTTPHeaderMapping {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub(super) struct SourceType {
     api: String,
     http: Option<HTTPSourceType>,
@@ -116,7 +130,7 @@ pub(super) struct SourceType {
 }
 
 // TODO: impl tryfrom with XOR validation on methods
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub(super) struct HTTPSourceType {
     get: Option<URLPathTemplate>,
     post: Option<URLPathTemplate>,
@@ -124,7 +138,7 @@ pub(super) struct HTTPSourceType {
     body: Option<JSONSelection>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub(super) struct KeyTypeMap {
     key: String,
     // Dictionary mapping possible __typename strings to values of the JSON
@@ -132,7 +146,7 @@ pub(super) struct KeyTypeMap {
     type_map: HashMap<String, String>, // TODO: is this accurate?
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub(super) struct SourceField {
     api: Option<String>,
     http: Option<HTTPSourceField>,
@@ -140,7 +154,7 @@ pub(super) struct SourceField {
 }
 
 // TODO: impl tryfrom with XOR validation on methods
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub(super) struct HTTPSourceField {
     get: Option<URLPathTemplate>,
     post: Option<URLPathTemplate>,

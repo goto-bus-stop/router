@@ -2,7 +2,10 @@
 
 use std::collections::HashMap;
 
-use apollo_compiler::schema::{Component, Directive, EnumValueDefinition, Value};
+use apollo_compiler::schema::Component;
+use apollo_compiler::schema::Directive;
+use apollo_compiler::schema::EnumValueDefinition;
+use apollo_compiler::schema::Value;
 use apollo_compiler::Node;
 use serde::Serialize;
 

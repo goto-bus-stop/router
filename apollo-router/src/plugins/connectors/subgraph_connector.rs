@@ -21,16 +21,15 @@ use regex::Regex;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use super::directives::HTTPSourceAPI;
+use super::directives::SourceAPI;
+use super::directives::SOURCE_API_DIRECTIVE_NAME;
 use crate::layers::ServiceBuilderExt;
 use crate::services::subgraph;
 // use crate::spec::hir_type_name;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::Selection;
-
-use super::directives::HTTPSourceAPI;
-use super::directives::SourceAPI;
-use super::directives::SOURCE_API_DIRECTIVE_NAME;
 
 pub(crate) const HTTP_RESOURCE_DIRECTIVE_NAME: &str = "http_resource";
 pub(crate) const HTTP_LIST_RESOURCE_DIRECTIVE_NAME: &str = "http_list_resource";
@@ -649,7 +648,8 @@ fn source_apis_from_schema_directive(schema: &Schema) -> HashMap<String, SourceA
 
 #[cfg(test)]
 mod tests {
-    use insta::{assert_json_snapshot, with_settings};
+    use insta::assert_json_snapshot;
+    use insta::with_settings;
 
     use super::*;
     use crate::Configuration;

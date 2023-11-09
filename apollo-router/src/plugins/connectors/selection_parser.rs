@@ -1161,11 +1161,10 @@ trait ApplyTo {
     // element of the array, producing a new array.
     fn apply_to_array(
         &self,
-        data: &JSON,
+        data_array: &Vec<JSON>,
         input_path: &mut Vec<Property>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
-        let data_array = data.as_array().unwrap();
         let mut output = Vec::with_capacity(data_array.len());
 
         for (i, element) in data_array.iter().enumerate() {
@@ -1208,6 +1207,7 @@ impl ApplyToError {
         }))
     }
 
+    #[cfg(test)]
     fn from_json(json: &JSON) -> Self {
         if let JSON::Object(error) = json {
             if let Some(JSON::String(message)) = error.get("message") {
@@ -1239,14 +1239,14 @@ impl ApplyTo for Selection {
         input_path: &mut Vec<Property>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
-        if data.is_array() {
-            return self.apply_to_array(data, input_path, errors);
-        }
-
-        if !data.is_object() {
-            errors.insert(ApplyToError::new("not an object", input_path));
-            return None;
-        }
+        let data = match data {
+            JSON::Array(array) => return self.apply_to_array(array, input_path, errors),
+            JSON::Object(_) => data,
+            _ => {
+                errors.insert(ApplyToError::new("not an object", input_path));
+                return None;
+            }
+        };
 
         match self {
             // Because we represent a Selection::Named as a SubSelection, we can
@@ -1269,14 +1269,14 @@ impl ApplyTo for NamedSelection {
         input_path: &mut Vec<Property>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
-        if data.is_array() {
-            return self.apply_to_array(data, input_path, errors);
-        }
-
-        if !data.is_object() {
-            errors.insert(ApplyToError::new("not an object", input_path));
-            return None;
-        }
+        let data = match data {
+            JSON::Array(array) => return self.apply_to_array(array, input_path, errors),
+            JSON::Object(_) => data,
+            _ => {
+                errors.insert(ApplyToError::new("not an object", input_path));
+                return None;
+            }
+        };
 
         let mut output = Map::new();
 
@@ -1341,8 +1341,8 @@ impl ApplyTo for PathSelection {
         input_path: &mut Vec<Property>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
-        if data.is_array() {
-            return self.apply_to_array(data, input_path, errors);
+        if let JSON::Array(array) = data {
+            return self.apply_to_array(array, input_path, errors);
         }
 
         match self {
@@ -1393,14 +1393,14 @@ impl ApplyTo for SubSelection {
         input_path: &mut Vec<Property>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
-        if data.is_array() {
-            return self.apply_to_array(data, input_path, errors);
-        }
-
-        if !data.is_object() {
-            errors.insert(ApplyToError::new("not an object", input_path));
-            return None;
-        }
+        let data_map = match data {
+            JSON::Array(array) => return self.apply_to_array(array, input_path, errors),
+            JSON::Object(data_map) => data_map,
+            _ => {
+                errors.insert(ApplyToError::new("not an object", input_path));
+                return None;
+            }
+        };
 
         let mut output = Map::new();
         let mut input_names = IndexSet::new();
@@ -1455,7 +1455,7 @@ impl ApplyTo for SubSelection {
             // Aliased but not subselected, e.g. "a b c rest: *"
             Some(StarSelection(Some(alias), None)) => {
                 let mut star_output = Map::new();
-                for (key, value) in data.as_object().unwrap() {
+                for (key, value) in data_map {
                     if !input_names.contains(key.as_str()) {
                         star_output.insert(key.clone(), value.clone());
                     }
@@ -1465,7 +1465,7 @@ impl ApplyTo for SubSelection {
             // Aliased and subselected, e.g. "alias: * { hello }"
             Some(StarSelection(Some(alias), Some(selection))) => {
                 let mut star_output = Map::new();
-                for (key, value) in data.as_object().unwrap() {
+                for (key, value) in data_map {
                     if !input_names.contains(key.as_str()) {
                         if let Some(selected) = selection.apply_to_path(value, input_path, errors) {
                             star_output.insert(key.clone(), selected);
@@ -1476,7 +1476,7 @@ impl ApplyTo for SubSelection {
             }
             // Not aliased but subselected, e.g. "parent { * { hello } }"
             Some(StarSelection(None, Some(selection))) => {
-                for (key, value) in data.as_object().unwrap() {
+                for (key, value) in data_map {
                     if !input_names.contains(key.as_str()) {
                         if let Some(selected) = selection.apply_to_path(value, input_path, errors) {
                             output.insert(key.clone(), selected);
@@ -1486,7 +1486,7 @@ impl ApplyTo for SubSelection {
             }
             // Neither aliased nor subselected, e.g. "parent { * }" or just "*"
             Some(StarSelection(None, None)) => {
-                for (key, value) in data.as_object().unwrap() {
+                for (key, value) in data_map {
                     if !input_names.contains(key.as_str()) {
                         output.insert(key.clone(), value.clone());
                     }

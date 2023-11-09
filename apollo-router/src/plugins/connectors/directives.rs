@@ -61,7 +61,6 @@ pub(super) struct HTTPSourceAPI {
 }
 
 impl HTTPSourceAPI {
-    // todo: probably a result instead of unwraps ^^
     pub(super) fn from_directive(
         directive: &Node<Directive>,
     ) -> Result<Self, ConnectorDirectiveError> {
@@ -73,20 +72,50 @@ impl HTTPSourceAPI {
             .arguments
             .iter()
             .find(|argument| argument.name == HTTP_ARGUMENT_NAME)
-            // TODO: error handling plz ^^'
-            .unwrap()
+            .ok_or_else(|| {
+                ConnectorDirectiveError::MissingAttributeForType(
+                    HTTP_ARGUMENT_NAME.to_string(),
+                    SOURCE_API_DIRECTIVE_NAME.to_string(),
+                )
+            })?
             .value
             .as_object()
-            // TODO: error handling plz ^^'
-            .unwrap()
+            .ok_or_else(|| {
+                ConnectorDirectiveError::InvalidTypeForAttribute(
+                    "object".to_string(),
+                    HTTP_ARGUMENT_NAME.to_string(),
+                )
+            })?
             .iter()
         {
             match name.as_str() {
                 // TODO: error handling plz ^^'
-                "base_url" => base_url = node.as_str().unwrap().to_string(),
-                "default" => default = node.to_bool(),
+                "base_url" => {
+                    base_url = node
+                        .as_str()
+                        .ok_or_else(|| {
+                            ConnectorDirectiveError::InvalidTypeForAttribute(
+                                "String".to_string(),
+                                "base_url".to_string(),
+                            )
+                        })?
+                        .to_string()
+                }
+                "default" => {
+                    default = Some(node.to_bool().ok_or_else(|| {
+                        ConnectorDirectiveError::InvalidTypeForAttribute(
+                            "boolean".to_string(),
+                            "default".to_string(),
+                        )
+                    })?)
+                }
                 "headers" => headers = HTTPHeaderMapping::from_header_arguments(node)?,
-                other => todo!("graceful error handling {other}"),
+                other => {
+                    return Err(ConnectorDirectiveError::UnknownAttributeForType(
+                        other.to_string(),
+                        HTTP_ARGUMENT_NAME.to_string(),
+                    ))
+                }
             }
         }
 

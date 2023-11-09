@@ -7,13 +7,24 @@ use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::Value;
 use apollo_compiler::Node;
+use displaydoc::Display;
 use serde::Serialize;
+use thiserror::Error;
 
 use super::selection_parser::Selection as JSONSelection;
 use super::url_path_parser::Template as URLPathTemplate;
 
 pub(super) const SOURCE_API_DIRECTIVE_NAME: &str = "source_api";
 const HTTP_ARGUMENT_NAME: &str = "http";
+
+#[derive(Error, Display, Debug, Clone, Serialize, Eq, PartialEq)]
+#[allow(missing_docs)] // FIXME
+pub(super) enum ConnectorDirectiveError {
+    /// Attribute '{1}' is missing for type '{0}'
+    MissingAttributeForType(String, String),
+    /// Attribute '{1}' does not exist for type '{0}'
+    UnknownAttributeForType(String, String),
+}
 
 #[derive(Debug, Serialize)]
 pub(super) struct SourceAPI {
@@ -23,26 +34,32 @@ pub(super) struct SourceAPI {
 
 // TODO: remove one of both once we land on the directive position
 impl SourceAPI {
-    pub(super) fn from_directive(name: String, component: &Component<EnumValueDefinition>) -> Self {
+    pub(super) fn from_directive(
+        name: String,
+        component: &Component<EnumValueDefinition>,
+    ) -> Result<Self, ConnectorDirectiveError> {
         let http = component
             .directives
             .0
             .iter()
             .find(|d| d.name == SOURCE_API_DIRECTIVE_NAME)
-            .map(HTTPSourceAPI::from_directive);
-        Self { name, http }
+            .map(HTTPSourceAPI::from_directive)
+            .transpose()?;
+        Ok(Self { name, http })
     }
 
-    pub(super) fn from_schema_directive(schema_directive: &Component<Directive>) -> Self {
+    pub(super) fn from_schema_directive(
+        schema_directive: &Component<Directive>,
+    ) -> Result<Self, ConnectorDirectiveError> {
         let name = schema_directive
             .argument_by_name("name")
             .as_ref()
             .map(|name| name.as_str().unwrap().to_string())
             .unwrap_or_default();
 
-        let http = Some(HTTPSourceAPI::from_directive(schema_directive));
+        let http = Some(HTTPSourceAPI::from_directive(schema_directive)?);
 
-        Self { name, http }
+        Ok(Self { name, http })
     }
 }
 
@@ -55,12 +72,14 @@ pub(super) struct HTTPSourceAPI {
 
 impl HTTPSourceAPI {
     // todo: probably a result instead of unwraps ^^
-    pub(super) fn from_directive(directive: &Node<Directive>) -> Self {
+    pub(super) fn from_directive(
+        directive: &Node<Directive>,
+    ) -> Result<Self, ConnectorDirectiveError> {
         let mut base_url = Default::default();
         let mut default = Default::default();
         let mut headers = Default::default();
 
-        directive
+        for (name, node) in directive
             .arguments
             .iter()
             .find(|argument| argument.name == HTTP_ARGUMENT_NAME)
@@ -71,19 +90,21 @@ impl HTTPSourceAPI {
             // TODO: error handling plz ^^'
             .unwrap()
             .iter()
-            .for_each(|(name, node)| match name.as_str() {
+        {
+            match name.as_str() {
                 // TODO: error handling plz ^^'
                 "base_url" => base_url = node.as_str().unwrap().to_string(),
                 "default" => default = node.to_bool(),
-                "headers" => headers = HTTPHeaderMapping::from_header_arguments(node),
+                "headers" => headers = HTTPHeaderMapping::from_header_arguments(node)?,
                 other => todo!("graceful error handling {other}"),
-            });
+            }
+        }
 
-        Self {
+        Ok(Self {
             base_url,
             default,
             headers,
-        }
+        })
     }
 }
 
@@ -96,31 +117,50 @@ pub(super) struct HTTPHeaderMapping {
 
 impl HTTPHeaderMapping {
     // TODO: maybe a result?
-    pub(super) fn from_header_arguments(argument: &Node<Value>) -> Vec<Self> {
-        argument
+    pub(super) fn from_header_arguments(
+        argument: &Node<Value>,
+    ) -> Result<Vec<Self>, ConnectorDirectiveError> {
+        Ok(argument
             .as_list()
-            .map(|arguments| arguments.iter().map(Self::from_value).collect())
-            .unwrap_or_default()
+            .map(|arguments| {
+                arguments
+                    .iter()
+                    .map(Self::from_value)
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?
+            .unwrap_or_default())
     }
     // TODO: 100% a result, the name is mandatory!
-    fn from_value(argument: &Node<Value>) -> Self {
+    fn from_value(argument: &Node<Value>) -> Result<Self, ConnectorDirectiveError> {
         let header_arguments = argument.as_object().unwrap();
         let mut name = Default::default();
         let mut r#as = Default::default();
         let mut value = Default::default();
 
-        header_arguments.iter().for_each(|(node_name, arg)| {
+        for (node_name, arg) in header_arguments.iter() {
             let as_string = arg.as_str().map(|s| s.to_string());
             match node_name.as_str() {
-                // TODO: error handling plz ^^'
-                "name" => name = as_string.expect("name is mandatory"),
+                "name" => {
+                    name = as_string.ok_or_else(|| {
+                        ConnectorDirectiveError::MissingAttributeForType(
+                            "name".to_string(),
+                            "header".to_string(),
+                        )
+                    })?;
+                }
                 "as" => r#as = as_string,
                 "value" => value = as_string,
-                other => todo!("graceful error handling {other} {value:?}"),
+                other => {
+                    return Err(ConnectorDirectiveError::UnknownAttributeForType(
+                        other.to_string(),
+                        "header".to_string(),
+                    ));
+                }
             }
-        });
+        }
 
-        Self { name, r#as, value }
+        Ok(Self { name, r#as, value })
     }
 }
 

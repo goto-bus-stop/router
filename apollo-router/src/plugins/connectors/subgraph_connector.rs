@@ -21,6 +21,7 @@ use regex::Regex;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use super::directives::ConnectorDirectiveError;
 use super::directives::HTTPSourceAPI;
 use super::directives::SourceAPI;
 use super::directives::SOURCE_API_DIRECTIVE_NAME;
@@ -596,10 +597,12 @@ impl CallParams {
 
 // Given a valid schema with a SOURCE_API enum,
 // returns `SourceApi` directive parameters for each of the relevant subgraphs.
-fn source_apis_from_root_enum(schema: &Schema) -> HashMap<String, SourceAPI> {
+fn source_apis_from_root_enum(
+    schema: &Schema,
+) -> Result<HashMap<String, SourceAPI>, ConnectorDirectiveError> {
     // SOURCE_API is an enum available at the root,
     // it contains variants, that have @source_api metadata attached to them
-    schema
+    Ok(schema
         .definitions
         .get_enum(SOURCE_API_ENUM_NAME)
         .map(|source_api_enum| {
@@ -610,22 +613,22 @@ fn source_apis_from_root_enum(schema: &Schema) -> HashMap<String, SourceAPI> {
                 .map(|(node, value)| {
                     // the node contains the name,
                     // let's craft a SourceApi from the directive metadata
-
-                    (
-                        node.as_str().to_string(),
-                        SourceAPI::from_directive(node.as_str().to_string(), value),
-                    )
+                    SourceAPI::from_directive(node.as_str().to_string(), value)
+                        .map(|source_api| (node.as_str().to_string(), source_api))
                 })
-                .collect::<HashMap<_, _>>()
+                .collect::<Result<HashMap<_, _>, _>>()
         })
-        .unwrap_or_default()
+        .transpose()?
+        .unwrap_or_default())
 }
 
 // Given a valid schema with a @source_api directive applied to the SCHEMA section,
 // returns `SourceApi` directive parameters for each of the relevant subgraphs.
-fn source_apis_from_schema_directive(schema: &Schema) -> HashMap<String, SourceAPI> {
+fn source_apis_from_schema_directive(
+    schema: &Schema,
+) -> Result<HashMap<String, SourceAPI>, ConnectorDirectiveError> {
     // `source_api` is an directive that applies to schema
-    schema
+    Ok(schema
         .definitions
         .schema_definition
         .directives
@@ -636,14 +639,18 @@ fn source_apis_from_schema_directive(schema: &Schema) -> HashMap<String, SourceA
                 .argument_by_name("name")
                 .as_ref()
                 .map(|name| name.as_str().unwrap().to_string())
-                .unwrap_or_default();
+                .ok_or_else(|| {
+                    ConnectorDirectiveError::MissingAttributeForType(
+                        "name".to_string(),
+                        SOURCE_API_DIRECTIVE_NAME.to_string(),
+                    )
+                })?;
             // for each of the applied directives, let's get the name, and create a SourceApi item.
-            (
-                connector_name,
-                SourceAPI::from_schema_directive(source_api_directive),
-            )
+            SourceAPI::from_schema_directive(source_api_directive)
+                .map(|source_api| (connector_name, source_api))
         })
-        .collect()
+        .collect::<Result<HashMap<_, _>, _>>()
+        .unwrap_or_default())
 }
 
 #[cfg(test)]
@@ -675,7 +682,7 @@ mod tests {
         )
         .unwrap();
 
-        let source_apis_from_schema = source_apis_from_schema_directive(&schema);
+        let source_apis_from_schema = source_apis_from_schema_directive(&schema).unwrap();
 
         insta::with_settings!({sort_maps => true}, {
             assert_json_snapshot!(source_apis_from_schema);
@@ -695,7 +702,7 @@ mod tests {
         let schema =
             Schema::parse(SCHEMA_ENUM, &Configuration::fake_builder().build().unwrap()).unwrap();
 
-        let source_apis_from_schema = source_apis_from_root_enum(&schema);
+        let source_apis_from_schema = source_apis_from_root_enum(&schema).unwrap();
         insta::with_settings!({sort_maps => true}, {
             assert_json_snapshot!(source_apis_from_schema);
         });

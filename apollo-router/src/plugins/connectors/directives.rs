@@ -29,7 +29,7 @@ impl SourceAPI {
             .0
             .iter()
             .find(|d| d.name == SOURCE_API_DIRECTIVE_NAME)
-            .map(|directive| HTTPSourceAPI::from_directive(directive));
+            .map(HTTPSourceAPI::from_directive);
         Self { name, http }
     }
 
@@ -80,7 +80,7 @@ impl HTTPSourceAPI {
             });
 
         Self {
-            base_url: base_url,
+            base_url,
             default,
             headers,
         }
@@ -99,7 +99,7 @@ impl HTTPHeaderMapping {
     pub(super) fn from_header_arguments(argument: &Node<Value>) -> Vec<Self> {
         argument
             .as_list()
-            .map(|arguments| arguments.iter().map(|arg| Self::from_value(arg)).collect())
+            .map(|arguments| arguments.iter().map(Self::from_value).collect())
             .unwrap_or_default()
     }
     // TODO: 100% a result, the name is mandatory!

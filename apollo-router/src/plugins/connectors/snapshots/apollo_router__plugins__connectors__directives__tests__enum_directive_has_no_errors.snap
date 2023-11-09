@@ -1,6 +1,6 @@
 ---
-source: apollo-router/src/plugins/connectors/subgraph_connector.rs
-expression: source_apis_from_schema
+source: apollo-router/src/plugins/connectors/directives.rs
+expression: all_source_apis
 ---
 {
   "CONTACTS": {

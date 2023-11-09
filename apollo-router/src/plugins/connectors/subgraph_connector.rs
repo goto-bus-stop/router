@@ -24,6 +24,7 @@ use tower::ServiceExt;
 use super::directives::HTTPSourceAPI;
 use super::directives::SourceAPI;
 use super::directives::SOURCE_API_DIRECTIVE_NAME;
+use super::directives::SOURCE_API_ENUM_NAME;
 use crate::error::ConnectorDirectiveError;
 use crate::layers::ServiceBuilderExt;
 use crate::services::subgraph;
@@ -35,7 +36,6 @@ use crate::spec::Selection;
 pub(crate) const HTTP_RESOURCE_DIRECTIVE_NAME: &str = "http_resource";
 pub(crate) const HTTP_LIST_RESOURCE_DIRECTIVE_NAME: &str = "http_list_resource";
 pub(crate) const HTTP_FIELD_DIRECTIVE_NAME: &str = "http_field";
-pub(crate) const SOURCE_API_ENUM_NAME: &str = "SOURCE_API";
 
 #[derive(Clone)]
 pub(crate) struct SubgraphConnector {
@@ -76,8 +76,8 @@ fn source_apis_from_root_enum(
                 .map(|(node, value)| {
                     // the node contains the name,
                     // let's craft a SourceApi from the directive metadata
-                    SourceAPI::from_directive(node.as_str().to_string(), value)
-                        .map(|source_api| (node.as_str().to_string(), source_api))
+                    SourceAPI::from_root_enum(value)
+                        .map(|source_api| (node.to_string().to_string(), source_api))
                 })
                 .collect::<Result<HashMap<_, _>, _>>()
         })
@@ -101,13 +101,23 @@ fn source_apis_from_schema_directive(
             let connector_name = source_api_directive
                 .argument_by_name("name")
                 .as_ref()
-                .map(|name| name.as_str().unwrap().to_string())
+                .map(|name| {
+                    Ok(name
+                        .as_str()
+                        .ok_or_else(|| {
+                            ConnectorDirectiveError::InvalidTypeForAttribute(
+                                "String".to_string(),
+                                "name".to_string(),
+                            )
+                        })?
+                        .to_string())
+                })
                 .ok_or_else(|| {
                     ConnectorDirectiveError::MissingAttributeForType(
                         "name".to_string(),
                         SOURCE_API_DIRECTIVE_NAME.to_string(),
                     )
-                })?;
+                })??;
             // for each of the applied directives, let's get the name, and create a SourceApi item.
             SourceAPI::from_schema_directive(source_api_directive)
                 .map(|source_api| (connector_name, source_api))

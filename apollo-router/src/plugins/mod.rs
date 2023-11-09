@@ -22,6 +22,12 @@ macro_rules! schemar_fn {
 
 pub(crate) mod authentication;
 pub(crate) mod authorization;
+#[cfg_attr(
+    not(test),
+    deny(clippy::unwrap_used),
+    deny(clippy::expect_used),
+    deny(clippy::panic)
+)]
 pub(crate) mod connectors;
 mod coprocessor;
 pub(crate) mod csrf;

@@ -181,7 +181,12 @@ impl HTTPHeaderMapping {
             .unwrap_or_default())
     }
     fn from_value(argument: &Node<Value>) -> Result<Self, ConnectorDirectiveError> {
-        let header_arguments = argument.as_object().unwrap();
+        let header_arguments = argument.as_object().ok_or_else(|| {
+            ConnectorDirectiveError::InvalidTypeForAttribute(
+                "Object".to_string(),
+                "headers".to_string(),
+            )
+        })?;
         let mut name = None;
         let mut r#as = Default::default();
         let mut value = Default::default();

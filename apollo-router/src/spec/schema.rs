@@ -30,6 +30,7 @@ pub(crate) struct Schema {
     pub(crate) implementers_map: HashMap<ast::Name, HashSet<ast::Name>>,
     api_schema: Option<Box<Schema>>,
     pub(crate) schema_id: Option<String>,
+    #[allow(dead_code)]
     pub(crate) subgraph_definition_and_names: HashMap<String, String>,
 }
 
@@ -219,6 +220,7 @@ impl Schema {
         self.subgraphs.get(service_name)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn subgraph_name(&self, subgraph_definition: &str) -> Option<&String> {
         self.subgraph_definition_and_names.get(subgraph_definition)
     }

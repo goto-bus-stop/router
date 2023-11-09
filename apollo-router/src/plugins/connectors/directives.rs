@@ -7,24 +7,14 @@ use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::Value;
 use apollo_compiler::Node;
-use displaydoc::Display;
 use serde::Serialize;
-use thiserror::Error;
 
 use super::selection_parser::Selection as JSONSelection;
 use super::url_path_parser::Template as URLPathTemplate;
+use crate::error::ConnectorDirectiveError;
 
 pub(super) const SOURCE_API_DIRECTIVE_NAME: &str = "source_api";
 const HTTP_ARGUMENT_NAME: &str = "http";
-
-#[derive(Error, Display, Debug, Clone, Serialize, Eq, PartialEq)]
-#[allow(missing_docs)] // FIXME
-pub(super) enum ConnectorDirectiveError {
-    /// Attribute '{1}' is missing for type '{0}'
-    MissingAttributeForType(String, String),
-    /// Attribute '{1}' does not exist for type '{0}'
-    UnknownAttributeForType(String, String),
-}
 
 #[derive(Debug, Serialize)]
 pub(super) struct SourceAPI {

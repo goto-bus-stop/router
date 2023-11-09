@@ -241,6 +241,15 @@ pub(crate) enum ServiceBuildError {
 
     /// schema error: {0}
     Schema(SchemaError),
+
+    /// subgraph instanciation error: {0}
+    SubgraphConnector(ConnectorDirectiveError),
+}
+
+impl From<ConnectorDirectiveError> for ServiceBuildError {
+    fn from(err: ConnectorDirectiveError) -> Self {
+        Self::SubgraphConnector(err)
+    }
 }
 
 impl From<SchemaError> for ServiceBuildError {
@@ -550,6 +559,14 @@ pub(crate) enum SchemaError {
     Validate(ValidationErrors),
     /// Api error(s): {0}
     Api(String),
+}
+
+#[derive(Error, Display, Debug, Clone, Serialize, Eq, PartialEq)]
+pub(crate) enum ConnectorDirectiveError {
+    /// Attribute '{1}' is missing for type '{0}'
+    MissingAttributeForType(String, String),
+    /// Attribute '{1}' does not exist for type '{0}'
+    UnknownAttributeForType(String, String),
 }
 
 /// Collection of schema validation errors.

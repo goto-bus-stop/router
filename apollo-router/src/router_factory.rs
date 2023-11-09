@@ -312,7 +312,7 @@ pub(crate) async fn create_subgraph_services(
 
     Ok((
         subgraph_services,
-        SubgraphConnector::for_schema(Arc::clone(&schema)),
+        SubgraphConnector::for_schema(Arc::clone(&schema))?,
     ))
 }
 

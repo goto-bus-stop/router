@@ -21,6 +21,7 @@ use nom::sequence::pair;
 use nom::sequence::preceded;
 use nom::sequence::tuple;
 use nom::IResult;
+use serde::Serialize;
 use serde_json::json;
 use serde_json::Map;
 use serde_json::Value as JSON;
@@ -133,8 +134,8 @@ fn test_spaces_or_comments() {
 
 // Selection ::= NamedSelection* StarSelection? | PathSelection
 
-#[derive(Debug, PartialEq, Clone)]
-enum Selection {
+#[derive(Debug, PartialEq, Clone, Serialize)]
+pub(super) enum Selection {
     // Although we reuse the SubSelection type for the Selection::Named case, we
     // parse it as a sequence of NamedSelection items without the {...} curly
     // braces that SubSelection::parse expects.
@@ -378,7 +379,7 @@ fn test_selection() {
 //     | Alias PathSelection
 //     | Alias SubSelection
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize)]
 enum NamedSelection {
     Field(Option<Alias>, String, Option<SubSelection>),
     Quoted(Alias, String, Option<SubSelection>),
@@ -557,8 +558,8 @@ fn test_named_selection() {
 
 // PathSelection ::= ("." Property)+ SubSelection?
 
-#[derive(Debug, PartialEq, Clone)]
-enum PathSelection {
+#[derive(Debug, PartialEq, Clone, Serialize)]
+pub(super) enum PathSelection {
     // We use a recursive structure here instead of a Vec<Property> to make
     // applying the selection to a JSON value easier.
     Path(Property, Box<PathSelection>),
@@ -660,8 +661,8 @@ fn test_path_selection() {
 
 // SubSelection ::= "{" NamedSelection* StarSelection? "}"
 
-#[derive(Debug, PartialEq, Clone)]
-struct SubSelection {
+#[derive(Debug, PartialEq, Clone, Serialize)]
+pub(super) struct SubSelection {
     selections: Vec<NamedSelection>,
     star: Option<StarSelection>,
 }
@@ -766,7 +767,7 @@ fn test_subselection() {
 
 // StarSelection ::= Alias? "*" SubSelection?
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize)]
 struct StarSelection(Option<Alias>, Option<Box<SubSelection>>);
 
 impl StarSelection {
@@ -926,7 +927,7 @@ fn test_star_selection() {
 
 // Alias ::= Identifier ":"
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize)]
 struct Alias {
     name: String,
 }
@@ -993,8 +994,8 @@ fn test_alias() {
 
 // Property ::= Identifier | StringLiteral
 
-#[derive(Debug, PartialEq, Clone)]
-enum Property {
+#[derive(Debug, PartialEq, Clone, Serialize)]
+pub(super) enum Property {
     Field(String),
     Quoted(String),
     Index(usize),

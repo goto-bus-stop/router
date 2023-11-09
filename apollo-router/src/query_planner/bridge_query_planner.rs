@@ -86,6 +86,7 @@ impl BridgeQueryPlanner {
         let planner = match planner {
             Ok(planner) => planner,
             Err(err) => {
+                dbg!(&err);
                 if configuration.experimental_graphql_validation_mode == GraphQLValidationMode::Both
                 {
                     let has_validation_errors = err.iter().any(|err| err.is_validation_error());

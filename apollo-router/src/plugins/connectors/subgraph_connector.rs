@@ -129,7 +129,6 @@ fn source_apis_from_schema_directive(
 #[cfg(test)]
 mod tests {
     use insta::assert_json_snapshot;
-    use insta::with_settings;
 
     use super::*;
     use crate::Configuration;

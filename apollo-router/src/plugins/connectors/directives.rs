@@ -232,23 +232,19 @@ pub(super) struct SourceType {
 }
 
 impl SourceType {
-    pub(super) fn from_arguments(arguments: &Node<Value>) -> Result<Self, ConnectorDirectiveError> {
-        let args = arguments.as_object().ok_or_else(|| {
-            ConnectorDirectiveError::InvalidTypeForAttribute(
-                "Object".to_string(),
-                "source_type".to_string(),
-            )
-        })?;
-
+    pub(super) fn from_directive(
+        directive: &Component<Directive>,
+    ) -> Result<Self, ConnectorDirectiveError> {
         let mut api = Default::default();
         let mut http = Default::default();
         let mut selection = Default::default();
         let mut key_type_map = Default::default();
 
-        for (name, node) in args.iter() {
-            match name.as_str() {
+        for argument in directive.arguments.iter() {
+            match argument.name.as_str() {
                 "api" => {
-                    api = node
+                    api = argument
+                        .value
                         .as_str()
                         .ok_or_else(|| {
                             ConnectorDirectiveError::InvalidTypeForAttribute(
@@ -258,10 +254,10 @@ impl SourceType {
                         })?
                         .to_string()
                 }
-                "http" => http = Some(HTTPSourceType::from_arguments(node)?),
+                "http" => http = Some(HTTPSourceType::from_arguments(&argument.value)?),
                 "selection" => {
                     selection = Some(
-                        JSONSelection::parse(node.as_str().ok_or_else(|| {
+                        JSONSelection::parse(argument.value.as_str().ok_or_else(|| {
                             ConnectorDirectiveError::InvalidTypeForAttribute(
                                 "string".to_string(),
                                 "selection".to_string(),
@@ -276,7 +272,7 @@ impl SourceType {
                         .1,
                     )
                 }
-                "keyTypeMap" => key_type_map = Some(KeyTypeMap::from_arguments(node)?),
+                "keyTypeMap" => key_type_map = Some(KeyTypeMap::from_arguments(&argument.value)?),
                 other => {
                     return Err(ConnectorDirectiveError::UnknownAttributeForType(
                         other.to_string(),
@@ -305,7 +301,9 @@ pub(super) struct HTTPSourceType {
 }
 
 impl HTTPSourceType {
-    pub(super) fn from_arguments(arguments: &Node<Value>) -> Result<Self, ConnectorDirectiveError> {
+    pub(super) fn from_arguments(
+        _arguments: &Node<Value>,
+    ) -> Result<Self, ConnectorDirectiveError> {
         Ok(Self {
             get: Default::default(),
             post: Default::default(),
@@ -324,7 +322,9 @@ pub(super) struct KeyTypeMap {
 }
 
 impl KeyTypeMap {
-    pub(super) fn from_arguments(arguments: &Node<Value>) -> Result<Self, ConnectorDirectiveError> {
+    pub(super) fn from_arguments(
+        _arguments: &Node<Value>,
+    ) -> Result<Self, ConnectorDirectiveError> {
         Ok(Self {
             key: Default::default(),
             type_map: Default::default(),
@@ -511,12 +511,12 @@ mod tests {
     fn test_valid_source_types() {
         let partial_sdl = r#"  
         type ValidSourceType
-            @source_type(api: CONTACTS, http: { GET: "/contacts/{contactId}" }) {
+            @source_type(api: "contacts", http: { GET: "/contacts/{contactId}" }) {
             id: ID!
             name: String
         }
         type ValidSourceTypeDefaultHttp
-            @source_type(api: CONTACTS) {
+            @source_type(api: "contacts") {
                 id: ID!
                 name: String
             }
@@ -525,15 +525,14 @@ mod tests {
         let partial_schema =
             Schema::parse(partial_sdl, &Configuration::fake_builder().build().unwrap()).unwrap();
 
-        let valid_source_type = SourceType::from_arguments(
+        let valid_source_type = SourceType::from_directive(
             partial_schema
                 .definitions
                 .get_object("ValidSourceType")
                 .unwrap()
                 .directives
                 .get(SOURCE_TYPE_DIRECTIVE_NAME)
-                .unwrap()
-                .arguments,
+                .unwrap(),
         )
         .unwrap();
 
@@ -541,15 +540,14 @@ mod tests {
             assert_json_snapshot!(valid_source_type);
         });
 
-        let valid_source_type_default_http = SourceType::from_arguments(
+        let valid_source_type_default_http = SourceType::from_directive(
             partial_schema
                 .definitions
                 .get_object("ValidSourceTypeDefaultHttp")
                 .unwrap()
                 .directives
                 .get(SOURCE_TYPE_DIRECTIVE_NAME)
-                .unwrap()
-                .arguments,
+                .unwrap(),
         )
         .unwrap();
 

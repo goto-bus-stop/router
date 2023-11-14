@@ -1,0 +1,15 @@
+---
+source: apollo-router/src/plugins/connectors/directives.rs
+expression: valid_source_type
+---
+{
+  "api": "contacts",
+  "http": {
+    "get": null,
+    "post": null,
+    "headers": [],
+    "body": null
+  },
+  "selection": null,
+  "key_type_map": null
+}

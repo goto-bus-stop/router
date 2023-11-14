@@ -17,6 +17,8 @@ pub(super) const SOURCE_API_DIRECTIVE_NAME: &str = "source_api";
 const HTTP_ARGUMENT_NAME: &str = "http";
 pub(crate) const SOURCE_API_ENUM_NAME: &str = "SOURCE_API";
 
+const SOURCE_TYPE_DIRECTIVE_NAME: &str = "source_type";
+
 #[derive(Debug, Serialize)]
 pub(super) struct SourceAPI {
     name: String,
@@ -229,6 +231,66 @@ pub(super) struct SourceType {
     key_type_map: Option<KeyTypeMap>,
 }
 
+impl SourceType {
+    pub(super) fn from_directive(
+        directive: &Component<Directive>,
+    ) -> Result<Self, ConnectorDirectiveError> {
+        let mut api = Default::default();
+        let mut http = Default::default();
+        let mut selection = Default::default();
+        let mut key_type_map = Default::default();
+
+        for argument in directive.arguments.iter() {
+            match argument.name.as_str() {
+                "api" => {
+                    api = argument
+                        .value
+                        .as_str()
+                        .ok_or_else(|| {
+                            ConnectorDirectiveError::InvalidTypeForAttribute(
+                                "string".to_string(),
+                                "api".to_string(),
+                            )
+                        })?
+                        .to_string()
+                }
+                "http" => http = Some(HTTPSourceType::from_arguments(&argument.value)?),
+                "selection" => {
+                    selection = Some(
+                        JSONSelection::parse(argument.value.as_str().ok_or_else(|| {
+                            ConnectorDirectiveError::InvalidTypeForAttribute(
+                                "string".to_string(),
+                                "selection".to_string(),
+                            )
+                        })?)
+                        .map_err(|e| {
+                            ConnectorDirectiveError::ParseError(
+                                e.to_string(),
+                                "selection".to_string(),
+                            )
+                        })?
+                        .1,
+                    )
+                }
+                "keyTypeMap" => key_type_map = Some(KeyTypeMap::from_arguments(&argument.value)?),
+                other => {
+                    return Err(ConnectorDirectiveError::UnknownAttributeForType(
+                        other.to_string(),
+                        SOURCE_TYPE_DIRECTIVE_NAME.to_string(),
+                    ))
+                }
+            }
+        }
+
+        Ok(Self {
+            api,
+            http,
+            selection,
+            key_type_map,
+        })
+    }
+}
+
 // TODO: impl tryfrom with XOR validation on methods
 #[derive(Debug, Serialize)]
 pub(super) struct HTTPSourceType {
@@ -238,12 +300,36 @@ pub(super) struct HTTPSourceType {
     body: Option<JSONSelection>,
 }
 
+impl HTTPSourceType {
+    pub(super) fn from_arguments(
+        _arguments: &Node<Value>,
+    ) -> Result<Self, ConnectorDirectiveError> {
+        Ok(Self {
+            get: Default::default(),
+            post: Default::default(),
+            headers: Default::default(),
+            body: Default::default(),
+        })
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub(super) struct KeyTypeMap {
     key: String,
     // Dictionary mapping possible __typename strings to values of the JSON
     // property named by key.
     type_map: HashMap<String, String>, // TODO: is this accurate?
+}
+
+impl KeyTypeMap {
+    pub(super) fn from_arguments(
+        _arguments: &Node<Value>,
+    ) -> Result<Self, ConnectorDirectiveError> {
+        Ok(Self {
+            key: Default::default(),
+            type_map: Default::default(),
+        })
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -419,5 +505,54 @@ mod tests {
             ),
             missing_header_name_error
         );
+    }
+
+    #[test]
+    fn test_valid_source_types() {
+        let partial_sdl = r#"  
+        type ValidSourceType
+            @source_type(api: "contacts", http: { GET: "/contacts/{contactId}" }) {
+            id: ID!
+            name: String
+        }
+        type ValidSourceTypeDefaultHttp
+            @source_type(api: "contacts") {
+                id: ID!
+                name: String
+            }
+        "#;
+
+        let partial_schema =
+            Schema::parse(partial_sdl, &Configuration::fake_builder().build().unwrap()).unwrap();
+
+        let valid_source_type = SourceType::from_directive(
+            partial_schema
+                .definitions
+                .get_object("ValidSourceType")
+                .unwrap()
+                .directives
+                .get(SOURCE_TYPE_DIRECTIVE_NAME)
+                .unwrap(),
+        )
+        .unwrap();
+
+        insta::with_settings!({sort_maps => true}, {
+            assert_json_snapshot!(valid_source_type);
+        });
+
+        let valid_source_type_default_http = SourceType::from_directive(
+            partial_schema
+                .definitions
+                .get_object("ValidSourceTypeDefaultHttp")
+                .unwrap()
+                .directives
+                .get(SOURCE_TYPE_DIRECTIVE_NAME)
+                .unwrap(),
+        )
+        .unwrap();
+
+        insta::with_settings!({sort_maps => true}, {
+            assert_json_snapshot!(valid_source_type_default_http);
+        });
     }
 }

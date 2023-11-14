@@ -144,7 +144,7 @@ pub(super) enum Selection {
 }
 
 impl Selection {
-    fn parse(input: &str) -> IResult<&str, Self> {
+    pub(super) fn parse(input: &str) -> IResult<&str, Self> {
         alt((
             all_consuming(map(
                 tuple((

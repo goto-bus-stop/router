@@ -569,6 +569,8 @@ pub(crate) enum ConnectorDirectiveError {
     UnknownAttributeForType(String, String),
     /// Attribute '{1}' must be of type '{0}'.
     InvalidTypeForAttribute(String, String),
+    /// Couldn't parse type '{1}': '{0}
+    ParseError(String, String),
 }
 
 /// Collection of schema validation errors.

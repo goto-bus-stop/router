@@ -423,15 +423,15 @@ mod tests {
             directive @source_api(name: String!, http: HTTPSourceAPI) on ENUM_VALUE
 
             input HTTPSourceAPI {
-            base_url: String!
-            default: Boolean
-            headers: [HTTPHeaderMapping!]
+                base_url: String!
+                default: Boolean
+                headers: [HTTPHeaderMapping!]
             }
 
             input HTTPHeaderMapping {
-            name: String!
-            as: String
-            value: String
+                name: String!
+                as: String
+                value: String
             }
 
             enum SOURCE_API {
@@ -443,13 +443,14 @@ mod tests {
                 MISSING_BASE_URL @source_api(
                     name: "missing_base_url"
                     http: {
+                        default: true
                     }
                 )
                 MISSING_HEADER_NAME @source_api(
                     name: "missing_header_name"
                     http: {
                         base_url: "http://localhost:4002/contacts/"
-                        headers: [{ }]
+                        headers: [{ as: "missing mandatory name field" }]
                     }
                 )
             }"#;

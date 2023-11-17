@@ -18,6 +18,7 @@ const HTTP_ARGUMENT_NAME: &str = "http";
 pub(crate) const SOURCE_API_ENUM_NAME: &str = "SOURCE_API";
 
 const SOURCE_TYPE_DIRECTIVE_NAME: &str = "source_type";
+const SOURCE_FIELD_DIRECTIVE_NAME: &str = "source_field";
 
 #[derive(Debug, Serialize)]
 pub(super) struct SourceAPI {
@@ -334,21 +335,161 @@ impl KeyTypeMap {
 
 #[derive(Debug, Serialize)]
 pub(super) struct SourceField {
-    api: Option<String>,
+    api: String,
     http: Option<HTTPSourceField>,
     selection: Option<JSONSelection>,
+}
+
+impl SourceField {
+    pub(super) fn from_directive(
+        directive: &Node<Directive>,
+    ) -> Result<Self, ConnectorDirectiveError> {
+        let mut api = Default::default();
+        let mut http = Default::default();
+        let mut selection = Default::default();
+
+        for argument in directive.arguments.iter() {
+            match argument.name.as_str() {
+                "api" => {
+                    api = argument
+                        .value
+                        .as_str()
+                        .ok_or_else(|| {
+                            ConnectorDirectiveError::InvalidTypeForAttribute(
+                                "string".to_string(),
+                                "api".to_string(),
+                            )
+                        })?
+                        .to_string()
+                }
+                "http" => http = Some(HTTPSourceField::from_argument(&argument.value)?),
+                "selection" => {
+                    selection = Some(
+                        JSONSelection::parse(argument.value.as_str().ok_or_else(|| {
+                            ConnectorDirectiveError::InvalidTypeForAttribute(
+                                "string".to_string(),
+                                "selection".to_string(),
+                            )
+                        })?)
+                        .map_err(|e| {
+                            ConnectorDirectiveError::ParseError(
+                                e.to_string(),
+                                "selection".to_string(),
+                            )
+                        })?
+                        .1,
+                    )
+                }
+                other => {
+                    return Err(ConnectorDirectiveError::UnknownAttributeForType(
+                        other.to_string(),
+                        SOURCE_TYPE_DIRECTIVE_NAME.to_string(),
+                    ))
+                }
+            }
+        }
+
+        Ok(Self {
+            api,
+            http,
+            selection,
+        })
+    }
 }
 
 // TODO: impl tryfrom with XOR validation on methods
 #[derive(Debug, Serialize)]
 pub(super) struct HTTPSourceField {
-    get: Option<URLPathTemplate>,
-    post: Option<URLPathTemplate>,
-    put: Option<URLPathTemplate>,
-    patch: Option<URLPathTemplate>,
-    delete: Option<URLPathTemplate>,
-    headers: Vec<HTTPHeaderMapping>,
+    get: Option<String>,    // TODO URLPathTemplate
+    post: Option<String>,   // TODO URLPathTemplate
+    put: Option<String>,    // TODO URLPathTemplate
+    patch: Option<String>,  // TODO URLPathTemplate
+    delete: Option<String>, // TODO URLPathTemplate
     body: Option<JSONSelection>,
+}
+
+impl HTTPSourceField {
+    fn from_argument(argument: &Node<Value>) -> Result<Self, ConnectorDirectiveError> {
+        let mut get = Default::default();
+        let mut post = Default::default();
+        let mut put = Default::default();
+        let mut patch = Default::default();
+        let mut delete = Default::default();
+        let mut body = Default::default();
+
+        let value = argument.as_object().ok_or_else(|| {
+            ConnectorDirectiveError::InvalidTypeForAttribute(
+                "object".to_string(),
+                HTTP_ARGUMENT_NAME.to_string(),
+            )
+        })?;
+
+        let mut methods_set = 0;
+
+        for (name, value) in value.iter() {
+            match name.as_str() {
+                "GET" => {
+                    get = value.as_str().map(|s| s.to_string());
+                    methods_set += 1;
+                }
+                "POST" => {
+                    post = value.as_str().map(|s| s.to_string());
+                    methods_set += 1;
+                }
+                "PUT" => {
+                    put = value.as_str().map(|s| s.to_string());
+                    methods_set += 1;
+                }
+                "PATCH" => {
+                    patch = value.as_str().map(|s| s.to_string());
+                    methods_set += 1;
+                }
+                "DELETE" => {
+                    delete = value.as_str().map(|s| s.to_string());
+                    methods_set += 1;
+                }
+                "body" => {
+                    body = Some(
+                        JSONSelection::parse(value.as_str().ok_or_else(|| {
+                            ConnectorDirectiveError::InvalidTypeForAttribute(
+                                "string".to_string(),
+                                "selection".to_string(),
+                            )
+                        })?)
+                        .map_err(|e| {
+                            ConnectorDirectiveError::ParseError(
+                                e.to_string(),
+                                "selection".to_string(),
+                            )
+                        })?
+                        .1,
+                    )
+                }
+                other => {
+                    return Err(ConnectorDirectiveError::UnknownAttributeForType(
+                        other.to_string(),
+                        HTTP_ARGUMENT_NAME.to_string(),
+                    ))
+                }
+            }
+        }
+
+        if methods_set != 1 {
+            return Err(ConnectorDirectiveError::RequiresExactlyOne(
+                "HTTPSourceField".to_string(),
+                "GET, POST, PUT, PATCH, DELETE".to_string(),
+            ));
+        }
+
+        Ok(Self {
+            get,
+            post,
+            put,
+            patch,
+            delete,
+            body,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -361,7 +502,7 @@ mod tests {
 
     #[test]
     fn test_enum_directive_has_no_errors() {
-        let partial_sdl = r#"  
+        let partial_sdl = r#"
             enum SOURCE_API {
                 CONTACTS
                 @source_api(
@@ -510,7 +651,7 @@ mod tests {
 
     #[test]
     fn test_valid_source_types() {
-        let partial_sdl = r#"  
+        let partial_sdl = r#"
         type ValidSourceType
             @source_type(api: "contacts", http: { GET: "/contacts/{contactId}" }) {
             id: ID!
@@ -555,5 +696,147 @@ mod tests {
         insta::with_settings!({sort_maps => true}, {
             assert_json_snapshot!(valid_source_type_default_http);
         });
+    }
+
+    #[test]
+    fn test_valid_source_field() {
+        let partial_sdl = r#"
+        type Query {
+            field: String
+              @source_field(
+                api: "contacts"
+                http: { GET: "/contacts/{contactId}" }
+                selection: "id name"
+              )
+        }
+        "#;
+
+        let partial_schema =
+            Schema::parse(partial_sdl, &Configuration::fake_builder().build().unwrap()).unwrap();
+
+        let valid_source_type = SourceField::from_directive(
+            partial_schema
+                .definitions
+                .get_object("Query")
+                .unwrap()
+                .fields
+                .iter()
+                .find(|(name, _)| *name == "field")
+                .map(|(_, field)| field)
+                .unwrap()
+                .directives
+                .get(SOURCE_FIELD_DIRECTIVE_NAME)
+                .unwrap(),
+        )
+        .unwrap();
+
+        insta::with_settings!({sort_maps => true}, {
+            assert_json_snapshot!(valid_source_type, @r###"
+            {
+              "api": "contacts",
+              "http": {
+                "get": "/contacts/{contactId}",
+                "post": null,
+                "put": null,
+                "patch": null,
+                "delete": null,
+                "body": null
+              },
+              "selection": {
+                "Named": {
+                  "selections": [
+                    {
+                      "Field": [
+                        null,
+                        "id",
+                        null
+                      ]
+                    },
+                    {
+                      "Field": [
+                        null,
+                        "name",
+                        null
+                      ]
+                    }
+                  ],
+                  "star": null
+                }
+              }
+            }
+            "###);
+        });
+
+        let partial_sdl = r#"
+        type Query {
+            field: String
+              @source_field(
+                api: "contacts"
+                http: { GET: "/contacts/{contactId}", POST: "/x" }
+                selection: "id name"
+              )
+        }
+        "#;
+
+        let partial_schema =
+            Schema::parse(partial_sdl, &Configuration::fake_builder().build().unwrap()).unwrap();
+
+        assert_eq!(
+            SourceField::from_directive(
+                partial_schema
+                    .definitions
+                    .get_object("Query")
+                    .unwrap()
+                    .fields
+                    .iter()
+                    .find(|(name, _)| *name == "field")
+                    .map(|(_, field)| field)
+                    .unwrap()
+                    .directives
+                    .get(SOURCE_FIELD_DIRECTIVE_NAME)
+                    .unwrap(),
+            )
+            .err(),
+            Some(ConnectorDirectiveError::RequiresExactlyOne(
+                "HTTPSourceField".to_string(),
+                "GET, POST, PUT, PATCH, DELETE".to_string(),
+            )),
+        );
+
+        let partial_sdl = r#"
+        type Query {
+            field: String
+              @source_field(
+                api: "contacts"
+                http: { body: "id name" }
+                selection: "id name"
+              )
+        }
+        "#;
+
+        let partial_schema =
+            Schema::parse(partial_sdl, &Configuration::fake_builder().build().unwrap()).unwrap();
+
+        assert_eq!(
+            SourceField::from_directive(
+                partial_schema
+                    .definitions
+                    .get_object("Query")
+                    .unwrap()
+                    .fields
+                    .iter()
+                    .find(|(name, _)| *name == "field")
+                    .map(|(_, field)| field)
+                    .unwrap()
+                    .directives
+                    .get(SOURCE_FIELD_DIRECTIVE_NAME)
+                    .unwrap(),
+            )
+            .err(),
+            Some(ConnectorDirectiveError::RequiresExactlyOne(
+                "HTTPSourceField".to_string(),
+                "GET, POST, PUT, PATCH, DELETE".to_string(),
+            )),
+        );
     }
 }

@@ -691,6 +691,93 @@ impl ApplyTo for SubSelection {
     }
 }
 
+// GraphQL Selection Set -------------------------------------------------------
+
+use apollo_compiler::ast::Selection as GraphQLSelection;
+
+impl From<Selection> for Vec<GraphQLSelection> {
+    fn from(val: Selection) -> Vec<GraphQLSelection> {
+        match val {
+            Selection::Named(named_selections) => named_selections.into(),
+            Selection::Path(path_selection) => path_selection.into(),
+        }
+    }
+}
+
+fn new_field(name: String, selection: Option<Vec<GraphQLSelection>>) -> GraphQLSelection {
+    GraphQLSelection::Field(
+        apollo_compiler::ast::Field {
+            alias: None,
+            name: name.into(),
+            arguments: Default::default(),
+            directives: Default::default(),
+            selection_set: selection.unwrap_or_default(),
+        }
+        .into(),
+    )
+}
+
+impl From<NamedSelection> for Vec<GraphQLSelection> {
+    fn from(val: NamedSelection) -> Vec<GraphQLSelection> {
+        match val {
+            NamedSelection::Field(alias, name, selection) => vec![new_field(
+                alias.map(|a| a.name).unwrap_or(name),
+                selection.map(|s| s.into()),
+            )],
+            NamedSelection::Quoted(alias, _name, selection) => {
+                vec![new_field(alias.name, selection.map(|s| s.into()))]
+            }
+            NamedSelection::Path(alias, path_selection) => {
+                vec![new_field(alias.name, Some(path_selection.into()))]
+            }
+            NamedSelection::Group(alias, sub_selection) => {
+                vec![new_field(alias.name, Some(sub_selection.into()))]
+            }
+        }
+    }
+}
+
+impl From<PathSelection> for Vec<GraphQLSelection> {
+    fn from(val: PathSelection) -> Vec<GraphQLSelection> {
+        match val {
+            PathSelection::Path(_head, tail) => {
+                let tail = *tail;
+                tail.into()
+            }
+            PathSelection::Selection(selection) => selection.into(),
+            PathSelection::Empty => vec![],
+        }
+    }
+}
+
+impl From<SubSelection> for Vec<GraphQLSelection> {
+    fn from(val: SubSelection) -> Vec<GraphQLSelection> {
+        let mut selections = val
+            .selections
+            .into_iter()
+            .flat_map(|named_selection| {
+                <NamedSelection as std::convert::Into<Vec<GraphQLSelection>>>::into(named_selection)
+            })
+            .collect::<Vec<_>>();
+
+        if let Some(StarSelection(alias, sub_selection)) = val.star {
+            if let Some(alias) = alias {
+                let star = new_field(
+                    alias.name,
+                    sub_selection.map(|s| {
+                        let s = *s;
+                        s.into()
+                    }),
+                );
+                selections.push(star);
+            } else {
+                tracing::warn!("star selection without alias cannot be converted to GraphQL");
+            }
+        }
+        selections
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2228,100 +2315,8 @@ mod tests {
             (Some(json!(123)), vec![],),
         );
     }
-}
 
-// GraphQL Selection Set -------------------------------------------------------
-
-use apollo_compiler::ast::Selection as GraphQLSelection;
-
-impl From<Selection> for Vec<GraphQLSelection> {
-    fn from(val: Selection) -> Vec<GraphQLSelection> {
-        match val {
-            Selection::Named(named_selections) => named_selections.into(),
-            Selection::Path(path_selection) => path_selection.into(),
-        }
-    }
-}
-
-fn new_field(name: String, selection: Option<Vec<GraphQLSelection>>) -> GraphQLSelection {
-    GraphQLSelection::Field(
-        apollo_compiler::ast::Field {
-            alias: None,
-            name: name.into(),
-            arguments: Default::default(),
-            directives: Default::default(),
-            selection_set: selection.unwrap_or_default(),
-        }
-        .into(),
-    )
-}
-
-impl From<NamedSelection> for Vec<GraphQLSelection> {
-    fn from(val: NamedSelection) -> Vec<GraphQLSelection> {
-        match val {
-            NamedSelection::Field(alias, name, selection) => vec![new_field(
-                alias.map(|a| a.name).unwrap_or(name),
-                selection.map(|s| s.into()),
-            )],
-            NamedSelection::Quoted(alias, _name, selection) => {
-                vec![new_field(alias.name, selection.map(|s| s.into()))]
-            }
-            NamedSelection::Path(alias, path_selection) => {
-                vec![new_field(alias.name, Some(path_selection.into()))]
-            }
-            NamedSelection::Group(alias, sub_selection) => {
-                vec![new_field(alias.name, Some(sub_selection.into()))]
-            }
-        }
-    }
-}
-
-impl From<PathSelection> for Vec<GraphQLSelection> {
-    fn from(val: PathSelection) -> Vec<GraphQLSelection> {
-        match val {
-            PathSelection::Path(_head, tail) => {
-                let tail = *tail;
-                tail.into()
-            }
-            PathSelection::Selection(selection) => selection.into(),
-            PathSelection::Empty => vec![],
-        }
-    }
-}
-
-impl From<SubSelection> for Vec<GraphQLSelection> {
-    fn from(val: SubSelection) -> Vec<GraphQLSelection> {
-        let mut selections = val
-            .selections
-            .into_iter()
-            .flat_map(|named_selection| {
-                <NamedSelection as std::convert::Into<Vec<GraphQLSelection>>>::into(named_selection)
-            })
-            .collect::<Vec<_>>();
-
-        if let Some(StarSelection(alias, sub_selection)) = val.star {
-            if let Some(alias) = alias {
-                let star = new_field(
-                    alias.name,
-                    sub_selection.map(|s| {
-                        let s = *s;
-                        s.into()
-                    }),
-                );
-                selections.push(star);
-            } else {
-                println!("star selection without alias cannot be converted to GraphQL");
-            }
-        }
-        selections
-    }
-}
-
-#[cfg(test)]
-mod selection_tests {
     use apollo_compiler::ast::Selection as GraphQLSelection;
-
-    use super::*;
 
     fn print_set(set: &[apollo_compiler::ast::Selection]) -> String {
         set.iter()

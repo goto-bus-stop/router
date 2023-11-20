@@ -46,92 +46,6 @@ fn spaces_or_comments(input: &str) -> IResult<&str, &str> {
     }
 }
 
-#[test]
-fn test_spaces_or_comments() {
-    assert_eq!(spaces_or_comments(""), Ok(("", "")));
-    assert_eq!(spaces_or_comments(" "), Ok(("", " ")));
-    assert_eq!(spaces_or_comments("  "), Ok(("", "  ")));
-
-    assert_eq!(spaces_or_comments("#"), Ok(("", "#")));
-    assert_eq!(spaces_or_comments("# "), Ok(("", "# ")));
-    assert_eq!(spaces_or_comments(" # "), Ok(("", " # ")));
-    assert_eq!(spaces_or_comments(" #"), Ok(("", " #")));
-
-    assert_eq!(spaces_or_comments("#\n"), Ok(("", "#\n")));
-    assert_eq!(spaces_or_comments("# \n"), Ok(("", "# \n")));
-    assert_eq!(spaces_or_comments(" # \n"), Ok(("", " # \n")));
-    assert_eq!(spaces_or_comments(" #\n"), Ok(("", " #\n")));
-    assert_eq!(spaces_or_comments(" # \n "), Ok(("", " # \n ")));
-
-    assert_eq!(spaces_or_comments("hello"), Ok(("hello", "")));
-    assert_eq!(spaces_or_comments(" hello"), Ok(("hello", " ")));
-    assert_eq!(spaces_or_comments("hello "), Ok(("hello ", "")));
-    assert_eq!(spaces_or_comments("hello#"), Ok(("hello#", "")));
-    assert_eq!(spaces_or_comments("hello #"), Ok(("hello #", "")));
-    assert_eq!(spaces_or_comments("hello # "), Ok(("hello # ", "")));
-    assert_eq!(spaces_or_comments("   hello # "), Ok(("hello # ", "   ")));
-    assert_eq!(
-        spaces_or_comments("  hello # world "),
-        Ok(("hello # world ", "  "))
-    );
-
-    assert_eq!(spaces_or_comments("#comment"), Ok(("", "#comment")));
-    assert_eq!(spaces_or_comments(" #comment"), Ok(("", " #comment")));
-    assert_eq!(spaces_or_comments("#comment "), Ok(("", "#comment ")));
-    assert_eq!(spaces_or_comments("#comment#"), Ok(("", "#comment#")));
-    assert_eq!(spaces_or_comments("#comment #"), Ok(("", "#comment #")));
-    assert_eq!(spaces_or_comments("#comment # "), Ok(("", "#comment # ")));
-    assert_eq!(
-        spaces_or_comments("  #comment # world "),
-        Ok(("", "  #comment # world "))
-    );
-    assert_eq!(
-        spaces_or_comments("  # comment # world "),
-        Ok(("", "  # comment # world "))
-    );
-
-    assert_eq!(
-        spaces_or_comments("  # comment\nnot a comment"),
-        Ok(("not a comment", "  # comment\n"))
-    );
-    assert_eq!(
-        spaces_or_comments("  # comment\nnot a comment\n"),
-        Ok(("not a comment\n", "  # comment\n"))
-    );
-    assert_eq!(
-        spaces_or_comments("not a comment\n  # comment\nasdf"),
-        Ok(("not a comment\n  # comment\nasdf", ""))
-    );
-
-    #[rustfmt::skip]
-    assert_eq!(spaces_or_comments("
-      # This is a comment
-      # And so is this
-      not a comment
-    "), Ok(("not a comment\n    ", "
-      # This is a comment
-      # And so is this\n      ")));
-
-    #[rustfmt::skip]
-    assert_eq!(spaces_or_comments("
-        # This is a comment
-        # And so is this
-        not a comment
-    "), Ok(("not a comment\n    ", "
-        # This is a comment
-        # And so is this\n        ")));
-
-    #[rustfmt::skip]
-    assert_eq!(
-        spaces_or_comments("
-        # This is a comment
-        not a comment
-        # Another comment"),
-        Ok(("not a comment\n        # Another comment", "
-        # This is a comment\n        ")),
-    );
-}
-
 // Selection ::= NamedSelection* StarSelection? | PathSelection
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
@@ -161,216 +75,6 @@ impl Selection {
             all_consuming(map(PathSelection::parse, Self::Path)),
         ))(input)
     }
-}
-
-// This macro is handy for tests, but it absolutely should never be used with
-// dynamic input at runtime, since it panics if the selection string fails to
-// parse for any reason.
-#[cfg(test)]
-macro_rules! selection {
-    ($input:expr) => {
-        if let Ok((remainder, parsed)) = Selection::parse($input) {
-            assert_eq!(remainder, "");
-            parsed
-        } else {
-            panic!("invalid selection: {:?}", $input);
-        }
-    };
-}
-
-#[test]
-fn test_selection() {
-    assert_eq!(
-        selection!(""),
-        Selection::Named(SubSelection {
-            selections: vec![],
-            star: None,
-        }),
-    );
-
-    assert_eq!(
-        selection!("   "),
-        Selection::Named(SubSelection {
-            selections: vec![],
-            star: None,
-        }),
-    );
-
-    assert_eq!(
-        selection!("hello"),
-        Selection::Named(SubSelection {
-            selections: vec![NamedSelection::Field(None, "hello".to_string(), None),],
-            star: None,
-        }),
-    );
-
-    assert_eq!(
-        selection!(".hello"),
-        Selection::Path(PathSelection::from_slice(
-            &[Property::Field("hello".to_string()),],
-            None
-        )),
-    );
-
-    assert_eq!(
-        selection!("hi: .hello.world"),
-        Selection::Named(SubSelection {
-            selections: vec![NamedSelection::Path(
-                Alias {
-                    name: "hi".to_string(),
-                },
-                PathSelection::from_slice(
-                    &[
-                        Property::Field("hello".to_string()),
-                        Property::Field("world".to_string()),
-                    ],
-                    None
-                ),
-            )],
-            star: None,
-        }),
-    );
-
-    assert_eq!(
-        selection!("before hi: .hello.world after"),
-        Selection::Named(SubSelection {
-            selections: vec![
-                NamedSelection::Field(None, "before".to_string(), None),
-                NamedSelection::Path(
-                    Alias {
-                        name: "hi".to_string(),
-                    },
-                    PathSelection::from_slice(
-                        &[
-                            Property::Field("hello".to_string()),
-                            Property::Field("world".to_string()),
-                        ],
-                        None
-                    ),
-                ),
-                NamedSelection::Field(None, "after".to_string(), None),
-            ],
-            star: None,
-        }),
-    );
-
-    let before_path_nested_after_result = Selection::Named(SubSelection {
-        selections: vec![
-            NamedSelection::Field(None, "before".to_string(), None),
-            NamedSelection::Path(
-                Alias {
-                    name: "hi".to_string(),
-                },
-                PathSelection::from_slice(
-                    &[
-                        Property::Field("hello".to_string()),
-                        Property::Field("world".to_string()),
-                    ],
-                    Some(SubSelection {
-                        selections: vec![
-                            NamedSelection::Field(None, "nested".to_string(), None),
-                            NamedSelection::Field(None, "names".to_string(), None),
-                        ],
-                        star: None,
-                    }),
-                ),
-            ),
-            NamedSelection::Field(None, "after".to_string(), None),
-        ],
-        star: None,
-    });
-
-    assert_eq!(
-        selection!("before hi: .hello.world { nested names } after"),
-        before_path_nested_after_result,
-    );
-
-    assert_eq!(
-        selection!("before hi:.hello.world{nested names}after"),
-        before_path_nested_after_result,
-    );
-
-    assert_eq!(
-        selection!(
-            "
-            # Comments are supported because we parse them as whitespace
-            topLevelAlias: topLevelField {
-                # Non-identifier properties must be aliased as an identifier
-                nonIdentifier: 'property name with spaces'
-
-                # This extracts the value located at the given path and applies a
-                # selection set to it before renaming the result to pathSelection
-                pathSelection: .some.nested.path {
-                    still: yet
-                    more
-                    properties
-                }
-
-                # An aliased SubSelection of fields nests the fields together
-                # under the given alias
-                siblingGroup: { brother sister }
-            }"
-        ),
-        Selection::Named(SubSelection {
-            selections: vec![NamedSelection::Field(
-                Some(Alias {
-                    name: "topLevelAlias".to_string(),
-                }),
-                "topLevelField".to_string(),
-                Some(SubSelection {
-                    selections: vec![
-                        NamedSelection::Quoted(
-                            Alias {
-                                name: "nonIdentifier".to_string(),
-                            },
-                            "property name with spaces".to_string(),
-                            None,
-                        ),
-                        NamedSelection::Path(
-                            Alias {
-                                name: "pathSelection".to_string(),
-                            },
-                            PathSelection::from_slice(
-                                &[
-                                    Property::Field("some".to_string()),
-                                    Property::Field("nested".to_string()),
-                                    Property::Field("path".to_string()),
-                                ],
-                                Some(SubSelection {
-                                    selections: vec![
-                                        NamedSelection::Field(
-                                            Some(Alias {
-                                                name: "still".to_string(),
-                                            }),
-                                            "yet".to_string(),
-                                            None,
-                                        ),
-                                        NamedSelection::Field(None, "more".to_string(), None,),
-                                        NamedSelection::Field(None, "properties".to_string(), None,),
-                                    ],
-                                    star: None,
-                                })
-                            ),
-                        ),
-                        NamedSelection::Group(
-                            Alias {
-                                name: "siblingGroup".to_string(),
-                            },
-                            SubSelection {
-                                selections: vec![
-                                    NamedSelection::Field(None, "brother".to_string(), None,),
-                                    NamedSelection::Field(None, "sister".to_string(), None,),
-                                ],
-                                star: None,
-                            },
-                        ),
-                    ],
-                    star: None,
-                }),
-            )],
-            star: None,
-        }),
-    );
 }
 
 // NamedSelection ::=
@@ -437,125 +141,6 @@ impl NamedSelection {
     }
 }
 
-#[test]
-fn test_named_selection() {
-    fn assert_result_and_name(input: &str, expected: NamedSelection, name: &str) {
-        let actual = NamedSelection::parse(input);
-        assert_eq!(actual, Ok(("", expected.clone())));
-        assert_eq!(actual.unwrap().1.name(), name);
-        assert_eq!(
-            selection!(input),
-            Selection::Named(SubSelection {
-                selections: vec![expected],
-                star: None,
-            }),
-        );
-    }
-
-    assert_result_and_name(
-        "hello",
-        NamedSelection::Field(None, "hello".to_string(), None),
-        "hello",
-    );
-
-    assert_result_and_name(
-        "hello { world }",
-        NamedSelection::Field(
-            None,
-            "hello".to_string(),
-            Some(SubSelection {
-                selections: vec![NamedSelection::Field(None, "world".to_string(), None)],
-                star: None,
-            }),
-        ),
-        "hello",
-    );
-
-    assert_result_and_name(
-        "hi: hello",
-        NamedSelection::Field(
-            Some(Alias {
-                name: "hi".to_string(),
-            }),
-            "hello".to_string(),
-            None,
-        ),
-        "hi",
-    );
-
-    assert_result_and_name(
-        "hi: 'hello world'",
-        NamedSelection::Quoted(
-            Alias {
-                name: "hi".to_string(),
-            },
-            "hello world".to_string(),
-            None,
-        ),
-        "hi",
-    );
-
-    assert_result_and_name(
-        "hi: hello { world }",
-        NamedSelection::Field(
-            Some(Alias {
-                name: "hi".to_string(),
-            }),
-            "hello".to_string(),
-            Some(SubSelection {
-                selections: vec![NamedSelection::Field(None, "world".to_string(), None)],
-                star: None,
-            }),
-        ),
-        "hi",
-    );
-
-    assert_result_and_name(
-        "hey: hello { world again }",
-        NamedSelection::Field(
-            Some(Alias {
-                name: "hey".to_string(),
-            }),
-            "hello".to_string(),
-            Some(SubSelection {
-                selections: vec![
-                    NamedSelection::Field(None, "world".to_string(), None),
-                    NamedSelection::Field(None, "again".to_string(), None),
-                ],
-                star: None,
-            }),
-        ),
-        "hey",
-    );
-
-    assert_result_and_name(
-        "hey: 'hello world' { again }",
-        NamedSelection::Quoted(
-            Alias {
-                name: "hey".to_string(),
-            },
-            "hello world".to_string(),
-            Some(SubSelection {
-                selections: vec![NamedSelection::Field(None, "again".to_string(), None)],
-                star: None,
-            }),
-        ),
-        "hey",
-    );
-
-    assert_result_and_name(
-        "leggo: 'my ego'",
-        NamedSelection::Quoted(
-            Alias {
-                name: "leggo".to_string(),
-            },
-            "my ego".to_string(),
-            None,
-        ),
-        "leggo",
-    );
-}
-
 // PathSelection ::= ("." Property)+ SubSelection?
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
@@ -588,77 +173,6 @@ impl PathSelection {
     }
 }
 
-#[test]
-fn test_path_selection() {
-    fn check_path_selection(input: &str, expected: PathSelection) {
-        assert_eq!(PathSelection::parse(input), Ok(("", expected.clone())));
-        assert_eq!(selection!(input), Selection::Path(expected.clone()));
-    }
-
-    check_path_selection(
-        ".hello",
-        PathSelection::from_slice(&[Property::Field("hello".to_string())], None),
-    );
-
-    check_path_selection(
-        ".hello.world",
-        PathSelection::from_slice(
-            &[
-                Property::Field("hello".to_string()),
-                Property::Field("world".to_string()),
-            ],
-            None,
-        ),
-    );
-
-    check_path_selection(
-        ".hello.world { hello }",
-        PathSelection::from_slice(
-            &[
-                Property::Field("hello".to_string()),
-                Property::Field("world".to_string()),
-            ],
-            Some(SubSelection {
-                selections: vec![NamedSelection::Field(None, "hello".to_string(), None)],
-                star: None,
-            }),
-        ),
-    );
-
-    check_path_selection(
-        ".nested.'string literal'.\"property\".name",
-        PathSelection::from_slice(
-            &[
-                Property::Field("nested".to_string()),
-                Property::Quoted("string literal".to_string()),
-                Property::Quoted("property".to_string()),
-                Property::Field("name".to_string()),
-            ],
-            None,
-        ),
-    );
-
-    check_path_selection(
-        ".nested.'string literal' { leggo: 'my ego' }",
-        PathSelection::from_slice(
-            &[
-                Property::Field("nested".to_string()),
-                Property::Quoted("string literal".to_string()),
-            ],
-            Some(SubSelection {
-                selections: vec![NamedSelection::Quoted(
-                    Alias {
-                        name: "leggo".to_string(),
-                    },
-                    "my ego".to_string(),
-                    None,
-                )],
-                star: None,
-            }),
-        ),
-    );
-}
-
 // SubSelection ::= "{" NamedSelection* StarSelection? "}"
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
@@ -686,85 +200,6 @@ impl SubSelection {
     }
 }
 
-#[test]
-fn test_subselection() {
-    assert_eq!(
-        SubSelection::parse(" { \n } "),
-        Ok((
-            "",
-            SubSelection {
-                selections: vec![],
-                star: None,
-            },
-        )),
-    );
-
-    assert_eq!(
-        SubSelection::parse("{hello}"),
-        Ok((
-            "",
-            SubSelection {
-                selections: vec![NamedSelection::Field(None, "hello".to_string(), None),],
-                star: None,
-            },
-        )),
-    );
-
-    assert_eq!(
-        SubSelection::parse("{ hello }"),
-        Ok((
-            "",
-            SubSelection {
-                selections: vec![NamedSelection::Field(None, "hello".to_string(), None),],
-                star: None,
-            },
-        )),
-    );
-
-    assert_eq!(
-        SubSelection::parse("  { padded  } "),
-        Ok((
-            "",
-            SubSelection {
-                selections: vec![NamedSelection::Field(None, "padded".to_string(), None),],
-                star: None,
-            },
-        )),
-    );
-
-    assert_eq!(
-        SubSelection::parse("{ hello world }"),
-        Ok((
-            "",
-            SubSelection {
-                selections: vec![
-                    NamedSelection::Field(None, "hello".to_string(), None),
-                    NamedSelection::Field(None, "world".to_string(), None),
-                ],
-                star: None,
-            },
-        )),
-    );
-
-    assert_eq!(
-        SubSelection::parse("{ hello { world } }"),
-        Ok((
-            "",
-            SubSelection {
-                selections: vec![NamedSelection::Field(
-                    None,
-                    "hello".to_string(),
-                    Some(SubSelection {
-                        selections: vec![NamedSelection::Field(None, "world".to_string(), None),],
-                        star: None,
-                    })
-                ),],
-                star: None,
-            },
-        )),
-    );
-}
-
 // StarSelection ::= Alias? "*" SubSelection?
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
@@ -788,143 +223,6 @@ impl StarSelection {
     }
 }
 
-#[test]
-fn test_star_selection() {
-    assert_eq!(
-        StarSelection::parse("rest: *"),
-        Ok((
-            "",
-            StarSelection(
-                Some(Alias {
-                    name: "rest".to_string(),
-                }),
-                None
-            ),
-        )),
-    );
-
-    assert_eq!(
-        StarSelection::parse("*"),
-        Ok(("", StarSelection(None, None),)),
-    );
-
-    assert_eq!(
-        StarSelection::parse(" * "),
-        Ok(("", StarSelection(None, None),)),
-    );
-
-    assert_eq!(
-        StarSelection::parse(" * { hello } "),
-        Ok((
-            "",
-            StarSelection(
-                None,
-                Some(Box::new(SubSelection {
-                    selections: vec![NamedSelection::Field(None, "hello".to_string(), None),],
-                    star: None,
-                }))
-            ),
-        )),
-    );
-
-    assert_eq!(
-        StarSelection::parse("hi: * { hello }"),
-        Ok((
-            "",
-            StarSelection(
-                Some(Alias {
-                    name: "hi".to_string(),
-                }),
-                Some(Box::new(SubSelection {
-                    selections: vec![NamedSelection::Field(None, "hello".to_string(), None),],
-                    star: None,
-                }))
-            ),
-        )),
-    );
-
-    assert_eq!(
-        StarSelection::parse("alias: * { x y z rest: * }"),
-        Ok((
-            "",
-            StarSelection(
-                Some(Alias {
-                    name: "alias".to_string()
-                }),
-                Some(Box::new(SubSelection {
-                    selections: vec![
-                        NamedSelection::Field(None, "x".to_string(), None),
-                        NamedSelection::Field(None, "y".to_string(), None),
-                        NamedSelection::Field(None, "z".to_string(), None),
-                    ],
-                    star: Some(StarSelection(
-                        Some(Alias {
-                            name: "rest".to_string(),
-                        }),
-                        None
-                    )),
-                })),
-            ),
-        )),
-    );
-
-    assert_eq!(
-        selection!(" before alias: * { * { a b c } } "),
-        Selection::Named(SubSelection {
-            selections: vec![NamedSelection::Field(None, "before".to_string(), None),],
-            star: Some(StarSelection(
-                Some(Alias {
-                    name: "alias".to_string()
-                }),
-                Some(Box::new(SubSelection {
-                    selections: vec![],
-                    star: Some(StarSelection(
-                        None,
-                        Some(Box::new(SubSelection {
-                            selections: vec![
-                                NamedSelection::Field(None, "a".to_string(), None),
-                                NamedSelection::Field(None, "b".to_string(), None),
-                                NamedSelection::Field(None, "c".to_string(), None),
-                            ],
-                            star: None,
-                        }))
-                    )),
-                })),
-            )),
-        }),
-    );
-
-    assert_eq!(
-        selection!(" before group: { * { a b c } } after "),
-        Selection::Named(SubSelection {
-            selections: vec![
-                NamedSelection::Field(None, "before".to_string(), None),
-                NamedSelection::Group(
-                    Alias {
-                        name: "group".to_string(),
-                    },
-                    SubSelection {
-                        selections: vec![],
-                        star: Some(StarSelection(
-                            None,
-                            Some(Box::new(SubSelection {
-                                selections: vec![
-                                    NamedSelection::Field(None, "a".to_string(), None),
-                                    NamedSelection::Field(None, "b".to_string(), None),
-                                    NamedSelection::Field(None, "c".to_string(), None),
-                                ],
-                                star: None,
-                            }))
-                        )),
-                    },
-                ),
-                NamedSelection::Field(None, "after".to_string(), None),
-            ],
-            star: None,
-        }),
-    );
-}
-
 // Alias ::= Identifier ":"
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
@@ -937,59 +235,6 @@ impl Alias {
         tuple((parse_identifier, char(':'), spaces_or_comments))(input)
             .map(|(input, (name, _, _))| (input, Self { name }))
     }
-}
-
-#[test]
-fn test_alias() {
-    assert_eq!(
-        Alias::parse("hello:"),
-        Ok((
-            "",
-            Alias {
-                name: "hello".to_string(),
-            },
-        )),
-    );
-
-    assert_eq!(
-        Alias::parse("hello :"),
-        Ok((
-            "",
-            Alias {
-                name: "hello".to_string(),
-            },
-        )),
-    );
-
-    assert_eq!(
-        Alias::parse("hello : "),
-        Ok((
-            "",
-            Alias {
-                name: "hello".to_string(),
-            },
-        )),
-    );
-
-    assert_eq!(
-        Alias::parse("  hello :"),
-        Ok((
-            "",
-            Alias {
-                name: "hello".to_string(),
-            },
-        )),
-    );
-
-    assert_eq!(
-        Alias::parse("hello: "),
-        Ok((
-            "",
-            Alias {
-                name: "hello".to_string(),
-            },
-        )),
-    );
 }
 
 // Property ::= Identifier | StringLiteral
@@ -1010,19 +255,6 @@ impl Property {
     }
 }
 
-#[test]
-fn test_property() {
-    assert_eq!(
-        Property::parse("hello"),
-        Ok(("", Property::Field("hello".to_string()))),
-    );
-
-    assert_eq!(
-        Property::parse("'hello'"),
-        Ok(("", Property::Quoted("hello".to_string()))),
-    );
-}
-
 // Identifier ::= [a-zA-Z_][0-9a-zA-Z_]*
 
 fn parse_identifier(input: &str) -> IResult<&str, String> {
@@ -1037,23 +269,6 @@ fn parse_identifier(input: &str) -> IResult<&str, String> {
         spaces_or_comments,
     ))(input)
     .map(|(input, (_, name, _))| (input, name.to_string()))
-}
-
-#[test]
-fn test_identifier() {
-    assert_eq!(parse_identifier("hello"), Ok(("", "hello".to_string())),);
-
-    assert_eq!(
-        parse_identifier("hello_world"),
-        Ok(("", "hello_world".to_string())),
-    );
-
-    assert_eq!(
-        parse_identifier("hello_world_123"),
-        Ok(("", "hello_world_123".to_string())),
-    );
-
-    assert_eq!(parse_identifier(" hello "), Ok(("", "hello".to_string())),);
 }
 
 // StringLiteral ::=
@@ -1105,30 +320,6 @@ fn parse_string_literal(input: &str) -> IResult<&str, String> {
             nom::error::ErrorKind::IsNot,
         ))),
     }
-}
-
-#[test]
-fn test_string_literal() {
-    assert_eq!(
-        parse_string_literal("'hello world'"),
-        Ok(("", "hello world".to_string())),
-    );
-    assert_eq!(
-        parse_string_literal("\"hello world\""),
-        Ok(("", "hello world".to_string())),
-    );
-    assert_eq!(
-        parse_string_literal("'hello \"world\"'"),
-        Ok(("", "hello \"world\"".to_string())),
-    );
-    assert_eq!(
-        parse_string_literal("\"hello \\\"world\\\"\""),
-        Ok(("", "hello \"world\"".to_string())),
-    );
-    assert_eq!(
-        parse_string_literal("'hello \\'world\\''"),
-        Ok(("", "hello 'world'".to_string())),
-    );
 }
 
 /// ApplyTo is a trait for applying a Selection to a JSON value, collecting
@@ -1500,713 +691,1543 @@ impl ApplyTo for SubSelection {
     }
 }
 
-#[test]
-fn test_apply_to_selection() {
-    let data = json!({
-        "hello": "world",
-        "nested": {
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // This macro is handy for tests, but it absolutely should never be used with
+    // dynamic input at runtime, since it panics if the selection string fails to
+    // parse for any reason.
+    macro_rules! selection {
+        ($input:expr) => {
+            if let Ok((remainder, parsed)) = Selection::parse($input) {
+                assert_eq!(remainder, "");
+                parsed
+            } else {
+                panic!("invalid selection: {:?}", $input);
+            }
+        };
+    }
+
+    #[test]
+    fn test_spaces_or_comments() {
+        assert_eq!(spaces_or_comments(""), Ok(("", "")));
+        assert_eq!(spaces_or_comments(" "), Ok(("", " ")));
+        assert_eq!(spaces_or_comments("  "), Ok(("", "  ")));
+
+        assert_eq!(spaces_or_comments("#"), Ok(("", "#")));
+        assert_eq!(spaces_or_comments("# "), Ok(("", "# ")));
+        assert_eq!(spaces_or_comments(" # "), Ok(("", " # ")));
+        assert_eq!(spaces_or_comments(" #"), Ok(("", " #")));
+
+        assert_eq!(spaces_or_comments("#\n"), Ok(("", "#\n")));
+        assert_eq!(spaces_or_comments("# \n"), Ok(("", "# \n")));
+        assert_eq!(spaces_or_comments(" # \n"), Ok(("", " # \n")));
+        assert_eq!(spaces_or_comments(" #\n"), Ok(("", " #\n")));
+        assert_eq!(spaces_or_comments(" # \n "), Ok(("", " # \n ")));
+
+        assert_eq!(spaces_or_comments("hello"), Ok(("hello", "")));
+        assert_eq!(spaces_or_comments(" hello"), Ok(("hello", " ")));
+        assert_eq!(spaces_or_comments("hello "), Ok(("hello ", "")));
+        assert_eq!(spaces_or_comments("hello#"), Ok(("hello#", "")));
+        assert_eq!(spaces_or_comments("hello #"), Ok(("hello #", "")));
+        assert_eq!(spaces_or_comments("hello # "), Ok(("hello # ", "")));
+        assert_eq!(spaces_or_comments("   hello # "), Ok(("hello # ", "   ")));
+        assert_eq!(
+            spaces_or_comments("  hello # world "),
+            Ok(("hello # world ", "  "))
+        );
+
+        assert_eq!(spaces_or_comments("#comment"), Ok(("", "#comment")));
+        assert_eq!(spaces_or_comments(" #comment"), Ok(("", " #comment")));
+        assert_eq!(spaces_or_comments("#comment "), Ok(("", "#comment ")));
+        assert_eq!(spaces_or_comments("#comment#"), Ok(("", "#comment#")));
+        assert_eq!(spaces_or_comments("#comment #"), Ok(("", "#comment #")));
+        assert_eq!(spaces_or_comments("#comment # "), Ok(("", "#comment # ")));
+        assert_eq!(
+            spaces_or_comments("  #comment # world "),
+            Ok(("", "  #comment # world "))
+        );
+        assert_eq!(
+            spaces_or_comments("  # comment # world "),
+            Ok(("", "  # comment # world "))
+        );
+
+        assert_eq!(
+            spaces_or_comments("  # comment\nnot a comment"),
+            Ok(("not a comment", "  # comment\n"))
+        );
+        assert_eq!(
+            spaces_or_comments("  # comment\nnot a comment\n"),
+            Ok(("not a comment\n", "  # comment\n"))
+        );
+        assert_eq!(
+            spaces_or_comments("not a comment\n  # comment\nasdf"),
+            Ok(("not a comment\n  # comment\nasdf", ""))
+        );
+
+        #[rustfmt::skip]
+        assert_eq!(spaces_or_comments("
+            # This is a comment
+            # And so is this
+            not a comment
+        "),
+        Ok(("not a comment
+        ", "
+            # This is a comment
+            # And so is this
+            ")));
+
+        #[rustfmt::skip]
+        assert_eq!(spaces_or_comments("
+            # This is a comment
+            not a comment
+            # Another comment
+        "),
+        Ok(("not a comment
+            # Another comment
+        ", "
+            # This is a comment
+            ")));
+
+        #[rustfmt::skip]
+        assert_eq!(spaces_or_comments("
+            not a comment
+            # This is a comment
+            # Another comment
+        "),
+        Ok(("not a comment
+            # This is a comment
+            # Another comment
+        ", "
+            ")));
+    }
+
+    #[test]
+    fn test_identifier() {
+        assert_eq!(parse_identifier("hello"), Ok(("", "hello".to_string())),);
+
+        assert_eq!(
+            parse_identifier("hello_world"),
+            Ok(("", "hello_world".to_string())),
+        );
+
+        assert_eq!(
+            parse_identifier("hello_world_123"),
+            Ok(("", "hello_world_123".to_string())),
+        );
+
+        assert_eq!(parse_identifier(" hello "), Ok(("", "hello".to_string())),);
+    }
+
+    #[test]
+    fn test_string_literal() {
+        assert_eq!(
+            parse_string_literal("'hello world'"),
+            Ok(("", "hello world".to_string())),
+        );
+        assert_eq!(
+            parse_string_literal("\"hello world\""),
+            Ok(("", "hello world".to_string())),
+        );
+        assert_eq!(
+            parse_string_literal("'hello \"world\"'"),
+            Ok(("", "hello \"world\"".to_string())),
+        );
+        assert_eq!(
+            parse_string_literal("\"hello \\\"world\\\"\""),
+            Ok(("", "hello \"world\"".to_string())),
+        );
+        assert_eq!(
+            parse_string_literal("'hello \\'world\\''"),
+            Ok(("", "hello 'world'".to_string())),
+        );
+    }
+    #[test]
+    fn test_property() {
+        assert_eq!(
+            Property::parse("hello"),
+            Ok(("", Property::Field("hello".to_string()))),
+        );
+
+        assert_eq!(
+            Property::parse("'hello'"),
+            Ok(("", Property::Quoted("hello".to_string()))),
+        );
+    }
+
+    #[test]
+    fn test_alias() {
+        assert_eq!(
+            Alias::parse("hello:"),
+            Ok((
+                "",
+                Alias {
+                    name: "hello".to_string(),
+                },
+            )),
+        );
+
+        assert_eq!(
+            Alias::parse("hello :"),
+            Ok((
+                "",
+                Alias {
+                    name: "hello".to_string(),
+                },
+            )),
+        );
+
+        assert_eq!(
+            Alias::parse("hello : "),
+            Ok((
+                "",
+                Alias {
+                    name: "hello".to_string(),
+                },
+            )),
+        );
+
+        assert_eq!(
+            Alias::parse("  hello :"),
+            Ok((
+                "",
+                Alias {
+                    name: "hello".to_string(),
+                },
+            )),
+        );
+
+        assert_eq!(
+            Alias::parse("hello: "),
+            Ok((
+                "",
+                Alias {
+                    name: "hello".to_string(),
+                },
+            )),
+        );
+    }
+
+    #[test]
+    fn test_named_selection() {
+        fn assert_result_and_name(input: &str, expected: NamedSelection, name: &str) {
+            let actual = NamedSelection::parse(input);
+            assert_eq!(actual, Ok(("", expected.clone())));
+            assert_eq!(actual.unwrap().1.name(), name);
+            assert_eq!(
+                selection!(input),
+                Selection::Named(SubSelection {
+                    selections: vec![expected],
+                    star: None,
+                }),
+            );
+        }
+
+        assert_result_and_name(
+            "hello",
+            NamedSelection::Field(None, "hello".to_string(), None),
+            "hello",
+        );
+
+        assert_result_and_name(
+            "hello { world }",
+            NamedSelection::Field(
+                None,
+                "hello".to_string(),
+                Some(SubSelection {
+                    selections: vec![NamedSelection::Field(None, "world".to_string(), None)],
+                    star: None,
+                }),
+            ),
+            "hello",
+        );
+
+        assert_result_and_name(
+            "hi: hello",
+            NamedSelection::Field(
+                Some(Alias {
+                    name: "hi".to_string(),
+                }),
+                "hello".to_string(),
+                None,
+            ),
+            "hi",
+        );
+
+        assert_result_and_name(
+            "hi: 'hello world'",
+            NamedSelection::Quoted(
+                Alias {
+                    name: "hi".to_string(),
+                },
+                "hello world".to_string(),
+                None,
+            ),
+            "hi",
+        );
+
+        assert_result_and_name(
+            "hi: hello { world }",
+            NamedSelection::Field(
+                Some(Alias {
+                    name: "hi".to_string(),
+                }),
+                "hello".to_string(),
+                Some(SubSelection {
+                    selections: vec![NamedSelection::Field(None, "world".to_string(), None)],
+                    star: None,
+                }),
+            ),
+            "hi",
+        );
+
+        assert_result_and_name(
+            "hey: hello { world again }",
+            NamedSelection::Field(
+                Some(Alias {
+                    name: "hey".to_string(),
+                }),
+                "hello".to_string(),
+                Some(SubSelection {
+                    selections: vec![
+                        NamedSelection::Field(None, "world".to_string(), None),
+                        NamedSelection::Field(None, "again".to_string(), None),
+                    ],
+                    star: None,
+                }),
+            ),
+            "hey",
+        );
+
+        assert_result_and_name(
+            "hey: 'hello world' { again }",
+            NamedSelection::Quoted(
+                Alias {
+                    name: "hey".to_string(),
+                },
+                "hello world".to_string(),
+                Some(SubSelection {
+                    selections: vec![NamedSelection::Field(None, "again".to_string(), None)],
+                    star: None,
+                }),
+            ),
+            "hey",
+        );
+
+        assert_result_and_name(
+            "leggo: 'my ego'",
+            NamedSelection::Quoted(
+                Alias {
+                    name: "leggo".to_string(),
+                },
+                "my ego".to_string(),
+                None,
+            ),
+            "leggo",
+        );
+    }
+
+    #[test]
+    fn test_selection() {
+        assert_eq!(
+            selection!(""),
+            Selection::Named(SubSelection {
+                selections: vec![],
+                star: None,
+            }),
+        );
+
+        assert_eq!(
+            selection!("   "),
+            Selection::Named(SubSelection {
+                selections: vec![],
+                star: None,
+            }),
+        );
+
+        assert_eq!(
+            selection!("hello"),
+            Selection::Named(SubSelection {
+                selections: vec![NamedSelection::Field(None, "hello".to_string(), None),],
+                star: None,
+            }),
+        );
+
+        assert_eq!(
+            selection!(".hello"),
+            Selection::Path(PathSelection::from_slice(
+                &[Property::Field("hello".to_string()),],
+                None
+            )),
+        );
+
+        assert_eq!(
+            selection!("hi: .hello.world"),
+            Selection::Named(SubSelection {
+                selections: vec![NamedSelection::Path(
+                    Alias {
+                        name: "hi".to_string(),
+                    },
+                    PathSelection::from_slice(
+                        &[
+                            Property::Field("hello".to_string()),
+                            Property::Field("world".to_string()),
+                        ],
+                        None
+                    ),
+                )],
+                star: None,
+            }),
+        );
+
+        assert_eq!(
+            selection!("before hi: .hello.world after"),
+            Selection::Named(SubSelection {
+                selections: vec![
+                    NamedSelection::Field(None, "before".to_string(), None),
+                    NamedSelection::Path(
+                        Alias {
+                            name: "hi".to_string(),
+                        },
+                        PathSelection::from_slice(
+                            &[
+                                Property::Field("hello".to_string()),
+                                Property::Field("world".to_string()),
+                            ],
+                            None
+                        ),
+                    ),
+                    NamedSelection::Field(None, "after".to_string(), None),
+                ],
+                star: None,
+            }),
+        );
+
+        let before_path_nested_after_result = Selection::Named(SubSelection {
+            selections: vec![
+                NamedSelection::Field(None, "before".to_string(), None),
+                NamedSelection::Path(
+                    Alias {
+                        name: "hi".to_string(),
+                    },
+                    PathSelection::from_slice(
+                        &[
+                            Property::Field("hello".to_string()),
+                            Property::Field("world".to_string()),
+                        ],
+                        Some(SubSelection {
+                            selections: vec![
+                                NamedSelection::Field(None, "nested".to_string(), None),
+                                NamedSelection::Field(None, "names".to_string(), None),
+                            ],
+                            star: None,
+                        }),
+                    ),
+                ),
+                NamedSelection::Field(None, "after".to_string(), None),
+            ],
+            star: None,
+        });
+
+        assert_eq!(
+            selection!("before hi: .hello.world { nested names } after"),
+            before_path_nested_after_result,
+        );
+
+        assert_eq!(
+            selection!("before hi:.hello.world{nested names}after"),
+            before_path_nested_after_result,
+        );
+
+        assert_eq!(
+            selection!(
+                "
+            # Comments are supported because we parse them as whitespace
+            topLevelAlias: topLevelField {
+                # Non-identifier properties must be aliased as an identifier
+                nonIdentifier: 'property name with spaces'
+
+                # This extracts the value located at the given path and applies a
+                # selection set to it before renaming the result to pathSelection
+                pathSelection: .some.nested.path {
+                    still: yet
+                    more
+                    properties
+                }
+
+                # An aliased SubSelection of fields nests the fields together
+                # under the given alias
+                siblingGroup: { brother sister }
+            }"
+            ),
+            Selection::Named(SubSelection {
+                selections: vec![NamedSelection::Field(
+                    Some(Alias {
+                        name: "topLevelAlias".to_string(),
+                    }),
+                    "topLevelField".to_string(),
+                    Some(SubSelection {
+                        selections: vec![
+                            NamedSelection::Quoted(
+                                Alias {
+                                    name: "nonIdentifier".to_string(),
+                                },
+                                "property name with spaces".to_string(),
+                                None,
+                            ),
+                            NamedSelection::Path(
+                                Alias {
+                                    name: "pathSelection".to_string(),
+                                },
+                                PathSelection::from_slice(
+                                    &[
+                                        Property::Field("some".to_string()),
+                                        Property::Field("nested".to_string()),
+                                        Property::Field("path".to_string()),
+                                    ],
+                                    Some(SubSelection {
+                                        selections: vec![
+                                            NamedSelection::Field(
+                                                Some(Alias {
+                                                    name: "still".to_string(),
+                                                }),
+                                                "yet".to_string(),
+                                                None,
+                                            ),
+                                            NamedSelection::Field(None, "more".to_string(), None,),
+                                            NamedSelection::Field(
+                                                None,
+                                                "properties".to_string(),
+                                                None,
+                                            ),
+                                        ],
+                                        star: None,
+                                    })
+                                ),
+                            ),
+                            NamedSelection::Group(
+                                Alias {
+                                    name: "siblingGroup".to_string(),
+                                },
+                                SubSelection {
+                                    selections: vec![
+                                        NamedSelection::Field(None, "brother".to_string(), None,),
+                                        NamedSelection::Field(None, "sister".to_string(), None,),
+                                    ],
+                                    star: None,
+                                },
+                            ),
+                        ],
+                        star: None,
+                    }),
+                )],
+                star: None,
+            }),
+        );
+    }
+
+    #[test]
+    fn test_path_selection() {
+        fn check_path_selection(input: &str, expected: PathSelection) {
+            assert_eq!(PathSelection::parse(input), Ok(("", expected.clone())));
+            assert_eq!(selection!(input), Selection::Path(expected.clone()));
+        }
+
+        check_path_selection(
+            ".hello",
+            PathSelection::from_slice(&[Property::Field("hello".to_string())], None),
+        );
+
+        check_path_selection(
+            ".hello.world",
+            PathSelection::from_slice(
+                &[
+                    Property::Field("hello".to_string()),
+                    Property::Field("world".to_string()),
+                ],
+                None,
+            ),
+        );
+
+        check_path_selection(
+            ".hello.world { hello }",
+            PathSelection::from_slice(
+                &[
+                    Property::Field("hello".to_string()),
+                    Property::Field("world".to_string()),
+                ],
+                Some(SubSelection {
+                    selections: vec![NamedSelection::Field(None, "hello".to_string(), None)],
+                    star: None,
+                }),
+            ),
+        );
+
+        check_path_selection(
+            ".nested.'string literal'.\"property\".name",
+            PathSelection::from_slice(
+                &[
+                    Property::Field("nested".to_string()),
+                    Property::Quoted("string literal".to_string()),
+                    Property::Quoted("property".to_string()),
+                    Property::Field("name".to_string()),
+                ],
+                None,
+            ),
+        );
+
+        check_path_selection(
+            ".nested.'string literal' { leggo: 'my ego' }",
+            PathSelection::from_slice(
+                &[
+                    Property::Field("nested".to_string()),
+                    Property::Quoted("string literal".to_string()),
+                ],
+                Some(SubSelection {
+                    selections: vec![NamedSelection::Quoted(
+                        Alias {
+                            name: "leggo".to_string(),
+                        },
+                        "my ego".to_string(),
+                        None,
+                    )],
+                    star: None,
+                }),
+            ),
+        );
+    }
+
+    #[test]
+    fn test_subselection() {
+        assert_eq!(
+            SubSelection::parse(" { \n } "),
+            Ok((
+                "",
+                SubSelection {
+                    selections: vec![],
+                    star: None,
+                },
+            )),
+        );
+
+        assert_eq!(
+            SubSelection::parse("{hello}"),
+            Ok((
+                "",
+                SubSelection {
+                    selections: vec![NamedSelection::Field(None, "hello".to_string(), None),],
+                    star: None,
+                },
+            )),
+        );
+
+        assert_eq!(
+            SubSelection::parse("{ hello }"),
+            Ok((
+                "",
+                SubSelection {
+                    selections: vec![NamedSelection::Field(None, "hello".to_string(), None),],
+                    star: None,
+                },
+            )),
+        );
+
+        assert_eq!(
+            SubSelection::parse("  { padded  } "),
+            Ok((
+                "",
+                SubSelection {
+                    selections: vec![NamedSelection::Field(None, "padded".to_string(), None),],
+                    star: None,
+                },
+            )),
+        );
+
+        assert_eq!(
+            SubSelection::parse("{ hello world }"),
+            Ok((
+                "",
+                SubSelection {
+                    selections: vec![
+                        NamedSelection::Field(None, "hello".to_string(), None),
+                        NamedSelection::Field(None, "world".to_string(), None),
+                    ],
+                    star: None,
+                },
+            )),
+        );
+
+        assert_eq!(
+            SubSelection::parse("{ hello { world } }"),
+            Ok((
+                "",
+                SubSelection {
+                    selections: vec![NamedSelection::Field(
+                        None,
+                        "hello".to_string(),
+                        Some(SubSelection {
+                            selections: vec![NamedSelection::Field(
+                                None,
+                                "world".to_string(),
+                                None
+                            ),],
+                            star: None,
+                        })
+                    ),],
+                    star: None,
+                },
+            )),
+        );
+    }
+
+    #[test]
+    fn test_star_selection() {
+        assert_eq!(
+            StarSelection::parse("rest: *"),
+            Ok((
+                "",
+                StarSelection(
+                    Some(Alias {
+                        name: "rest".to_string(),
+                    }),
+                    None
+                ),
+            )),
+        );
+
+        assert_eq!(
+            StarSelection::parse("*"),
+            Ok(("", StarSelection(None, None),)),
+        );
+
+        assert_eq!(
+            StarSelection::parse(" * "),
+            Ok(("", StarSelection(None, None),)),
+        );
+
+        assert_eq!(
+            StarSelection::parse(" * { hello } "),
+            Ok((
+                "",
+                StarSelection(
+                    None,
+                    Some(Box::new(SubSelection {
+                        selections: vec![NamedSelection::Field(None, "hello".to_string(), None),],
+                        star: None,
+                    }))
+                ),
+            )),
+        );
+
+        assert_eq!(
+            StarSelection::parse("hi: * { hello }"),
+            Ok((
+                "",
+                StarSelection(
+                    Some(Alias {
+                        name: "hi".to_string(),
+                    }),
+                    Some(Box::new(SubSelection {
+                        selections: vec![NamedSelection::Field(None, "hello".to_string(), None),],
+                        star: None,
+                    }))
+                ),
+            )),
+        );
+
+        assert_eq!(
+            StarSelection::parse("alias: * { x y z rest: * }"),
+            Ok((
+                "",
+                StarSelection(
+                    Some(Alias {
+                        name: "alias".to_string()
+                    }),
+                    Some(Box::new(SubSelection {
+                        selections: vec![
+                            NamedSelection::Field(None, "x".to_string(), None),
+                            NamedSelection::Field(None, "y".to_string(), None),
+                            NamedSelection::Field(None, "z".to_string(), None),
+                        ],
+                        star: Some(StarSelection(
+                            Some(Alias {
+                                name: "rest".to_string(),
+                            }),
+                            None
+                        )),
+                    })),
+                ),
+            )),
+        );
+
+        assert_eq!(
+            selection!(" before alias: * { * { a b c } } "),
+            Selection::Named(SubSelection {
+                selections: vec![NamedSelection::Field(None, "before".to_string(), None),],
+                star: Some(StarSelection(
+                    Some(Alias {
+                        name: "alias".to_string()
+                    }),
+                    Some(Box::new(SubSelection {
+                        selections: vec![],
+                        star: Some(StarSelection(
+                            None,
+                            Some(Box::new(SubSelection {
+                                selections: vec![
+                                    NamedSelection::Field(None, "a".to_string(), None),
+                                    NamedSelection::Field(None, "b".to_string(), None),
+                                    NamedSelection::Field(None, "c".to_string(), None),
+                                ],
+                                star: None,
+                            }))
+                        )),
+                    })),
+                )),
+            }),
+        );
+
+        assert_eq!(
+            selection!(" before group: { * { a b c } } after "),
+            Selection::Named(SubSelection {
+                selections: vec![
+                    NamedSelection::Field(None, "before".to_string(), None),
+                    NamedSelection::Group(
+                        Alias {
+                            name: "group".to_string(),
+                        },
+                        SubSelection {
+                            selections: vec![],
+                            star: Some(StarSelection(
+                                None,
+                                Some(Box::new(SubSelection {
+                                    selections: vec![
+                                        NamedSelection::Field(None, "a".to_string(), None),
+                                        NamedSelection::Field(None, "b".to_string(), None),
+                                        NamedSelection::Field(None, "c".to_string(), None),
+                                    ],
+                                    star: None,
+                                }))
+                            )),
+                        },
+                    ),
+                    NamedSelection::Field(None, "after".to_string(), None),
+                ],
+                star: None,
+            }),
+        );
+    }
+
+    #[test]
+    fn test_apply_to_selection() {
+        let data = json!({
             "hello": "world",
-            "world": "hello",
-        },
-        "array": [
-            { "hello": "world 0" },
-            { "hello": "world 1" },
-            { "hello": "world 2" },
-        ],
-    });
-
-    let check_ok = |selection: Selection, expected_json: JSON| {
-        let (actual_json, errors) = selection.apply_to(&data);
-        assert_eq!(actual_json, Some(expected_json));
-        assert_eq!(errors, vec![]);
-    };
-
-    check_ok(selection!("hello"), json!({"hello": "world"}));
-
-    check_ok(
-        selection!("nested"),
-        json!({
             "nested": {
                 "hello": "world",
                 "world": "hello",
             },
-        }),
-    );
-
-    check_ok(selection!(".nested.hello"), json!("world"));
-
-    check_ok(selection!(".nested.world"), json!("hello"));
-
-    check_ok(
-        selection!("nested hello"),
-        json!({
-            "hello": "world",
-            "nested": {
-                "hello": "world",
-                "world": "hello",
-            },
-        }),
-    );
-
-    check_ok(
-        selection!("array { hello }"),
-        json!({
             "array": [
                 { "hello": "world 0" },
                 { "hello": "world 1" },
                 { "hello": "world 2" },
             ],
-        }),
-    );
+        });
 
-    check_ok(
-        selection!("greetings: array { hello }"),
-        json!({
-            "greetings": [
+        let check_ok = |selection: Selection, expected_json: JSON| {
+            let (actual_json, errors) = selection.apply_to(&data);
+            assert_eq!(actual_json, Some(expected_json));
+            assert_eq!(errors, vec![]);
+        };
+
+        check_ok(selection!("hello"), json!({"hello": "world"}));
+
+        check_ok(
+            selection!("nested"),
+            json!({
+                "nested": {
+                    "hello": "world",
+                    "world": "hello",
+                },
+            }),
+        );
+
+        check_ok(selection!(".nested.hello"), json!("world"));
+
+        check_ok(selection!(".nested.world"), json!("hello"));
+
+        check_ok(
+            selection!("nested hello"),
+            json!({
+                "hello": "world",
+                "nested": {
+                    "hello": "world",
+                    "world": "hello",
+                },
+            }),
+        );
+
+        check_ok(
+            selection!("array { hello }"),
+            json!({
+                "array": [
+                    { "hello": "world 0" },
+                    { "hello": "world 1" },
+                    { "hello": "world 2" },
+                ],
+            }),
+        );
+
+        check_ok(
+            selection!("greetings: array { hello }"),
+            json!({
+                "greetings": [
+                    { "hello": "world 0" },
+                    { "hello": "world 1" },
+                    { "hello": "world 2" },
+                ],
+            }),
+        );
+
+        check_ok(
+            selection!(".array { hello }"),
+            json!([
                 { "hello": "world 0" },
                 { "hello": "world 1" },
                 { "hello": "world 2" },
-            ],
-        }),
-    );
+            ]),
+        );
 
-    check_ok(
-        selection!(".array { hello }"),
-        json!([
-            { "hello": "world 0" },
-            { "hello": "world 1" },
-            { "hello": "world 2" },
-        ]),
-    );
-
-    check_ok(
-        selection!("worlds: .array.hello"),
-        json!({
-            "worlds": [
-                "world 0",
-                "world 1",
-                "world 2",
-            ],
-        }),
-    );
-
-    check_ok(
-        selection!(".array.hello"),
-        json!(["world 0", "world 1", "world 2",]),
-    );
-
-    check_ok(
-        selection!("nested grouped: { hello worlds: .array.hello }"),
-        json!({
-            "nested": {
-                "hello": "world",
-                "world": "hello",
-            },
-            "grouped": {
-                "hello": "world",
+        check_ok(
+            selection!("worlds: .array.hello"),
+            json!({
                 "worlds": [
                     "world 0",
                     "world 1",
                     "world 2",
                 ],
-            },
-        }),
-    );
-}
+            }),
+        );
 
-#[test]
-fn test_apply_to_star_selections() {
-    let data = json!({
-        "englishAndGreekLetters": {
-            "a": { "en": "ay", "gr": "alpha" },
-            "b": { "en": "bee", "gr": "beta" },
-            "c": { "en": "see", "gr": "gamma" },
-            "d": { "en": "dee", "gr": "delta" },
-            "e": { "en": "ee", "gr": "epsilon" },
-            "f": { "en": "eff", "gr": "phi" },
-        },
-        "englishAndSpanishNumbers": [
-            { "en": "one", "es": "uno" },
-            { "en": "two", "es": "dos" },
-            { "en": "three", "es": "tres" },
-            { "en": "four", "es": "cuatro" },
-            { "en": "five", "es": "cinco" },
-            { "en": "six", "es": "seis" },
-        ],
-        "asciiCharCodes": {
-            "A": 65,
-            "B": 66,
-            "C": 67,
-            "D": 68,
-            "E": 69,
-            "F": 70,
-            "G": 71,
-        },
-        "books": {
-            "9780262533751": {
-                "title": "The Geometry of Meaning",
-                "author": "Peter Gärdenfors",
-            },
-            "978-1492674313": {
-                "title": "P is for Pterodactyl: The Worst Alphabet Book Ever",
-                "author": "Raj Haldar",
-            },
-            "9780262542456": {
-                "title": "A Biography of the Pixel",
-                "author": "Alvy Ray Smith",
-            },
-        }
-    });
+        check_ok(
+            selection!(".array.hello"),
+            json!(["world 0", "world 1", "world 2",]),
+        );
 
-    let check_ok = |selection: Selection, expected_json: JSON| {
-        let (actual_json, errors) = selection.apply_to(&data);
-        assert_eq!(actual_json, Some(expected_json));
-        assert_eq!(errors, vec![]);
-    };
-
-    check_ok(
-        selection!("englishAndGreekLetters { * { en }}"),
-        json!({
-            "englishAndGreekLetters": {
-                "a": { "en": "ay" },
-                "b": { "en": "bee" },
-                "c": { "en": "see" },
-                "d": { "en": "dee" },
-                "e": { "en": "ee" },
-                "f": { "en": "eff" },
-            },
-        }),
-    );
-
-    check_ok(
-        selection!("englishAndGreekLetters { C: .c.en * { gr }}"),
-        json!({
-            "englishAndGreekLetters": {
-                "a": { "gr": "alpha" },
-                "b": { "gr": "beta" },
-                "C": "see",
-                "d": { "gr": "delta" },
-                "e": { "gr": "epsilon" },
-                "f": { "gr": "phi" },
-            },
-        }),
-    );
-
-    check_ok(
-        selection!("englishAndGreekLetters { A: a B: b rest: * }"),
-        json!({
-            "englishAndGreekLetters": {
-                "A": { "en": "ay", "gr": "alpha" },
-                "B": { "en": "bee", "gr": "beta" },
-                "rest": {
-                    "c": { "en": "see", "gr": "gamma" },
-                    "d": { "en": "dee", "gr": "delta" },
-                    "e": { "en": "ee", "gr": "epsilon" },
-                    "f": { "en": "eff", "gr": "phi" },
+        check_ok(
+            selection!("nested grouped: { hello worlds: .array.hello }"),
+            json!({
+                "nested": {
+                    "hello": "world",
+                    "world": "hello",
                 },
+                "grouped": {
+                    "hello": "world",
+                    "worlds": [
+                        "world 0",
+                        "world 1",
+                        "world 2",
+                    ],
+                },
+            }),
+        );
+    }
+
+    #[test]
+    fn test_apply_to_star_selections() {
+        let data = json!({
+            "englishAndGreekLetters": {
+                "a": { "en": "ay", "gr": "alpha" },
+                "b": { "en": "bee", "gr": "beta" },
+                "c": { "en": "see", "gr": "gamma" },
+                "d": { "en": "dee", "gr": "delta" },
+                "e": { "en": "ee", "gr": "epsilon" },
+                "f": { "en": "eff", "gr": "phi" },
             },
-        }),
-    );
-
-    check_ok(
-        selection!(".'englishAndSpanishNumbers' { en rest: * }"),
-        json!([
-            { "en": "one", "rest": { "es": "uno" } },
-            { "en": "two", "rest": { "es": "dos" } },
-            { "en": "three", "rest": { "es": "tres" } },
-            { "en": "four", "rest": { "es": "cuatro" } },
-            { "en": "five", "rest": { "es": "cinco" } },
-            { "en": "six", "rest": { "es": "seis" } },
-        ]),
-    );
-
-    // To include/preserve all remaining properties from an object in the output
-    // object, we support a naked * selection (no alias or subselection). This
-    // is useful when the values of the properties are scalar, so a subselection
-    // isn't possible, and we want to preserve all properties of the original
-    // object. These unnamed properties may not be useful for GraphQL unless the
-    // whole object is considered as opaque JSON scalar data, but we still need
-    // to support preserving JSON when it has scalar properties.
-    check_ok(
-        selection!("asciiCharCodes { ay: A bee: B * }"),
-        json!({
+            "englishAndSpanishNumbers": [
+                { "en": "one", "es": "uno" },
+                { "en": "two", "es": "dos" },
+                { "en": "three", "es": "tres" },
+                { "en": "four", "es": "cuatro" },
+                { "en": "five", "es": "cinco" },
+                { "en": "six", "es": "seis" },
+            ],
             "asciiCharCodes": {
-                "ay": 65,
-                "bee": 66,
+                "A": 65,
+                "B": 66,
                 "C": 67,
                 "D": 68,
                 "E": 69,
                 "F": 70,
                 "G": 71,
             },
-        }),
-    );
-
-    check_ok(
-        selection!("asciiCharCodes { * } gee: .asciiCharCodes.G"),
-        json!({
-            "asciiCharCodes": data.get("asciiCharCodes").unwrap(),
-            "gee": 71,
-        }),
-    );
-
-    check_ok(
-        selection!("books { * { title } }"),
-        json!({
             "books": {
                 "9780262533751": {
                     "title": "The Geometry of Meaning",
+                    "author": "Peter Gärdenfors",
                 },
                 "978-1492674313": {
                     "title": "P is for Pterodactyl: The Worst Alphabet Book Ever",
+                    "author": "Raj Haldar",
                 },
                 "9780262542456": {
                     "title": "A Biography of the Pixel",
+                    "author": "Alvy Ray Smith",
                 },
-            },
-        }),
-    );
+            }
+        });
 
-    check_ok(
-        selection!("books { authorsByISBN: * { author } }"),
-        json!({
-            "books": {
-                "authorsByISBN": {
+        let check_ok = |selection: Selection, expected_json: JSON| {
+            let (actual_json, errors) = selection.apply_to(&data);
+            assert_eq!(actual_json, Some(expected_json));
+            assert_eq!(errors, vec![]);
+        };
+
+        check_ok(
+            selection!("englishAndGreekLetters { * { en }}"),
+            json!({
+                "englishAndGreekLetters": {
+                    "a": { "en": "ay" },
+                    "b": { "en": "bee" },
+                    "c": { "en": "see" },
+                    "d": { "en": "dee" },
+                    "e": { "en": "ee" },
+                    "f": { "en": "eff" },
+                },
+            }),
+        );
+
+        check_ok(
+            selection!("englishAndGreekLetters { C: .c.en * { gr }}"),
+            json!({
+                "englishAndGreekLetters": {
+                    "a": { "gr": "alpha" },
+                    "b": { "gr": "beta" },
+                    "C": "see",
+                    "d": { "gr": "delta" },
+                    "e": { "gr": "epsilon" },
+                    "f": { "gr": "phi" },
+                },
+            }),
+        );
+
+        check_ok(
+            selection!("englishAndGreekLetters { A: a B: b rest: * }"),
+            json!({
+                "englishAndGreekLetters": {
+                    "A": { "en": "ay", "gr": "alpha" },
+                    "B": { "en": "bee", "gr": "beta" },
+                    "rest": {
+                        "c": { "en": "see", "gr": "gamma" },
+                        "d": { "en": "dee", "gr": "delta" },
+                        "e": { "en": "ee", "gr": "epsilon" },
+                        "f": { "en": "eff", "gr": "phi" },
+                    },
+                },
+            }),
+        );
+
+        check_ok(
+            selection!(".'englishAndSpanishNumbers' { en rest: * }"),
+            json!([
+                { "en": "one", "rest": { "es": "uno" } },
+                { "en": "two", "rest": { "es": "dos" } },
+                { "en": "three", "rest": { "es": "tres" } },
+                { "en": "four", "rest": { "es": "cuatro" } },
+                { "en": "five", "rest": { "es": "cinco" } },
+                { "en": "six", "rest": { "es": "seis" } },
+            ]),
+        );
+
+        // To include/preserve all remaining properties from an object in the output
+        // object, we support a naked * selection (no alias or subselection). This
+        // is useful when the values of the properties are scalar, so a subselection
+        // isn't possible, and we want to preserve all properties of the original
+        // object. These unnamed properties may not be useful for GraphQL unless the
+        // whole object is considered as opaque JSON scalar data, but we still need
+        // to support preserving JSON when it has scalar properties.
+        check_ok(
+            selection!("asciiCharCodes { ay: A bee: B * }"),
+            json!({
+                "asciiCharCodes": {
+                    "ay": 65,
+                    "bee": 66,
+                    "C": 67,
+                    "D": 68,
+                    "E": 69,
+                    "F": 70,
+                    "G": 71,
+                },
+            }),
+        );
+
+        check_ok(
+            selection!("asciiCharCodes { * } gee: .asciiCharCodes.G"),
+            json!({
+                "asciiCharCodes": data.get("asciiCharCodes").unwrap(),
+                "gee": 71,
+            }),
+        );
+
+        check_ok(
+            selection!("books { * { title } }"),
+            json!({
+                "books": {
                     "9780262533751": {
-                        "author": "Peter Gärdenfors",
+                        "title": "The Geometry of Meaning",
                     },
                     "978-1492674313": {
-                        "author": "Raj Haldar",
+                        "title": "P is for Pterodactyl: The Worst Alphabet Book Ever",
                     },
                     "9780262542456": {
-                        "author": "Alvy Ray Smith",
+                        "title": "A Biography of the Pixel",
                     },
                 },
-            },
-        }),
-    );
-}
+            }),
+        );
 
-#[test]
-fn test_apply_to_errors() {
-    let data = json!({
-        "hello": "world",
-        "nested": {
-            "hello": 123,
-            "world": true,
-        },
-        "array": [
-            { "hello": 1, "goodbye": "farewell" },
-            { "hello": "two" },
-            { "hello": 3.0, "smello": "yellow" },
-        ],
-    });
+        check_ok(
+            selection!("books { authorsByISBN: * { author } }"),
+            json!({
+                "books": {
+                    "authorsByISBN": {
+                        "9780262533751": {
+                            "author": "Peter Gärdenfors",
+                        },
+                        "978-1492674313": {
+                            "author": "Raj Haldar",
+                        },
+                        "9780262542456": {
+                            "author": "Alvy Ray Smith",
+                        },
+                    },
+                },
+            }),
+        );
+    }
 
-    assert_eq!(
-        selection!("hello").apply_to(&data),
-        (Some(json!({"hello": "world"})), vec![],)
-    );
-
-    assert_eq!(
-        selection!("yellow").apply_to(&data),
-        (
-            Some(json!({})),
-            vec![ApplyToError::from_json(&json!({
-                "message": "\"yellow\" not found",
-                "path": ["yellow"],
-            })),],
-        )
-    );
-
-    assert_eq!(
-        selection!(".nested.hello").apply_to(&data),
-        (Some(json!(123)), vec![],)
-    );
-
-    assert_eq!(
-        selection!(".nested.'yellow'").apply_to(&data),
-        (
-            None,
-            vec![ApplyToError::from_json(&json!({
-                "message": "\"yellow\" not found",
-                "path": ["nested", "yellow"],
-            })),],
-        )
-    );
-
-    assert_eq!(
-        selection!(".nested { hola yellow world }").apply_to(&data),
-        (
-            Some(json!({
+    #[test]
+    fn test_apply_to_errors() {
+        let data = json!({
+            "hello": "world",
+            "nested": {
+                "hello": 123,
                 "world": true,
-            })),
-            vec![
-                ApplyToError::from_json(&json!({
-                    "message": "\"hola\" not found",
-                    "path": ["nested", "hola"],
-                })),
-                ApplyToError::from_json(&json!({
+            },
+            "array": [
+                { "hello": 1, "goodbye": "farewell" },
+                { "hello": "two" },
+                { "hello": 3.0, "smello": "yellow" },
+            ],
+        });
+
+        assert_eq!(
+            selection!("hello").apply_to(&data),
+            (Some(json!({"hello": "world"})), vec![],)
+        );
+
+        assert_eq!(
+            selection!("yellow").apply_to(&data),
+            (
+                Some(json!({})),
+                vec![ApplyToError::from_json(&json!({
+                    "message": "\"yellow\" not found",
+                    "path": ["yellow"],
+                })),],
+            )
+        );
+
+        assert_eq!(
+            selection!(".nested.hello").apply_to(&data),
+            (Some(json!(123)), vec![],)
+        );
+
+        assert_eq!(
+            selection!(".nested.'yellow'").apply_to(&data),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
                     "message": "\"yellow\" not found",
                     "path": ["nested", "yellow"],
-                })),
-            ],
-        )
-    );
+                })),],
+            )
+        );
 
-    assert_eq!(
-        selection!("partial: .array { hello goodbye }").apply_to(&data),
-        (
-            Some(json!({
-                "partial": [
-                    { "hello": 1, "goodbye": "farewell" },
-                    { "hello": "two" },
-                    { "hello": 3.0 },
-                ],
-            })),
-            vec![
-                ApplyToError::from_json(&json!({
-                    "message": "\"goodbye\" not found",
-                    "path": ["array", 1, "goodbye"],
-                })),
-                ApplyToError::from_json(&json!({
-                    "message": "\"goodbye\" not found",
-                    "path": ["array", 2, "goodbye"],
-                })),
-            ],
-        )
-    );
-
-    assert_eq!(
-        selection!("good: .array.hello bad: .array.smello").apply_to(&data),
-        (
-            Some(json!({
-                "good": [
-                    1,
-                    "two",
-                    3.0,
-                ],
-                "bad": [
-                    null,
-                    null,
-                    "yellow",
-                ],
-            })),
-            vec![
-                ApplyToError::from_json(&json!({
-                    "message": "\"smello\" not found",
-                    "path": ["array", 0, "smello"],
-                })),
-                ApplyToError::from_json(&json!({
-                    "message": "\"smello\" not found",
-                    "path": ["array", 1, "smello"],
-                })),
-            ],
-        )
-    );
-
-    assert_eq!(
-        selection!("array { hello smello }").apply_to(&data),
-        (
-            Some(json!({
-                "array": [
-                    { "hello": 1 },
-                    { "hello": "two" },
-                    { "hello": 3.0, "smello": "yellow" },
-                ],
-            })),
-            vec![
-                ApplyToError::from_json(&json!({
-                    "message": "\"smello\" not found",
-                    "path": ["array", 0, "smello"],
-                })),
-                ApplyToError::from_json(&json!({
-                    "message": "\"smello\" not found",
-                    "path": ["array", 1, "smello"],
-                })),
-            ],
-        )
-    );
-
-    assert_eq!(
-        selection!(".nested { grouped: { hello smelly world } }").apply_to(&data),
-        (
-            Some(json!({
-                "grouped": {
-                    "hello": 123,
+        assert_eq!(
+            selection!(".nested { hola yellow world }").apply_to(&data),
+            (
+                Some(json!({
                     "world": true,
-                },
-            })),
-            vec![ApplyToError::from_json(&json!({
-                "message": "\"smelly\" not found",
-                "path": ["nested", "smelly"],
-            })),],
-        )
-    );
+                })),
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "\"hola\" not found",
+                        "path": ["nested", "hola"],
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "\"yellow\" not found",
+                        "path": ["nested", "yellow"],
+                    })),
+                ],
+            )
+        );
 
-    assert_eq!(
-        selection!("alias: .nested { grouped: { hello smelly world } }").apply_to(&data),
-        (
-            Some(json!({
-                "alias": {
+        assert_eq!(
+            selection!("partial: .array { hello goodbye }").apply_to(&data),
+            (
+                Some(json!({
+                    "partial": [
+                        { "hello": 1, "goodbye": "farewell" },
+                        { "hello": "two" },
+                        { "hello": 3.0 },
+                    ],
+                })),
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "\"goodbye\" not found",
+                        "path": ["array", 1, "goodbye"],
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "\"goodbye\" not found",
+                        "path": ["array", 2, "goodbye"],
+                    })),
+                ],
+            )
+        );
+
+        assert_eq!(
+            selection!("good: .array.hello bad: .array.smello").apply_to(&data),
+            (
+                Some(json!({
+                    "good": [
+                        1,
+                        "two",
+                        3.0,
+                    ],
+                    "bad": [
+                        null,
+                        null,
+                        "yellow",
+                    ],
+                })),
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "\"smello\" not found",
+                        "path": ["array", 0, "smello"],
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "\"smello\" not found",
+                        "path": ["array", 1, "smello"],
+                    })),
+                ],
+            )
+        );
+
+        assert_eq!(
+            selection!("array { hello smello }").apply_to(&data),
+            (
+                Some(json!({
+                    "array": [
+                        { "hello": 1 },
+                        { "hello": "two" },
+                        { "hello": 3.0, "smello": "yellow" },
+                    ],
+                })),
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "\"smello\" not found",
+                        "path": ["array", 0, "smello"],
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "\"smello\" not found",
+                        "path": ["array", 1, "smello"],
+                    })),
+                ],
+            )
+        );
+
+        assert_eq!(
+            selection!(".nested { grouped: { hello smelly world } }").apply_to(&data),
+            (
+                Some(json!({
                     "grouped": {
                         "hello": 123,
                         "world": true,
                     },
-                },
-            })),
-            vec![ApplyToError::from_json(&json!({
-                "message": "\"smelly\" not found",
-                "path": ["nested", "smelly"],
-            })),],
-        )
-    );
-}
+                })),
+                vec![ApplyToError::from_json(&json!({
+                    "message": "\"smelly\" not found",
+                    "path": ["nested", "smelly"],
+                })),],
+            )
+        );
 
-#[test]
-fn test_apply_to_nested_arrays() {
-    let data = json!({
-        "arrayOfArrays": [
-            [
-                { "x": 0, "y": 0 },
-            ],
-            [
-                { "x": 1, "y": 0 },
-                { "x": 1, "y": 1 },
-                { "x": 1, "y": 2 },
-            ],
-            [
-                { "x": 2, "y": 0 },
-                { "x": 2, "y": 1 },
-            ],
-            [],
-            [
-                null,
-                { "x": 4, "y": 1 },
-                { "x": 4, "why": 2 },
-                null,
-                { "x": 4, "y": 4 },
-            ]
-        ],
-    });
+        assert_eq!(
+            selection!("alias: .nested { grouped: { hello smelly world } }").apply_to(&data),
+            (
+                Some(json!({
+                    "alias": {
+                        "grouped": {
+                            "hello": 123,
+                            "world": true,
+                        },
+                    },
+                })),
+                vec![ApplyToError::from_json(&json!({
+                    "message": "\"smelly\" not found",
+                    "path": ["nested", "smelly"],
+                })),],
+            )
+        );
+    }
 
-    assert_eq!(
-        selection!(".arrayOfArrays.x").apply_to(&data),
-        (
-            Some(json!([[0], [1, 1, 1], [2, 2], [], [null, 4, 4, null, 4],])),
-            vec![
-                ApplyToError::from_json(&json!({
-                    "message": "not an object",
-                    "path": ["arrayOfArrays", 4, 0],
-                })),
-                ApplyToError::from_json(&json!({
-                    "message": "not an object",
-                    "path": ["arrayOfArrays", 4, 3],
-                })),
-            ],
-        ),
-    );
-
-    assert_eq!(
-        selection!(".arrayOfArrays.y").apply_to(&data),
-        (
-            Some(json!([
-                [0],
-                [0, 1, 2],
-                [0, 1],
-                [],
-                [null, 1, null, null, 4],
-            ])),
-            vec![
-                ApplyToError::from_json(&json!({
-                    "message": "not an object",
-                    "path": ["arrayOfArrays", 4, 0],
-                })),
-                ApplyToError::from_json(&json!({
-                    "message": "\"y\" not found",
-                    "path": ["arrayOfArrays", 4, 2, "y"],
-                })),
-                ApplyToError::from_json(&json!({
-                    "message": "not an object",
-                    "path": ["arrayOfArrays", 4, 3],
-                })),
-            ],
-        ),
-    );
-
-    assert_eq!(
-        selection!("alias: arrayOfArrays { x y }").apply_to(&data),
-        (
-            Some(json!({
-                "alias": [
-                    [
-                        { "x": 0, "y": 0 },
-                    ],
-                    [
-                        { "x": 1, "y": 0 },
-                        { "x": 1, "y": 1 },
-                        { "x": 1, "y": 2 },
-                    ],
-                    [
-                        { "x": 2, "y": 0 },
-                        { "x": 2, "y": 1 },
-                    ],
-                    [],
-                    [
-                        null,
-                        { "x": 4, "y": 1 },
-                        { "x": 4 },
-                        null,
-                        { "x": 4, "y": 4 },
-                    ]
+    #[test]
+    fn test_apply_to_nested_arrays() {
+        let data = json!({
+            "arrayOfArrays": [
+                [
+                    { "x": 0, "y": 0 },
                 ],
-            })),
-            vec![
-                ApplyToError::from_json(&json!({
-                    "message": "not an object",
-                    "path": ["arrayOfArrays", 4, 0],
-                })),
-                ApplyToError::from_json(&json!({
-                    "message": "\"y\" not found",
-                    "path": ["arrayOfArrays", 4, 2, "y"],
-                })),
-                ApplyToError::from_json(&json!({
-                    "message": "not an object",
-                    "path": ["arrayOfArrays", 4, 3],
-                })),
+                [
+                    { "x": 1, "y": 0 },
+                    { "x": 1, "y": 1 },
+                    { "x": 1, "y": 2 },
+                ],
+                [
+                    { "x": 2, "y": 0 },
+                    { "x": 2, "y": 1 },
+                ],
+                [],
+                [
+                    null,
+                    { "x": 4, "y": 1 },
+                    { "x": 4, "why": 2 },
+                    null,
+                    { "x": 4, "y": 4 },
+                ]
             ],
-        ),
-    );
+        });
 
-    assert_eq!(
-        selection!("ys: .arrayOfArrays.y xs: .arrayOfArrays.x").apply_to(&data),
-        (
-            Some(json!({
-                "ys": [
+        assert_eq!(
+            selection!(".arrayOfArrays.x").apply_to(&data),
+            (
+                Some(json!([[0], [1, 1, 1], [2, 2], [], [null, 4, 4, null, 4],])),
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "not an object",
+                        "path": ["arrayOfArrays", 4, 0],
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "not an object",
+                        "path": ["arrayOfArrays", 4, 3],
+                    })),
+                ],
+            ),
+        );
+
+        assert_eq!(
+            selection!(".arrayOfArrays.y").apply_to(&data),
+            (
+                Some(json!([
                     [0],
                     [0, 1, 2],
                     [0, 1],
                     [],
                     [null, 1, null, null, 4],
+                ])),
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "not an object",
+                        "path": ["arrayOfArrays", 4, 0],
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "\"y\" not found",
+                        "path": ["arrayOfArrays", 4, 2, "y"],
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "not an object",
+                        "path": ["arrayOfArrays", 4, 3],
+                    })),
                 ],
-                "xs": [
-                    [0],
-                    [1, 1, 1],
-                    [2, 2],
-                    [],
-                    [null, 4, 4, null, 4],
+            ),
+        );
+
+        assert_eq!(
+            selection!("alias: arrayOfArrays { x y }").apply_to(&data),
+            (
+                Some(json!({
+                    "alias": [
+                        [
+                            { "x": 0, "y": 0 },
+                        ],
+                        [
+                            { "x": 1, "y": 0 },
+                            { "x": 1, "y": 1 },
+                            { "x": 1, "y": 2 },
+                        ],
+                        [
+                            { "x": 2, "y": 0 },
+                            { "x": 2, "y": 1 },
+                        ],
+                        [],
+                        [
+                            null,
+                            { "x": 4, "y": 1 },
+                            { "x": 4 },
+                            null,
+                            { "x": 4, "y": 4 },
+                        ]
+                    ],
+                })),
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "not an object",
+                        "path": ["arrayOfArrays", 4, 0],
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "\"y\" not found",
+                        "path": ["arrayOfArrays", 4, 2, "y"],
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "not an object",
+                        "path": ["arrayOfArrays", 4, 3],
+                    })),
                 ],
-            })),
-            vec![
-                ApplyToError::from_json(&json!({
-                    "message": "not an object",
-                    "path": ["arrayOfArrays", 4, 0],
+            ),
+        );
+
+        assert_eq!(
+            selection!("ys: .arrayOfArrays.y xs: .arrayOfArrays.x").apply_to(&data),
+            (
+                Some(json!({
+                    "ys": [
+                        [0],
+                        [0, 1, 2],
+                        [0, 1],
+                        [],
+                        [null, 1, null, null, 4],
+                    ],
+                    "xs": [
+                        [0],
+                        [1, 1, 1],
+                        [2, 2],
+                        [],
+                        [null, 4, 4, null, 4],
+                    ],
                 })),
-                ApplyToError::from_json(&json!({
-                    "message": "\"y\" not found",
-                    "path": ["arrayOfArrays", 4, 2, "y"],
-                })),
-                ApplyToError::from_json(&json!({
-                    // Reversing the order of "path" and "message" here to make
-                    // sure that doesn't affect the deduplication logic.
-                    "path": ["arrayOfArrays", 4, 3],
-                    "message": "not an object",
-                })),
-                // These errors have already been reported along different paths, above.
-                // ApplyToError::from_json(&json!({
-                //     "message": "not an object",
-                //     "path": ["arrayOfArrays", 4, 0],
-                // })),
-                // ApplyToError::from_json(&json!({
-                //     "message": "not an object",
-                //     "path": ["arrayOfArrays", 4, 3],
-                // })),
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "not an object",
+                        "path": ["arrayOfArrays", 4, 0],
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "\"y\" not found",
+                        "path": ["arrayOfArrays", 4, 2, "y"],
+                    })),
+                    ApplyToError::from_json(&json!({
+                        // Reversing the order of "path" and "message" here to make
+                        // sure that doesn't affect the deduplication logic.
+                        "path": ["arrayOfArrays", 4, 3],
+                        "message": "not an object",
+                    })),
+                    // These errors have already been reported along different paths, above.
+                    // ApplyToError::from_json(&json!({
+                    //     "message": "not an object",
+                    //     "path": ["arrayOfArrays", 4, 0],
+                    // })),
+                    // ApplyToError::from_json(&json!({
+                    //     "message": "not an object",
+                    //     "path": ["arrayOfArrays", 4, 3],
+                    // })),
+                ],
+            ),
+        );
+    }
+
+    #[test]
+    fn test_apply_to_non_identifier_properties() {
+        let data = json!({
+            "not an identifier": [
+                { "also.not.an.identifier": 0 },
+                { "also.not.an.identifier": 1 },
+                { "also.not.an.identifier": 2 },
             ],
-        ),
-    );
-}
-
-#[test]
-fn test_apply_to_non_identifier_properties() {
-    let data = json!({
-        "not an identifier": [
-            { "also.not.an.identifier": 0 },
-            { "also.not.an.identifier": 1 },
-            { "also.not.an.identifier": 2 },
-        ],
-        "another": {
-            "pesky string literal!": {
-                "identifier": 123,
-                "{ evil braces }": true,
+            "another": {
+                "pesky string literal!": {
+                    "identifier": 123,
+                    "{ evil braces }": true,
+                },
             },
-        },
-    });
+        });
 
-    assert_eq!(
-        // The grammar enforces that we must always provide identifier aliases
-        // for non-identifier properties, so the data we get back will always be
-        // GraphQL-safe.
-        selection!("alias: 'not an identifier' { safe: 'also.not.an.identifier' }").apply_to(&data),
-        (
-            Some(json!({
-                "alias": [
+        assert_eq!(
+            // The grammar enforces that we must always provide identifier aliases
+            // for non-identifier properties, so the data we get back will always be
+            // GraphQL-safe.
+            selection!("alias: 'not an identifier' { safe: 'also.not.an.identifier' }")
+                .apply_to(&data),
+            (
+                Some(json!({
+                    "alias": [
+                        { "safe": 0 },
+                        { "safe": 1 },
+                        { "safe": 2 },
+                    ],
+                })),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            selection!(".'not an identifier'.'also.not.an.identifier'").apply_to(&data),
+            (Some(json!([0, 1, 2])), vec![],),
+        );
+
+        assert_eq!(
+            selection!(".\"not an identifier\" { safe: \"also.not.an.identifier\" }")
+                .apply_to(&data),
+            (
+                Some(json!([
                     { "safe": 0 },
                     { "safe": 1 },
                     { "safe": 2 },
-                ],
-            })),
-            vec![],
-        ),
-    );
+                ])),
+                vec![],
+            ),
+        );
 
-    assert_eq!(
-        selection!(".'not an identifier'.'also.not.an.identifier'").apply_to(&data),
-        (Some(json!([0, 1, 2])), vec![],),
-    );
-
-    assert_eq!(
-        selection!(".\"not an identifier\" { safe: \"also.not.an.identifier\" }").apply_to(&data),
-        (
-            Some(json!([
-                { "safe": 0 },
-                { "safe": 1 },
-                { "safe": 2 },
-            ])),
-            vec![],
-        ),
-    );
-
-    assert_eq!(
-        selection!(
-            "another {
-            pesky: 'pesky string literal!' {
-                identifier
-                evil: '{ evil braces }'
-            }
-        }"
-        )
-        .apply_to(&data),
-        (
-            Some(json!({
-                "another": {
-                    "pesky": {
-                        "identifier": 123,
-                        "evil": true,
+        assert_eq!(
+            selection!(
+                "another {
+                pesky: 'pesky string literal!' {
+                    identifier
+                    evil: '{ evil braces }'
+                }
+            }"
+            )
+            .apply_to(&data),
+            (
+                Some(json!({
+                    "another": {
+                        "pesky": {
+                            "identifier": 123,
+                            "evil": true,
+                        },
                     },
-                },
-            })),
-            vec![],
-        ),
-    );
+                })),
+                vec![],
+            ),
+        );
 
-    assert_eq!(
-        selection!(".another.'pesky string literal!'.'{ evil braces }'").apply_to(&data),
-        (Some(json!(true)), vec![],),
-    );
+        assert_eq!(
+            selection!(".another.'pesky string literal!'.'{ evil braces }'").apply_to(&data),
+            (Some(json!(true)), vec![],),
+        );
 
-    assert_eq!(
-        selection!(".another.'pesky string literal!'.\"identifier\"").apply_to(&data),
-        (Some(json!(123)), vec![],),
-    );
+        assert_eq!(
+            selection!(".another.'pesky string literal!'.\"identifier\"").apply_to(&data),
+            (Some(json!(123)), vec![],),
+        );
+    }
 }
 
 // GraphQL Selection Set -------------------------------------------------------

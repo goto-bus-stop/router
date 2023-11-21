@@ -3,7 +3,15 @@ source: apollo-router/src/plugins/connectors/directives.rs
 expression: all_source_apis
 ---
 {
-  "CONTACTS": {
+  "legacy_contacts": {
+    "name": "legacy_contacts",
+    "http": {
+      "base_url": "http://localhost:4002/legacy/contacts/",
+      "default": null,
+      "headers": []
+    }
+  },
+  "rest_contacts": {
     "name": "rest_contacts",
     "http": {
       "base_url": "http://localhost:4002/contacts/",
@@ -27,15 +35,7 @@ expression: all_source_apis
       ]
     }
   },
-  "LEGACY_CONTACTS": {
-    "name": "legacy_contacts",
-    "http": {
-      "base_url": "http://localhost:4002/legacy/contacts/",
-      "default": null,
-      "headers": []
-    }
-  },
-  "NOTES": {
+  "rest_notes": {
     "name": "rest_notes",
     "http": {
       "base_url": "http://localhost:4002/notes/",

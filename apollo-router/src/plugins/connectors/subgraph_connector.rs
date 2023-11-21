@@ -24,7 +24,6 @@ use tower::ServiceExt;
 use super::directives::HTTPSourceAPI;
 use super::directives::SourceAPI;
 use super::directives::SOURCE_API_DIRECTIVE_NAME;
-use super::directives::SOURCE_API_ENUM_NAME;
 use crate::error::ConnectorDirectiveError;
 use crate::layers::ServiceBuilderExt;
 use crate::services::subgraph;
@@ -45,7 +44,7 @@ pub(crate) struct SubgraphConnector {
 impl SubgraphConnector {
     pub(crate) fn for_schema(schema: Arc<Schema>) -> Result<Self, ConnectorDirectiveError> {
         Ok(Self {
-            source_apis: Arc::new(source_apis_from_root_enum(&schema)?),
+            source_apis: Arc::new(SourceAPI::from_schema(&schema.definitions)?),
         })
     }
 
@@ -56,33 +55,6 @@ impl SubgraphConnector {
     ) -> subgraph::BoxService {
         service
     }
-}
-
-// Given a valid schema with a SOURCE_API enum,
-// returns `SourceApi` directive parameters for each of the relevant subgraphs.
-fn source_apis_from_root_enum(
-    schema: &Schema,
-) -> Result<HashMap<String, SourceAPI>, ConnectorDirectiveError> {
-    // SOURCE_API is an enum available at the root,
-    // it contains variants, that have @source_api metadata attached to them
-    Ok(schema
-        .definitions
-        .get_enum(SOURCE_API_ENUM_NAME)
-        .map(|source_api_enum| {
-            // for each of the variants, let's get the name, and create a SourceApi item.
-            source_api_enum
-                .values
-                .iter()
-                .map(|(node, value)| {
-                    // the node contains the name,
-                    // let's craft a SourceApi from the directive metadata
-                    SourceAPI::from_root_enum(value)
-                        .map(|source_api| (node.to_string().to_string(), source_api))
-                })
-                .collect::<Result<HashMap<_, _>, _>>()
-        })
-        .transpose()?
-        .unwrap_or_default())
 }
 
 // Given a valid schema with a @source_api directive applied to the SCHEMA section,
@@ -134,7 +106,6 @@ mod tests {
     use crate::Configuration;
 
     const SCHEMA_DIRECTIVE: &str = include_str!("./test_supergraph_schema_directive.graphql");
-    const SCHEMA_ENUM: &str = include_str!("./test_supergraph_root_enum.graphql");
 
     #[test]
     fn test_schema_directive_has_no_errors() {
@@ -146,6 +117,7 @@ mod tests {
 
         assert!(!schema.has_errors());
     }
+
     #[test]
     fn test_source_api_directive() {
         let schema = Schema::parse(
@@ -156,25 +128,6 @@ mod tests {
 
         let source_apis_from_schema = source_apis_from_schema_directive(&schema).unwrap();
 
-        insta::with_settings!({sort_maps => true}, {
-            assert_json_snapshot!(source_apis_from_schema);
-        });
-    }
-
-    #[test]
-    fn test_schema_enum_has_no_errors() {
-        let schema =
-            Schema::parse(SCHEMA_ENUM, &Configuration::fake_builder().build().unwrap()).unwrap();
-
-        assert!(!schema.has_errors());
-    }
-
-    #[test]
-    fn test_source_api_enum() {
-        let schema =
-            Schema::parse(SCHEMA_ENUM, &Configuration::fake_builder().build().unwrap()).unwrap();
-
-        let source_apis_from_schema = source_apis_from_root_enum(&schema).unwrap();
         insta::with_settings!({sort_maps => true}, {
             assert_json_snapshot!(source_apis_from_schema);
         });

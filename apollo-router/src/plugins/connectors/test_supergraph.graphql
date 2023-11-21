@@ -1,0 +1,161 @@
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  @link(
+    url: "https://specs.apollo.dev/source/v0.1"
+    import: ["@source_api", "@source_type", "@source_field"]
+  ) {
+  query: Query
+}
+
+enum join__Graph {
+  THIS
+  THAT
+}
+
+directive @key(fields: join__FieldSet!) on OBJECT | INTERFACE
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(
+  graph: join__Graph
+  requires: join__FieldSet
+  provides: join__FieldSet
+  type: String
+  external: Boolean
+  override: String
+  usedOverridden: Boolean
+) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(
+  graph: join__Graph!
+  interface: String!
+) repeatable on OBJECT | INTERFACE
+
+directive @join__type(
+  graph: join__Graph!
+  key: join__FieldSet
+  extension: Boolean! = false
+  resolvable: Boolean! = true
+  isInterfaceObject: Boolean! = false
+) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(
+  graph: join__Graph!
+  member: String!
+) repeatable on UNION
+
+directive @link(
+  url: String
+  as: String
+  for: link__Purpose
+  import: [link__Import]
+) repeatable on SCHEMA
+
+directive @source_api(
+  graph: join__Graph
+  name: String!
+  http: HTTPSourceAPI
+) repeatable on SCHEMA
+
+directive @source_field(
+  graph: join__Graph
+  api: String
+  http: HTTPSourceField
+  selection: JSONSelection
+) repeatable on FIELD_DEFINITION
+
+directive @source_type(
+  graph: join__Graph
+  api: String
+  http: HTTPSourceType
+  selection: JSONSelection
+  key: String
+) repeatable on OBJECT | INTERFACE
+
+input HTTPHeaderMapping {
+  name: String!
+  as: String
+  value: String
+}
+
+input HTTPSourceAPI {
+  base_url: String!
+  default: Boolean
+  headers: [HTTPHeaderMapping!]
+}
+
+input HTTPSourceField {
+  GET: URLPathTemplate
+  POST: URLPathTemplate
+  PUT: URLPathTemplate
+  PATCH: URLPathTemplate
+  DELETE: URLPathTemplate
+  headers: [HTTPHeaderMapping!]
+  body: JSONSelection
+}
+
+input HTTPSourceType {
+  GET: URLPathTemplate
+  POST: URLPathTemplate
+  PUT: URLPathTemplate
+  PATCH: URLPathTemplate
+  DELETE: URLPathTemplate
+  headers: [HTTPHeaderMapping!]
+  body: JSONSelection
+}
+
+scalar join__FieldSet @specifiedBy(url: "https://whatever")
+
+scalar JSON @specifiedBy(url: "https://whatever")
+
+scalar JSONSelection
+  @specifiedBy(url: "https://specs.apollo.dev/selection/v1.0")
+
+scalar link__Import @specifiedBy(url: "https://whatever")
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar URLPathTemplate @specifiedBy(url: "https://specs.apollo.dev/source/v1.0")
+
+################################################################################
+
+extend schema @source_api(name: "a", http: { base_url: "http://x" })
+
+type Query {
+  hello: Hello
+    @source_field(api: "a", http: { GET: "/hello" }, selection: ".data { id }")
+}
+
+type Hello
+  @key(fields: "id")
+  @source_type(
+    api: "a"
+    http: { GET: "/hello/{id}" }
+    selection: ".data { id field }"
+  ) {
+  id: ID!
+  field: String
+  world: World
+    @source_field(
+      api: "a"
+      http: { GET: "/hello/{id}/world" }
+      selection: ".data { field }"
+    )
+}
+
+type World {
+  field: String
+}

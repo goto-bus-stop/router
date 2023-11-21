@@ -474,7 +474,7 @@ async fn subscription_task(
                         break;
                     },
                 };
-                let (subgraph_services, subgraph_connector) = match create_subgraph_services(&plugins, execution_service_factory.schema.clone(), &conf).await {
+                let subgraph_services = match create_subgraph_services(&plugins, execution_service_factory.schema.clone(), &conf).await {
                     Ok(both) => both,
                     Err(err) => {
                         tracing::error!("cannot re-create subgraph service with the new configuration (closing existing subscription): {err:?}");
@@ -482,7 +482,8 @@ async fn subscription_task(
                     },
                 };
                 let plugins = Arc::new(IndexMap::from_iter(plugins));
-                execution_service_factory = ExecutionServiceFactory { schema: execution_service_factory.schema.clone(), plugins: plugins.clone(), subgraph_service_factory: Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(),subgraph_connector, plugins.clone())) };
+                // TODO: connector support with subs needs to happen!
+                execution_service_factory = ExecutionServiceFactory { schema: execution_service_factory.schema.clone(), plugins: plugins.clone(), subgraph_service_factory: Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(), None, plugins.clone())) };
                 }
             }
             Some(new_schema) = schema_updated_rx.next() => {
@@ -650,6 +651,7 @@ pub(crate) struct PluggableSupergraphServiceBuilder {
     subgraph_services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
     configuration: Option<Arc<Configuration>>,
     planner: BridgeQueryPlanner,
+    extra_planner: Option<BridgeQueryPlanner>,
 }
 
 impl PluggableSupergraphServiceBuilder {
@@ -659,7 +661,13 @@ impl PluggableSupergraphServiceBuilder {
             subgraph_services: Default::default(),
             configuration: None,
             planner,
+            extra_planner: None,
         }
+    }
+
+    pub(crate) fn with_extra_planner(mut self, extra_planner: BridgeQueryPlanner) -> Self {
+        self.extra_planner = Some(extra_planner);
+        self
     }
 
     pub(crate) fn with_dyn_plugin(
@@ -696,13 +704,6 @@ impl PluggableSupergraphServiceBuilder {
         let configuration = self.configuration.unwrap_or_default();
 
         let schema = self.planner.schema();
-        let query_planner_service = CachingQueryPlanner::new(
-            self.planner,
-            schema.clone(),
-            &configuration,
-            IndexMap::new(),
-        )
-        .await;
 
         let mut plugins = self.plugins;
         // Activate the telemetry plugin.
@@ -714,10 +715,43 @@ impl PluggableSupergraphServiceBuilder {
         }
 
         let plugins = Arc::new(plugins);
-        let subgraph_connector = SubgraphConnector::for_schema(Arc::clone(&schema))?;
+        // create a scattered schema from the extra_planner:
+        let connector_subgraph = if let Some(p) = self.extra_planner {
+            let extra_schema: Arc<Schema> = p.schema();
+            let query_planner_service =
+                CachingQueryPlanner::new(p, extra_schema.clone(), &configuration, IndexMap::new())
+                    .await;
+            let subgraph_service_factory = Arc::new(SubgraphServiceFactory::new(
+                self.subgraph_services.iter().cloned().collect(),
+                None,
+                plugins.clone(),
+            ));
+            Some(SubgraphConnector::for_schema(
+                Arc::clone(&schema),
+                SupergraphCreator {
+                    query_planner_service,
+                    subgraph_service_factory,
+                    schema: extra_schema,
+                    plugins: plugins.clone(),
+                    config: configuration.clone(),
+                },
+            )?)
+        } else {
+            None
+        };
+
+        // create the connector subgraph that will be used by the "outer router"
+        let query_planner_service = CachingQueryPlanner::new(
+            self.planner,
+            schema.clone(),
+            &configuration,
+            IndexMap::new(),
+        )
+        .await;
+
         let subgraph_service_factory = Arc::new(SubgraphServiceFactory::new(
             self.subgraph_services,
-            subgraph_connector,
+            connector_subgraph,
             plugins.clone(),
         ));
 

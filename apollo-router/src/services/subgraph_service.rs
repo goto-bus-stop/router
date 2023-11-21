@@ -1118,13 +1118,13 @@ pub(crate) struct SubgraphServiceFactory {
 impl SubgraphServiceFactory {
     pub(crate) fn new(
         services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
-        subgraph_connector: SubgraphConnector,
+        subgraph_connector: Option<SubgraphConnector>,
         plugins: Arc<Plugins>,
     ) -> Self {
-        SubgraphServiceFactory {
+        Self {
             services: Arc::new(services.into_iter().collect()),
-            subgraph_connector: Some(subgraph_connector),
             plugins,
+            subgraph_connector,
         }
     }
 

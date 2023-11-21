@@ -26,7 +26,6 @@ use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
-use crate::plugins::connectors::subgraph_connector::SubgraphConnector;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::traffic_shaping::rate;
@@ -157,11 +156,21 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterFactory, BoxError> {
+        // TODO: we can use a single bridge for both the regular planner and the extras.
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
         let bridge_query_planner = match previous_router.as_ref().map(|router| router.planner()) {
             None => BridgeQueryPlanner::new(schema.clone(), configuration.clone()).await?,
             Some(planner) => {
                 BridgeQueryPlanner::new_from_planner(planner, schema.clone(), configuration.clone())
+                    .await?
+            }
+        };
+
+        let extra_schema = do_some_extraction_magic_letsgo(schema.clone())?;
+        let extra_planner = match previous_router.as_ref().map(|router| router.planner()) {
+            None => BridgeQueryPlanner::new(extra_schema, configuration.clone()).await?,
+            Some(planner) => {
+                BridgeQueryPlanner::new_from_planner(planner, extra_schema, configuration.clone())
                     .await?
             }
         };
@@ -188,9 +197,10 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
-        let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
+        let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner)
+            .with_extra_planner(extra_planner);
         builder = builder.with_configuration(configuration.clone());
-        let (subgraph_services, _) =
+        let subgraph_services =
             create_subgraph_services(&plugins, Arc::clone(&schema), &configuration).await?;
         for (name, subgraph_service) in subgraph_services {
             builder = builder.with_subgraph_service(&name, subgraph_service);
@@ -201,6 +211,8 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
 
         // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
         let mut supergraph_creator = builder.build().await?;
+
+        // TODO: connector planner warmup with pqls?
 
         // Instantiate the parser here so we can use it to warm up the planner below
         let query_analysis_layer =
@@ -233,47 +245,44 @@ pub(crate) async fn create_subgraph_services(
     schema: Arc<Schema>,
     configuration: &Configuration,
 ) -> Result<
-    (
-        IndexMap<
-            String,
-            impl Service<
-                    subgraph::Request,
-                    Response = subgraph::Response,
-                    Error = BoxError,
-                    Future = Either<
+    IndexMap<
+        String,
+        impl Service<
+                subgraph::Request,
+                Response = subgraph::Response,
+                Error = BoxError,
+                Future = Either<
+                    Either<
+                        BoxFuture<'static, Result<subgraph::Response, BoxError>>,
                         Either<
                             BoxFuture<'static, Result<subgraph::Response, BoxError>>,
-                            Either<
-                                BoxFuture<'static, Result<subgraph::Response, BoxError>>,
-                                timeout::future::ResponseFuture<
-                                    Oneshot<
-                                        Either<
-                                            Retry<
-                                                RetryPolicy,
-                                                Either<
-                                                    rate::service::RateLimit<SubgraphService>,
-                                                    SubgraphService,
-                                                >,
-                                            >,
+                            timeout::future::ResponseFuture<
+                                Oneshot<
+                                    Either<
+                                        Retry<
+                                            RetryPolicy,
                                             Either<
                                                 rate::service::RateLimit<SubgraphService>,
                                                 SubgraphService,
                                             >,
                                         >,
-                                        subgraph::Request,
+                                        Either<
+                                            rate::service::RateLimit<SubgraphService>,
+                                            SubgraphService,
+                                        >,
                                     >,
+                                    subgraph::Request,
                                 >,
                             >,
                         >,
-                        <SubgraphService as Service<subgraph::Request>>::Future,
                     >,
-                > + Clone
-                + Send
-                + Sync
-                + 'static,
-        >,
-        SubgraphConnector,
-    ),
+                    <SubgraphService as Service<subgraph::Request>>::Future,
+                >,
+            > + Clone
+            + Send
+            + Sync
+            + 'static,
+    >,
     BoxError,
 > {
     let tls_root_store: Option<RootCertStore> = configuration
@@ -310,10 +319,12 @@ pub(crate) async fn create_subgraph_services(
         subgraph_services.insert(name.clone(), subgraph_service);
     }
 
-    Ok((
-        subgraph_services,
-        SubgraphConnector::for_schema(Arc::clone(&schema))?,
-    ))
+    Ok(subgraph_services)
+}
+
+// Probably not the best place but hey let's see
+fn do_some_extraction_magic_letsgo(schema: String) -> Result<String, BoxError> {
+    Ok(schema)
 }
 
 impl YamlRouterFactory {
@@ -341,7 +352,7 @@ impl YamlRouterFactory {
         let mut builder: PluggableSupergraphServiceBuilder =
             PluggableSupergraphServiceBuilder::new(bridge_query_planner);
         builder = builder.with_configuration(configuration.clone());
-        let (subgraph_services, _) =
+        let subgraph_services =
             create_subgraph_services(&plugins, Arc::clone(&schema), &configuration).await?;
         for (name, subgraph_service) in subgraph_services {
             builder = builder.with_subgraph_service(&name, subgraph_service);

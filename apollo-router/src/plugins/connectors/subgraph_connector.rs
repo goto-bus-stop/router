@@ -27,7 +27,7 @@ use super::directives::SOURCE_API_DIRECTIVE_NAME;
 use crate::error::ConnectorDirectiveError;
 use crate::layers::ServiceBuilderExt;
 use crate::services::subgraph;
-// use crate::spec::hir_type_name;
+use crate::services::SupergraphCreator;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::Selection;
@@ -42,7 +42,10 @@ pub(crate) struct SubgraphConnector {
 }
 
 impl SubgraphConnector {
-    pub(crate) fn for_schema(schema: Arc<Schema>) -> Result<Self, ConnectorDirectiveError> {
+    pub(crate) fn for_schema(
+        schema: Arc<Schema>,
+        creator: SupergraphCreator,
+    ) -> Result<Self, ConnectorDirectiveError> {
         Ok(Self {
             source_apis: Arc::new(SourceAPI::from_schema(&schema.definitions)?),
         })
@@ -50,10 +53,18 @@ impl SubgraphConnector {
 
     pub(crate) fn subgraph_service(
         &self,
-        _subgraph_name: &str,
+        subgraph_name: &str,
         service: subgraph::BoxService,
     ) -> subgraph::BoxService {
-        service
+        let subgraph_name = Arc::new(subgraph_name.to_string());
+        let s2 = subgraph_name.clone();
+        ServiceBuilder::new()
+            .map_request(move |req| {
+                dbg!(&s2);
+                req
+            })
+            .service(service)
+            .boxed()
     }
 }
 

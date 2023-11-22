@@ -227,7 +227,7 @@ pub(super) struct SourceType {
     pub(super) type_name: String,
     pub(super) api: String,
     http: Option<HTTPSourceType>,
-    pub(super) selection: Option<JSONSelection>,
+    selection: Option<JSONSelection>,
     key_type_map: Option<KeyTypeMap>,
 }
 
@@ -368,7 +368,7 @@ pub(super) struct SourceField {
     pub(super) output_type_name: String,
     pub(super) api: String,
     http: Option<HTTPSourceField>,
-    pub(super) selection: Option<JSONSelection>,
+    selection: Option<JSONSelection>,
 }
 
 impl SourceField {
@@ -590,7 +590,7 @@ mod tests {
     use crate::Configuration;
 
     #[test]
-    fn test_enum_directive_has_no_errors() {
+    fn test_source_api_directive_has_no_errors() {
         let partial_sdl = r#"
             schema
                 @source_api(
@@ -623,24 +623,9 @@ mod tests {
                 query: Query
             }
             "#;
-        let partial_schema =
-            Schema::parse(partial_sdl, &Configuration::fake_builder().build().unwrap()).unwrap();
+        let partial_schema = apollo_compiler::Schema::parse(partial_sdl, "schema.graphql");
 
-        let schema_directives = partial_schema
-            .definitions
-            .schema_definition
-            .directives
-            .clone();
-
-        // for each of the variants, let's get the name, and create a SourceApi item.
-        let all_source_apis = schema_directives
-            .iter()
-            .map(|directive| {
-                SourceAPI::from_schema_directive(directive)
-                    .map(|source_api| (source_api.name.clone(), source_api))
-                    .unwrap()
-            })
-            .collect::<HashMap<_, _>>();
+        let all_source_apis = SourceAPI::from_schema(&partial_schema).unwrap();
 
         insta::with_settings!({sort_maps => true}, {
             assert_json_snapshot!(all_source_apis);
@@ -648,7 +633,7 @@ mod tests {
     }
 
     #[test]
-    fn test_enum_directive_missing_mandatory_fields() {
+    fn test_source_api_directive_missing_mandatory_fields() {
         let partial_sdl = r#"
             directive @source_api(name: String!, http: HTTPSourceAPI) on SCHEMA
 
@@ -664,7 +649,7 @@ mod tests {
                 value: String
             }
 
-            extend schema
+            schema
                 @source_api(
                     http: {
                         base_url: "http://localhost:4002/contacts/"
@@ -683,6 +668,7 @@ mod tests {
                         headers: [{ as: "missing mandatory name field" }]
                     }
                 )
+            { query: Query }
             "#;
 
         let partial_schema =
@@ -694,21 +680,13 @@ mod tests {
             .directives
             .clone();
 
-        // for each directive, let's get the name, and create a SourceAPI result.
+        // relies on source order
         let mut all_source_apis = schema_directives
             .iter()
-            .map(|directive| {
-                let source_api = SourceAPI::from_schema_directive(directive);
-                let name = source_api
-                    .clone()
-                    .map(|s| s.name)
-                    .unwrap_or("MISSING_NAME".to_string());
+            .map(|directive| SourceAPI::from_schema_directive(directive))
+            .collect::<Vec<_>>();
 
-                (name, source_api)
-            })
-            .collect::<HashMap<_, _>>();
-
-        let missing_name_error = all_source_apis.remove("MISSING_NAME").unwrap().unwrap_err();
+        let missing_name_error = all_source_apis.remove(0).unwrap_err();
         assert_eq!(
             ConnectorDirectiveError::MissingAttributeForType(
                 "name".to_string(),
@@ -717,10 +695,7 @@ mod tests {
             missing_name_error
         );
 
-        let missing_base_url_error = all_source_apis
-            .remove("missing_base_url")
-            .unwrap()
-            .unwrap_err();
+        let missing_base_url_error = all_source_apis.remove(0).unwrap_err();
         assert_eq!(
             ConnectorDirectiveError::MissingAttributeForType(
                 "base_url".to_string(),
@@ -729,10 +704,7 @@ mod tests {
             missing_base_url_error
         );
 
-        let missing_header_name_error = all_source_apis
-            .remove("missing_header_name")
-            .unwrap()
-            .unwrap_err();
+        let missing_header_name_error = all_source_apis.remove(0).unwrap_err();
         assert_eq!(
             ConnectorDirectiveError::MissingAttributeForType(
                 "name".to_string(),

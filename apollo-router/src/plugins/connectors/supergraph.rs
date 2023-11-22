@@ -61,13 +61,13 @@ mod tests {
     #[test]
     fn it_works() -> anyhow::Result<()> {
         let schema = Schema::parse(SCHEMA, "outer.graphql");
-        assert_eq!(schema.validate().unwrap().is_empty(), true);
+        assert!(schema.validate().unwrap().is_empty());
 
         let connectors = Arc::from(Connector::from_schema(&schema).unwrap());
         let inner = generate_connector_supergraph(&schema, connectors).unwrap();
 
         // new supergraph is valid
-        assert_eq!(inner.validate().unwrap().is_empty(), true);
+        assert!(inner.validate().unwrap().is_empty());
 
         // new supergraph can be parsed into subgraphs
         let result = RouterSchema::parse(

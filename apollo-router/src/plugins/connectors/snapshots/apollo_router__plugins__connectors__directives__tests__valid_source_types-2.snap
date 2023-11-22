@@ -3,6 +3,7 @@ source: apollo-router/src/plugins/connectors/directives.rs
 expression: valid_source_type_default_http
 ---
 {
+  "graph": "contacts",
   "type_name": "ValidSourceTypeDefaultHttp",
   "api": "contacts",
   "http": null,

@@ -683,7 +683,7 @@ mod tests {
         // relies on source order
         let mut all_source_apis = schema_directives
             .iter()
-            .map(|directive| SourceAPI::from_schema_directive(directive))
+            .map(SourceAPI::from_schema_directive)
             .collect::<Vec<_>>();
 
         let missing_name_error = all_source_apis.remove(0).unwrap_err();

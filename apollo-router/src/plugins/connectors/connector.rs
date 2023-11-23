@@ -33,7 +33,7 @@ pub(super) enum ConnectorType {
 
 /// The list of the subgraph names that should use the inner query planner
 /// instead of making a normal subgraph request.
-pub(crate) fn connector_subgraph_names(connectors: HashMap<String, Connector>) -> HashSet<String> {
+pub(crate) fn connector_subgraph_names(connectors: &HashMap<String, Connector>) -> HashSet<String> {
     connectors
         .values()
         .map(|c| c.outer_subgraph_name())

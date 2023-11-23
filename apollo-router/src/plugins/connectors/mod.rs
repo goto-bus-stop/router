@@ -1,5 +1,6 @@
 #[allow(dead_code)]
 mod connector;
+pub(crate) use connector::connector_subgraph_names;
 pub(crate) use connector::Connector;
 #[allow(dead_code)]
 mod directives;

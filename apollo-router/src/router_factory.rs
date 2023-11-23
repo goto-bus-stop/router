@@ -26,6 +26,7 @@ use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
+use crate::plugins::connectors::connector_subgraph_names;
 use crate::plugins::connectors::generate_connector_supergraph;
 use crate::plugins::connectors::Connector;
 use crate::plugins::subscription::Subscription;
@@ -174,7 +175,11 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         debug_assert!(spec_schema.validate().unwrap().is_empty());
 
         let connectors = Arc::from(Connector::from_schema(&spec_schema)?);
+        let connector_subgraph_names = connector_subgraph_names(&connectors);
         let connector_schema = generate_connector_supergraph(&spec_schema, connectors)?;
+
+        dbg!(&connector_subgraph_names);
+        println!("connector\n{}", connector_schema.to_string());
 
         // wohoo we have a connector planner \o/
         let extra_planner = match previous_router.as_ref().map(|router| router.planner()) {

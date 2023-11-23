@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use anyhow::anyhow;
 use anyhow::bail;
@@ -18,9 +19,9 @@ use super::join_spec_helpers::make_any_scalar;
 
 /// A connector wraps the API and type/field connector metadata and has
 /// a unique name used to construct a "subgraph" in the inner supergraph
-pub(super) struct Connector {
+pub(crate) struct Connector {
     /// Internal name used to construct "subgraphs" in the inner supergraph
-    pub(super) name: String,
+    pub(crate) name: String,
     api: SourceAPI,
     ty: ConnectorType,
 }
@@ -28,6 +29,15 @@ pub(super) struct Connector {
 pub(super) enum ConnectorType {
     Type(SourceType),
     Field(SourceField),
+}
+
+/// The list of the subgraph names that should use the inner query planner
+/// instead of making a normal subgraph request.
+pub(crate) fn connector_subgraph_names(connectors: HashMap<String, Connector>) -> HashSet<String> {
+    connectors
+        .values()
+        .map(|c| c.outer_subgraph_name())
+        .collect()
 }
 
 impl Connector {
@@ -47,8 +57,8 @@ impl Connector {
                 Connector {
                     name: connector_name,
                     api: apis
-                        .get(&directive.api)
-                        .ok_or(anyhow!("missing API {}", directive.api))? // TODO support default
+                        .get(&directive.api_name())
+                        .ok_or(anyhow!("missing API {}", directive.api_name()))? // TODO support default
                         .clone(),
                     ty: ConnectorType::Type(directive),
                 },
@@ -67,8 +77,8 @@ impl Connector {
                 Connector {
                     name: connector_name,
                     api: apis
-                        .get(&directive.api)
-                        .ok_or(anyhow!("missing API {}", directive.api))? // TODO support default
+                        .get(&directive.api_name())
+                        .ok_or(anyhow!("missing API {}", directive.api_name()))? // TODO support default
                         .clone(),
                     ty: ConnectorType::Field(directive),
                 },
@@ -139,6 +149,13 @@ impl Connector {
             }
         }
     }
+
+    pub(super) fn outer_subgraph_name(&self) -> String {
+        match self.ty {
+            ConnectorType::Type(ref ty) => ty.graph.clone(),
+            ConnectorType::Field(ref field) => field.graph.clone(),
+        }
+    }
 }
 
 /// A "change" is a unit of work that can be applied to a schema. Each connector
@@ -173,7 +190,7 @@ impl Change {
     ) -> anyhow::Result<()> {
         match self {
             Change::Type { name, graph, key } => {
-                let ty = copy_type(original_schema, schema, name)?;
+                let ty = upsert_type(original_schema, schema, name)?;
                 add_join_type_directive(ty, graph, key.as_deref(), false);
             }
             Change::Field {
@@ -181,7 +198,7 @@ impl Change {
                 field_name,
                 graph,
             } => {
-                let field = copy_field(original_schema, schema, type_name, field_name)?;
+                let field = upsert_field(original_schema, schema, type_name, field_name)?;
                 add_join_field_directive(field, graph)?;
             }
             Change::MagicFinder { type_name, graph } => {
@@ -190,7 +207,7 @@ impl Change {
                     add_join_type_directive(arg_ty, graph, None, false);
                 }
 
-                let ty = copy_type(original_schema, schema, "Query")?;
+                let ty = upsert_type(original_schema, schema, "Query")?;
                 add_join_type_directive(ty, graph, None, false);
 
                 add_entities_field(
@@ -205,7 +222,7 @@ impl Change {
     }
 }
 
-fn copy_field<'a>(
+fn upsert_field<'a>(
     source: &Schema,
     dest: &'a mut Schema,
     type_name: &NodeStr,
@@ -237,7 +254,7 @@ fn copy_field<'a>(
     Ok(new_field.make_mut())
 }
 
-fn copy_type<'a>(
+fn upsert_type<'a>(
     source: &Schema,
     dest: &'a mut Schema,
     name: &str,

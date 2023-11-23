@@ -40,7 +40,7 @@ use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
-use crate::services::router_service::RouterCreator;
+use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::transport;
 use crate::services::HasConfig;
@@ -197,8 +197,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
-        let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner)
-            .with_extra_planner(extra_planner);
+        let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
         builder = builder.with_configuration(configuration.clone());
         let subgraph_services =
             create_subgraph_services(&plugins, Arc::clone(&schema), &configuration).await?;

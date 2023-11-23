@@ -2,77 +2,69 @@
 
 use std::collections::HashMap;
 
+use apollo_compiler::ast::Selection;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
-use apollo_compiler::schema::EnumValueDefinition;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::FieldDefinition;
 use apollo_compiler::schema::Value;
 use apollo_compiler::Node;
+use apollo_compiler::NodeStr;
+use apollo_compiler::Schema;
+use indexmap::IndexMap;
 use serde::Serialize;
 
 use super::selection_parser::Selection as JSONSelection;
 use super::url_path_parser::Template as URLPathTemplate;
 use crate::error::ConnectorDirectiveError;
 
-pub(super) const SOURCE_API_DIRECTIVE_NAME: &str = "source_api";
+pub(super) const SOURCE_API_DIRECTIVE_NAME: &str = "sourceAPI";
 const HTTP_ARGUMENT_NAME: &str = "http";
-pub(crate) const SOURCE_API_ENUM_NAME: &str = "SOURCE_API";
 
-const SOURCE_TYPE_DIRECTIVE_NAME: &str = "source_type";
-const SOURCE_FIELD_DIRECTIVE_NAME: &str = "source_field";
+const SOURCE_TYPE_DIRECTIVE_NAME: &str = "sourceType";
+const SOURCE_FIELD_DIRECTIVE_NAME: &str = "sourceField";
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub(super) struct SourceAPI {
+    graph: String,
     name: String,
     http: Option<HTTPSourceAPI>,
 }
 
-// TODO: remove one of both once we land on the directive position
 impl SourceAPI {
-    pub(super) fn from_root_enum(
-        component: &Component<EnumValueDefinition>,
-    ) -> Result<Self, ConnectorDirectiveError> {
-        let (name, http) = component
+    pub(super) fn from_schema(
+        schema: &Schema,
+    ) -> Result<HashMap<String, Self>, ConnectorDirectiveError> {
+        schema
+            .schema_definition
             .directives
-            .0
             .iter()
-            .find(|d| d.name == SOURCE_API_DIRECTIVE_NAME)
-            .map(|directive| {
-                let name = directive
-                    .argument_by_name("name")
-                    .ok_or_else(|| {
-                        ConnectorDirectiveError::MissingAttributeForType(
-                            "name".to_string(),
-                            SOURCE_API_DIRECTIVE_NAME.to_string(),
-                        )
-                    })?
-                    .as_str()
-                    .ok_or_else(|| {
-                        ConnectorDirectiveError::InvalidTypeForAttribute(
-                            "String!".to_string(),
-                            "name".to_string(),
-                        )
-                    })?
-                    .to_string();
-
-                Ok((name, HTTPSourceAPI::from_directive(directive)?))
+            .filter(|d| d.name == SOURCE_API_DIRECTIVE_NAME)
+            .map(|source_api_directive| {
+                let source_api = Self::from_schema_directive(source_api_directive)?;
+                Ok::<_, ConnectorDirectiveError>((
+                    format!("{}_{}", source_api.graph, source_api.name),
+                    source_api,
+                ))
             })
-            .transpose()?
-            .ok_or_else(|| {
-                ConnectorDirectiveError::MissingAttributeForType(
-                    SOURCE_API_DIRECTIVE_NAME.to_string(),
-                    SOURCE_API_ENUM_NAME.to_string(),
-                )
-            })?;
-
-        Ok(Self {
-            name,
-            http: Some(http),
-        })
+            .collect::<Result<HashMap<_, _>, _>>()
     }
 
     pub(super) fn from_schema_directive(
         schema_directive: &Component<Directive>,
     ) -> Result<Self, ConnectorDirectiveError> {
+        let graph = schema_directive
+            .argument_by_name("graph")
+            .as_ref()
+            .and_then(|graph| graph.as_str())
+            .ok_or_else(|| {
+                ConnectorDirectiveError::MissingAttributeForType(
+                    "graph".to_string(),
+                    SOURCE_API_DIRECTIVE_NAME.to_string(),
+                )
+            })?
+            .to_string();
+
         let name = schema_directive
             .argument_by_name("name")
             .as_ref()
@@ -87,11 +79,11 @@ impl SourceAPI {
 
         let http = Some(HTTPSourceAPI::from_directive(schema_directive)?);
 
-        Ok(Self { name, http })
+        Ok(Self { graph, name, http })
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub(super) struct HTTPSourceAPI {
     base_url: String,
     default: Option<bool>,
@@ -127,7 +119,7 @@ impl HTTPSourceAPI {
             .iter()
         {
             match name.as_str() {
-                "base_url" => base_url = node.as_str(),
+                "baseURL" => base_url = node.as_str(),
                 "default" => {
                     default = Some(node.to_bool().ok_or_else(|| {
                         ConnectorDirectiveError::InvalidTypeForAttribute(
@@ -150,7 +142,7 @@ impl HTTPSourceAPI {
             base_url: base_url
                 .ok_or_else(|| {
                     ConnectorDirectiveError::MissingAttributeForType(
-                        "base_url".to_string(),
+                        "baseURL".to_string(),
                         HTTP_ARGUMENT_NAME.to_string(),
                     )
                 })?
@@ -161,7 +153,7 @@ impl HTTPSourceAPI {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub(super) struct HTTPHeaderMapping {
     name: String,
     r#as: Option<String>,
@@ -226,6 +218,8 @@ impl HTTPHeaderMapping {
 
 #[derive(Debug, Serialize)]
 pub(super) struct SourceType {
+    pub(super) graph: String,
+    pub(super) type_name: String,
     api: String,
     http: Option<HTTPSourceType>,
     selection: Option<JSONSelection>,
@@ -233,9 +227,31 @@ pub(super) struct SourceType {
 }
 
 impl SourceType {
+    pub(super) fn from_schema(
+        schema: &Schema,
+    ) -> Result<HashMap<String, Self>, ConnectorDirectiveError> {
+        Ok(schema
+            .types
+            .iter()
+            .flat_map(|(name, object)| {
+                object
+                    .directives()
+                    .get(SOURCE_TYPE_DIRECTIVE_NAME)
+                    .map(|directive| {
+                        let source_type = Self::from_directive(name.to_string(), directive)?;
+
+                        Ok::<_, ConnectorDirectiveError>((name.to_string(), source_type))
+                    })
+            })
+            .collect::<Result<HashMap<_, _>, _>>()
+            .unwrap_or_default())
+    }
+
     pub(super) fn from_directive(
+        type_name: String,
         directive: &Component<Directive>,
     ) -> Result<Self, ConnectorDirectiveError> {
+        let mut graph = Default::default();
         let mut api = Default::default();
         let mut http = Default::default();
         let mut selection = Default::default();
@@ -243,6 +259,18 @@ impl SourceType {
 
         for argument in directive.arguments.iter() {
             match argument.name.as_str() {
+                "graph" => {
+                    graph = argument
+                        .value
+                        .as_str()
+                        .ok_or_else(|| {
+                            ConnectorDirectiveError::InvalidTypeForAttribute(
+                                "string".to_string(),
+                                "graph".to_string(),
+                            )
+                        })?
+                        .to_string()
+                }
                 "api" => {
                     api = argument
                         .value
@@ -284,11 +312,24 @@ impl SourceType {
         }
 
         Ok(Self {
+            graph,
+            type_name,
             api,
             http,
             selection,
             key_type_map,
         })
+    }
+
+    pub(super) fn api_name(&self) -> String {
+        format!("{}_{}", self.graph, self.api)
+    }
+
+    pub(super) fn selections(&self) -> Vec<Selection> {
+        match &self.selection {
+            Some(selection) => selection.clone().into(),
+            None => vec![],
+        }
     }
 }
 
@@ -335,21 +376,86 @@ impl KeyTypeMap {
 
 #[derive(Debug, Serialize)]
 pub(super) struct SourceField {
+    pub(super) graph: String,
+    pub(super) parent_type_name: String,
+    pub(super) field_name: String,
+    pub(super) output_type_name: String,
     api: String,
     http: Option<HTTPSourceField>,
     selection: Option<JSONSelection>,
 }
 
 impl SourceField {
+    pub(super) fn from_schema(schema: &Schema) -> Result<Vec<Self>, ConnectorDirectiveError> {
+        let mut source_fields = vec![];
+        for (parent_type_name, ty) in schema.types.iter() {
+            source_fields.extend(Self::from_type(parent_type_name.to_string(), ty)?);
+        }
+        Ok(source_fields)
+    }
+
+    fn from_type(
+        parent_type_name: String,
+        ty: &ExtendedType,
+    ) -> Result<Vec<Self>, ConnectorDirectiveError> {
+        Ok(match ty {
+            ExtendedType::Object(ty) => Self::from_fields(parent_type_name, &ty.fields)?,
+            ExtendedType::Interface(ty) => Self::from_fields(parent_type_name, &ty.fields)?,
+            _ => vec![],
+        })
+    }
+
+    fn from_fields(
+        parent_type_name: String,
+        fields: &IndexMap<NodeStr, Component<FieldDefinition>>,
+    ) -> Result<Vec<Self>, ConnectorDirectiveError> {
+        let parent_type_name = parent_type_name.clone();
+        fields
+            .iter()
+            .flat_map(|(name, field)| {
+                let parent_type_name = parent_type_name.clone();
+                field
+                    .directives
+                    .iter()
+                    .filter(|d| d.name == SOURCE_FIELD_DIRECTIVE_NAME)
+                    .map(move |directive| {
+                        let source_field = Self::from_directive(
+                            parent_type_name.clone(),
+                            name.to_string(),
+                            field.ty.inner_named_type().to_string(),
+                            directive,
+                        )?;
+                        Ok(source_field)
+                    })
+            })
+            .collect()
+    }
+
     pub(super) fn from_directive(
+        parent_type_name: String,
+        field_name: String,
+        output_type_name: String,
         directive: &Node<Directive>,
     ) -> Result<Self, ConnectorDirectiveError> {
+        let mut graph = Default::default();
         let mut api = Default::default();
         let mut http = Default::default();
         let mut selection = Default::default();
 
         for argument in directive.arguments.iter() {
             match argument.name.as_str() {
+                "graph" => {
+                    graph = argument
+                        .value
+                        .as_str()
+                        .ok_or_else(|| {
+                            ConnectorDirectiveError::InvalidTypeForAttribute(
+                                "string".to_string(),
+                                "graph".to_string(),
+                            )
+                        })?
+                        .to_string()
+                }
                 "api" => {
                     api = argument
                         .value
@@ -390,10 +496,25 @@ impl SourceField {
         }
 
         Ok(Self {
+            graph,
+            parent_type_name,
+            field_name,
+            output_type_name,
             api,
             http,
             selection,
         })
+    }
+
+    pub(super) fn api_name(&self) -> String {
+        format!("{}_{}", self.graph, self.api)
+    }
+
+    pub(super) fn selections(&self) -> Vec<Selection> {
+        match &self.selection {
+            Some(selection) => selection.clone().into(),
+            None => vec![],
+        }
     }
 }
 
@@ -501,14 +622,14 @@ mod tests {
     use crate::Configuration;
 
     #[test]
-    fn test_enum_directive_has_no_errors() {
+    fn test_source_api_directive_has_no_errors() {
         let partial_sdl = r#"
-            enum SOURCE_API {
-                CONTACTS
-                @source_api(
+            schema
+                @sourceAPI(
+                    graph: "contacts"
                     name: "rest_contacts"
                     http: {
-                        base_url: "http://localhost:4002/contacts/"
+                        baseURL: "http://localhost:4002/contacts/"
                         default: true
                         headers: [
                             { name: "x-test", value: "test1234" }
@@ -521,37 +642,25 @@ mod tests {
                         ]
                     }
                 )
-                NOTES
-                @source_api(
+
+                @sourceAPI(
+                    graph: "contacts"
                     name: "rest_notes"
-                    http: { base_url: "http://localhost:4002/notes/" }
+                    http: { baseURL: "http://localhost:4002/notes/" }
                 )
-                LEGACY_CONTACTS
-                @source_api(
+
+                @sourceAPI(
+                    graph: "contacts"
                     name: "legacy_contacts"
-                    http: { base_url: "http://localhost:4002/legacy/contacts/" }
+                    http: { baseURL: "http://localhost:4002/legacy/contacts/" }
                 )
-            }"#;
-        let partial_schema =
-            Schema::parse(partial_sdl, &Configuration::fake_builder().build().unwrap()).unwrap();
+            {
+                query: Query
+            }
+            "#;
+        let partial_schema = apollo_compiler::Schema::parse(partial_sdl, "schema.graphql");
 
-        let root_enum = partial_schema
-            .definitions
-            .get_enum(SOURCE_API_ENUM_NAME)
-            .unwrap();
-
-        // for each of the variants, let's get the name, and create a SourceApi item.
-        let all_source_apis = root_enum
-            .values
-            .iter()
-            .map(|(node, value)| {
-                // the node contains the name,
-                // let's craft a SourceApi from the directive metadata
-                SourceAPI::from_root_enum(value)
-                    .map(|source_api| (node.as_str().to_string(), source_api))
-                    .unwrap()
-            })
-            .collect::<HashMap<_, _>>();
+        let all_source_apis = SourceAPI::from_schema(&partial_schema).unwrap();
 
         insta::with_settings!({sort_maps => true}, {
             assert_json_snapshot!(all_source_apis);
@@ -559,12 +668,12 @@ mod tests {
     }
 
     #[test]
-    fn test_enum_directive_missing_mandatory_fields() {
+    fn test_source_api_directive_missing_mandatory_fields() {
         let partial_sdl = r#"
-            directive @source_api(name: String!, http: HTTPSourceAPI) on ENUM_VALUE
+            directive @sourceAPI(name: String!, http: HTTPSourceAPI) on SCHEMA
 
             input HTTPSourceAPI {
-                base_url: String!
+                baseURL: String!
                 default: Boolean
                 headers: [HTTPHeaderMapping!]
             }
@@ -575,71 +684,64 @@ mod tests {
                 value: String
             }
 
-            enum SOURCE_API {
-                MISSING_NAME @source_api(
+            schema
+                @sourceAPI(
                     http: {
-                        base_url: "http://localhost:4002/contacts/"
+                        baseURL: "http://localhost:4002/contacts/"
                     }
                 )
-                MISSING_BASE_URL @source_api(
+                @sourceAPI(
+                    graph: "contacts"
                     name: "missing_base_url"
                     http: {
                         default: true
                     }
                 )
-                MISSING_HEADER_NAME @source_api(
+                @sourceAPI(
+                    graph: "contacts"
                     name: "missing_header_name"
                     http: {
-                        base_url: "http://localhost:4002/contacts/"
+                        baseURL: "http://localhost:4002/contacts/"
                         headers: [{ as: "missing mandatory name field" }]
                     }
                 )
-            }"#;
+            { query: Query }
+            "#;
 
         let partial_schema =
             Schema::parse(partial_sdl, &Configuration::fake_builder().build().unwrap()).unwrap();
 
-        let root_enum = partial_schema
+        let schema_directives = partial_schema
             .definitions
-            .get_enum(SOURCE_API_ENUM_NAME)
-            .unwrap();
+            .schema_definition
+            .directives
+            .clone();
 
-        // for each of the variants, let's get the name, and create a SourceApi item.
-        let mut all_source_apis = root_enum
-            .values
+        // relies on source order
+        let mut all_source_apis = schema_directives
             .iter()
-            .map(|(node, value)| {
-                // the node contains the name,
-                // let's craft a SourceApi from the directive metadata
-                (node.as_str().to_string(), SourceAPI::from_root_enum(value))
-            })
-            .collect::<HashMap<_, _>>();
+            .map(SourceAPI::from_schema_directive)
+            .collect::<Vec<_>>();
 
-        let missing_name_error = all_source_apis.remove("MISSING_NAME").unwrap().unwrap_err();
+        let missing_name_error = all_source_apis.remove(0).unwrap_err();
         assert_eq!(
             ConnectorDirectiveError::MissingAttributeForType(
-                "name".to_string(),
-                "source_api".to_string()
+                "graph".to_string(),
+                "sourceAPI".to_string()
             ),
             missing_name_error
         );
 
-        let missing_base_url_error = all_source_apis
-            .remove("MISSING_BASE_URL")
-            .unwrap()
-            .unwrap_err();
+        let missing_base_url_error = all_source_apis.remove(0).unwrap_err();
         assert_eq!(
             ConnectorDirectiveError::MissingAttributeForType(
-                "base_url".to_string(),
+                "baseURL".to_string(),
                 "http".to_string()
             ),
             missing_base_url_error
         );
 
-        let missing_header_name_error = all_source_apis
-            .remove("MISSING_HEADER_NAME")
-            .unwrap()
-            .unwrap_err();
+        let missing_header_name_error = all_source_apis.remove(0).unwrap_err();
         assert_eq!(
             ConnectorDirectiveError::MissingAttributeForType(
                 "name".to_string(),
@@ -653,21 +755,24 @@ mod tests {
     fn test_valid_source_types() {
         let partial_sdl = r#"
         type ValidSourceType
-            @source_type(api: "contacts", http: { GET: "/contacts/{contactId}" }) {
+            @sourceType(graph: "contacts", api: "contacts", http: { GET: "/contacts/{contactId}" })
+        {
             id: ID!
             name: String
         }
         type ValidSourceTypeDefaultHttp
-            @source_type(api: "contacts") {
-                id: ID!
-                name: String
-            }
+            @sourceType(graph: "contacts", api: "contacts")
+        {
+            id: ID!
+            name: String
+        }
         "#;
 
         let partial_schema =
             Schema::parse(partial_sdl, &Configuration::fake_builder().build().unwrap()).unwrap();
 
         let valid_source_type = SourceType::from_directive(
+            "ValidSourceType".to_string(),
             partial_schema
                 .definitions
                 .get_object("ValidSourceType")
@@ -683,6 +788,7 @@ mod tests {
         });
 
         let valid_source_type_default_http = SourceType::from_directive(
+            "ValidSourceTypeDefaultHttp".to_string(),
             partial_schema
                 .definitions
                 .get_object("ValidSourceTypeDefaultHttp")
@@ -703,7 +809,8 @@ mod tests {
         let partial_sdl = r#"
         type Query {
             field: String
-              @source_field(
+              @sourceField(
+                graph: "contacts"s
                 api: "contacts"
                 http: { GET: "/contacts/{contactId}" }
                 selection: "id name"
@@ -715,6 +822,9 @@ mod tests {
             Schema::parse(partial_sdl, &Configuration::fake_builder().build().unwrap()).unwrap();
 
         let valid_source_type = SourceField::from_directive(
+            "Query".to_string(),
+            "field".to_string(),
+            "String".to_string(),
             partial_schema
                 .definitions
                 .get_object("Query")
@@ -733,6 +843,10 @@ mod tests {
         insta::with_settings!({sort_maps => true}, {
             assert_json_snapshot!(valid_source_type, @r###"
             {
+              "graph": "contacts",
+              "parent_type_name": "Query",
+              "field_name": "field",
+              "output_type_name": "String",
               "api": "contacts",
               "http": {
                 "get": "/contacts/{contactId}",
@@ -770,7 +884,8 @@ mod tests {
         let partial_sdl = r#"
         type Query {
             field: String
-              @source_field(
+              @sourceField(
+                graph: "contacts"
                 api: "contacts"
                 http: { GET: "/contacts/{contactId}", POST: "/x" }
                 selection: "id name"
@@ -783,6 +898,9 @@ mod tests {
 
         assert_eq!(
             SourceField::from_directive(
+                "Query".to_string(),
+                "field".to_string(),
+                "String".to_string(),
                 partial_schema
                     .definitions
                     .get_object("Query")
@@ -806,7 +924,8 @@ mod tests {
         let partial_sdl = r#"
         type Query {
             field: String
-              @source_field(
+              @sourceField(
+                graph: "contacts"
                 api: "contacts"
                 http: { body: "id name" }
                 selection: "id name"
@@ -819,6 +938,9 @@ mod tests {
 
         assert_eq!(
             SourceField::from_directive(
+                "Query".to_string(),
+                "field".to_string(),
+                "String".to_string(),
                 partial_schema
                     .definitions
                     .get_object("Query")

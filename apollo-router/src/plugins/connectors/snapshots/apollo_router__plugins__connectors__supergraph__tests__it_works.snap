@@ -1,0 +1,56 @@
+---
+source: apollo-router/src/plugins/connectors/supergraph.rs
+expression: inner.serialize().to_string()
+---
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) @link(url: "https://specs.apollo.dev/source/v0.1", import: ["@sourceAPI", "@sourceType", "@sourceField"]) {
+  query: Query
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__FieldSet @specifiedBy(url: "http://just-to-avoid-valiadation-warnings")
+
+scalar link__Import @specifiedBy(url: "http://just-to-avoid-valiadation-warnings")
+
+enum link__Purpose {
+  "`SECURITY` features provide metadata necessary to securely resolve fields."
+  SECURITY
+  "`EXECUTION` features provide metadata necessary for operation execution."
+  EXECUTION
+}
+
+type Hello @join__type(graph: CONNECTOR_HELLO_0) @join__type(graph: CONNECTOR_HELLO_0) @join__type(graph: CONNECTOR_HELLO_WORLD_0) @join__type(graph: CONNECTOR_QUERY_HELLO_1) {
+  id: ID! @join__field(graph: CONNECTOR_HELLO_0) @join__field(graph: CONNECTOR_QUERY_HELLO_1)
+  field: String @join__field(graph: CONNECTOR_HELLO_0)
+  world: World @join__field(graph: CONNECTOR_HELLO_WORLD_0)
+}
+
+scalar _Any @specifiedBy(url: "https://whatever") @join__type(graph: CONNECTOR_HELLO_0)
+
+type Query @join__type(graph: CONNECTOR_HELLO_0) @join__type(graph: CONNECTOR_QUERY_HELLO_1) {
+  _Hello_finder(representations: [_Any!]!): [Hello!]! @join__field(graph: CONNECTOR_HELLO_0)
+  hello: Hello @join__field(graph: CONNECTOR_QUERY_HELLO_1)
+}
+
+type World @join__type(graph: CONNECTOR_HELLO_WORLD_0) {
+  field: String @join__field(graph: CONNECTOR_HELLO_WORLD_0)
+}
+
+enum join__Graph {
+  CONNECTOR_HELLO_0 @join__graph(name: "CONNECTOR_HELLO_0", url: "http://unused")
+  CONNECTOR_HELLO_WORLD_0 @join__graph(name: "CONNECTOR_HELLO_WORLD_0", url: "http://unused")
+  CONNECTOR_QUERY_HELLO_1 @join__graph(name: "CONNECTOR_QUERY_HELLO_1", url: "http://unused")
+}
+

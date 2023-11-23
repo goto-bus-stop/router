@@ -12,7 +12,7 @@ use super::join_spec_helpers::join_graph_enum;
 /// Generates a new supergraph schema with one subgraph per connector. Copies
 /// types and fields from the original schema and adds directives to associate
 /// them with the appropriate connector.
-pub(super) fn generate_connector_supergraph(
+pub(crate) fn generate_connector_supergraph(
     schema: &Schema,
     connectors: Arc<HashMap<String, Connector>>,
 ) -> Result<Schema, BoxError> {
@@ -37,7 +37,7 @@ pub(super) fn generate_connector_supergraph(
         .collect::<Vec<_>>();
     new_schema.types.insert(
         "join__Graph".into(),
-        join_graph_enum(connector_graph_names[..].into()),
+        join_graph_enum(connector_graph_names.as_slice()),
     );
 
     Ok(new_schema)

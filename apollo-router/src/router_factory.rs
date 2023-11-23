@@ -26,6 +26,8 @@ use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
+use crate::plugins::connectors::generate_connector_supergraph;
+use crate::plugins::connectors::Connector;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::traffic_shaping::rate;
@@ -166,12 +168,26 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             }
         };
 
-        let extra_schema = do_some_extraction_magic_letsgo(schema.clone())?;
+        let spec_schema = apollo_compiler::Schema::parse(schema.as_str(), "outer.graphql");
+        // We wouldn't have been able to instantiate a planner
+        // if the schema wasn't valid in the first place
+        debug_assert!(spec_schema.validate().unwrap().is_empty());
+
+        let connectors = Arc::from(Connector::from_schema(&spec_schema)?);
+        let connector_schema = generate_connector_supergraph(&spec_schema, connectors)?;
+
+        // wohoo we have a connector planner \o/
         let extra_planner = match previous_router.as_ref().map(|router| router.planner()) {
-            None => BridgeQueryPlanner::new(extra_schema, configuration.clone()).await?,
+            None => {
+                BridgeQueryPlanner::new(connector_schema.to_string(), configuration.clone()).await?
+            }
             Some(planner) => {
-                BridgeQueryPlanner::new_from_planner(planner, extra_schema, configuration.clone())
-                    .await?
+                BridgeQueryPlanner::new_from_planner(
+                    planner,
+                    connector_schema.to_string(),
+                    configuration.clone(),
+                )
+                .await?
             }
         };
 
@@ -319,11 +335,6 @@ pub(crate) async fn create_subgraph_services(
     }
 
     Ok(subgraph_services)
-}
-
-// Probably not the best place but hey let's see
-fn do_some_extraction_magic_letsgo(schema: String) -> Result<String, BoxError> {
-    Ok(schema)
 }
 
 impl YamlRouterFactory {

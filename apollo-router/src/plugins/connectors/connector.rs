@@ -42,7 +42,7 @@ pub(crate) fn connector_subgraph_names(connectors: HashMap<String, Connector>) -
 
 impl Connector {
     /// Generate a map of connectors with unique names
-    pub(super) fn from_schema(schema: &Schema) -> anyhow::Result<HashMap<String, Self>> {
+    pub(crate) fn from_schema(schema: &Schema) -> anyhow::Result<HashMap<String, Self>> {
         let apis = SourceAPI::from_schema(schema)?;
         let types = SourceType::from_schema(schema)?;
         let fields = SourceField::from_schema(schema)?;

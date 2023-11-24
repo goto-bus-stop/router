@@ -63,7 +63,7 @@ mod tests {
         assert!(schema.validate().unwrap().is_empty());
 
         let connectors = Arc::from(Connector::from_schema(&schema).unwrap());
-        let inner = generate_connector_supergraph(&schema, connectors).unwrap();
+        let inner = generate_connector_supergraph(&schema, &connectors).unwrap();
 
         // new supergraph is valid
         assert!(inner.validate().unwrap().is_empty());

@@ -11,11 +11,6 @@ use apollo_compiler::NodeStr;
 use apollo_compiler::Schema;
 use tower::BoxError;
 
-use crate::json_ext::Object;
-use crate::services::SubgraphRequest;
-use crate::services::SubgraphResponse;
-use crate::Context;
-
 use super::directives::SourceAPI;
 use super::directives::SourceField;
 use super::directives::SourceType;
@@ -23,6 +18,10 @@ use super::join_spec_helpers::add_entities_field;
 use super::join_spec_helpers::add_join_field_directive;
 use super::join_spec_helpers::add_join_type_directive;
 use super::join_spec_helpers::make_any_scalar;
+use crate::json_ext::Object;
+use crate::services::SubgraphRequest;
+use crate::services::SubgraphResponse;
+use crate::Context;
 
 /// A connector wraps the API and type/field connector metadata and has
 /// a unique name used to construct a "subgraph" in the inner supergraph

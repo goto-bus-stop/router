@@ -490,7 +490,7 @@ async fn subscription_task(
                             break;
                         },
                     };
-                    let subgraph_services = match create_subgraph_services(&plugins, execution_service_factory.schema.clone(), &conf).await {
+                    let subgraph_services = match create_subgraph_services(&plugins, execution_service_factory.schema.clone(), &conf) {
                         Ok(subgraph_services) => subgraph_services,
                         Err(err) => {
                             tracing::error!("cannot re-create subgraph service with the new configuration (closing existing subscription): {err:?}");
@@ -820,6 +820,43 @@ impl SupergraphCreator {
 
         let supergraph_service = AllowOnlyHttpPostMutationsLayer::default()
             .layer(shaping.supergraph_service_internal(supergraph_service));
+
+        ServiceBuilder::new()
+            .layer(content_negotiation::SupergraphLayer::default())
+            .service(
+                self.plugins
+                    .iter()
+                    .rev()
+                    .fold(supergraph_service.boxed(), |acc, (_, e)| {
+                        e.supergraph_service(acc)
+                    }),
+            )
+    }
+
+    // Like make() except without traffic shaping.
+    // TODO: there's a world in which plugins are Clone OR reuseable,
+    // gotta figure that one out before private preview
+    pub(crate) fn make_connector(
+        &self,
+    ) -> impl Service<
+        supergraph::Request,
+        Response = supergraph::Response,
+        Error = BoxError,
+        Future = BoxFuture<'static, supergraph::ServiceResult>,
+    > + Send {
+        let supergraph_service = SupergraphService::builder()
+            .query_planner_service(self.query_planner_service.clone())
+            .execution_service_factory(ExecutionServiceFactory {
+                schema: self.schema.clone(),
+                plugins: self.plugins.clone(),
+                subgraph_service_factory: self.subgraph_service_factory.clone(),
+            })
+            .schema(self.schema.clone())
+            .notify(self.config.notify.clone())
+            .build();
+
+        let supergraph_service =
+            AllowOnlyHttpPostMutationsLayer::default().layer(supergraph_service);
 
         ServiceBuilder::new()
             .layer(content_negotiation::SupergraphLayer::default())

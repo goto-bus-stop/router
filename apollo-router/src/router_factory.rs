@@ -243,6 +243,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                     subgraph_name,
                     SubgraphConnector::for_schema(
                         connector_schema.clone(),
+                        configuration.clone(),
                         connector_supergraph_creator.clone(),
                     )
                     // TODON'T
@@ -277,7 +278,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
 
         // Instantiate the parser here so we can use it to warm up the planner below
         let query_analysis_layer =
-            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await;
+            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration));
 
         let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration).await?);
 

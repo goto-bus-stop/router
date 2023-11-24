@@ -28,6 +28,7 @@ use super::directives::SOURCE_API_DIRECTIVE_NAME;
 use crate::error::ConnectorDirectiveError;
 use crate::error::FetchError;
 use crate::layers::ServiceBuilderExt;
+use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::subgraph;
 use crate::services::MakeSubgraphService;
@@ -36,21 +37,26 @@ use crate::services::SupergraphRequest;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::Selection;
+use crate::Configuration;
 
 #[derive(Clone)]
 pub(crate) struct SubgraphConnector {
     source_apis: Arc<HashMap<String, SourceAPI>>,
     creator: SupergraphCreator,
+    query_analysis_layer: QueryAnalysisLayer,
 }
 
 impl SubgraphConnector {
     pub(crate) fn for_schema(
         schema: Arc<Schema>,
+        configuration: Arc<Configuration>,
         creator: SupergraphCreator,
     ) -> Result<Self, ConnectorDirectiveError> {
+        let query_analysis_layer = QueryAnalysisLayer::new(schema.clone(), configuration);
         Ok(Self {
             source_apis: Arc::new(SourceAPI::from_schema(&schema.definitions)?),
             creator,
+            query_analysis_layer,
         })
     }
 
@@ -93,10 +99,18 @@ impl tower::Service<SubgraphRequest> for SubgraphConnector {
             context: request.context,
         };
 
+        let query_analysis_layer = self.query_analysis_layer.clone();
+
         let service = self.creator.make_connector();
 
-        Box::pin(async {
-            let res = service.oneshot(supergraph_request).await?;
+        Box::pin(async move {
+            let res = match query_analysis_layer
+                .supergraph_request(supergraph_request)
+                .await
+            {
+                Ok(req) => service.oneshot(req).await?,
+                Err(res) => res,
+            };
 
             let (parts, mut body) = res.response.into_parts();
 
@@ -108,12 +122,10 @@ impl tower::Service<SubgraphRequest> for SubgraphConnector {
                     .ok_or_else(|| "connector: empty response body")?,
             );
 
-            let subgraph_response = SubgraphResponse {
+            Ok(SubgraphResponse {
                 response,
                 context: res.context,
-            };
-
-            Ok(subgraph_response)
+            })
         })
     }
 }

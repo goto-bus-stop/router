@@ -73,48 +73,7 @@ use tower::Service;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 
-#[derive(Clone)]
-pub(crate) struct HTTPConnector {}
-
-impl<S> Layer<S> for HTTPConnector
-where
-    S: Clone,
-{
-    type Service = HTTPConnectorService<S>;
-
-    fn layer(&self, inner: S) -> Self::Service {
-        HTTPConnectorService { inner }
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct HTTPConnectorService<S> {
-    inner: S,
-}
-
-impl<S> tower::Service<SubgraphRequest> for HTTPConnectorService<S>
-where
-    S: Service<SubgraphRequest>,
-    S::Future: Future<Output = Result<SubgraphResponse, BoxError>> + Send + 'static,
-{
-    type Response = SubgraphResponse;
-    type Error = BoxError;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner
-            .poll_ready(cx)
-            .map_err(|_| BoxError::from("http service is not ready"))
-    }
-
-    fn call(&mut self, request: SubgraphRequest) -> Self::Future {
-        dbg!(&request.subgraph_request, &request.subgraph_name);
-
-        let fut = self.inner.call(request);
-        // TODO: this is where actual connectors will be wired up!
-        Box::pin(async move { fut.await.map_err(BoxError::from) })
-    }
-}
+/// OUTER SUBGRAPH SERVICE
 
 impl tower::Service<SubgraphRequest> for SubgraphConnector {
     type Response = SubgraphResponse;
@@ -157,5 +116,50 @@ impl tower::Service<SubgraphRequest> for SubgraphConnector {
                 context: res.context,
             })
         })
+    }
+}
+
+/// INNER (CONNECTOR) SUBGRAPH SERVICE
+
+#[derive(Clone)]
+pub(crate) struct HTTPConnector {}
+
+impl<S> Layer<S> for HTTPConnector
+where
+    S: Clone,
+{
+    type Service = HTTPConnectorService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        HTTPConnectorService { inner }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct HTTPConnectorService<S> {
+    inner: S,
+}
+
+impl<S> tower::Service<SubgraphRequest> for HTTPConnectorService<S>
+where
+    S: Service<SubgraphRequest>,
+    S::Future: Future<Output = Result<SubgraphResponse, BoxError>> + Send + 'static,
+{
+    type Response = SubgraphResponse;
+    type Error = BoxError;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner
+            .poll_ready(cx)
+            .map_err(|_| BoxError::from("http service is not ready"))
+    }
+
+    fn call(&mut self, request: SubgraphRequest) -> Self::Future {
+        dbg!(&request.subgraph_request, &request.subgraph_name);
+
+        let fut = self.inner.call(request);
+        // TODO: this is where actual connectors will be wired up!
+        Box::pin(async move { fut.await.map_err(BoxError::from) })
     }
 }

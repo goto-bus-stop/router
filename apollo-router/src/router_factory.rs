@@ -173,28 +173,67 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         };
 
         let spec_schema = apollo_compiler::Schema::parse(schema.as_str(), "outer.graphql");
-        // We wouldn't have been able to instantiate a planner
-        // if the schema wasn't valid in the first place
-        debug_assert!(spec_schema.validate().unwrap().is_empty());
 
         let connectors = Arc::from(Connector::from_schema(&spec_schema)?);
-        let connector_subgraph_names = connector_subgraph_names(&connectors);
-        let connector_schema = generate_connector_supergraph(&spec_schema, connectors)?;
+        let connector_subgraphs = if !connectors.is_empty() {
+            let connector_subgraph_names = connector_subgraph_names(&connectors);
+            let connector_schema = generate_connector_supergraph(&spec_schema, connectors)?;
 
-        // TODO: we can use a single bridge for both the regular planner and the extras.
-        // wohoo we have a connector planner \o/
-        let extra_planner = match previous_router.as_ref().map(|router| router.planner()) {
-            None => {
-                BridgeQueryPlanner::new(connector_schema.to_string(), configuration.clone()).await?
+            // TODO: we can use a single bridge for both the regular planner and the extras.
+            // wohoo we have a connector planner \o/
+            let extra_planner = match previous_router.as_ref().map(|router| router.planner()) {
+                None => {
+                    BridgeQueryPlanner::new(connector_schema.to_string(), configuration.clone())
+                        .await?
+                }
+                Some(planner) => {
+                    BridgeQueryPlanner::new_from_planner(
+                        planner,
+                        connector_schema.to_string(),
+                        configuration.clone(),
+                    )
+                    .await?
+                }
+            };
+
+            // TODO: no plugins for connectors? ^^'
+            let plugins: Vec<_> = Default::default();
+            let mut connector_builder = PluggableSupergraphServiceBuilder::new(extra_planner);
+
+            // todo: that's a lot of reparsing isnt it? :D
+            let connector_schema = Arc::new(Schema::parse(
+                &connector_schema.to_string(),
+                &configuration,
+            )?);
+
+            connector_builder = connector_builder.with_configuration(configuration.clone());
+            let subgraph_services =
+                create_connector_services(&plugins, Arc::clone(&connector_schema), &configuration)?;
+            for (name, subgraph_service) in subgraph_services {
+                connector_builder =
+                    connector_builder.with_subgraph_service(&name, subgraph_service);
             }
-            Some(planner) => {
-                BridgeQueryPlanner::new_from_planner(
-                    planner,
-                    connector_schema.to_string(),
-                    configuration.clone(),
-                )
-                .await?
-            }
+
+            // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
+            let connector_supergraph_creator: SupergraphCreator = connector_builder.build().await?;
+
+            connector_subgraph_names
+                .into_iter()
+                .map(|subgraph_name| {
+                    (
+                        subgraph_name,
+                        SubgraphConnector::for_schema(
+                            connector_schema.clone(),
+                            configuration.clone(),
+                            connector_supergraph_creator.clone(),
+                        )
+                        // TODON'T
+                        .unwrap(),
+                    )
+                })
+                .collect::<HashMap<_, _>>()
+        } else {
+            Default::default()
         };
 
         let schema_changed = previous_router
@@ -215,42 +254,6 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         if schema_changed {
             configuration.notify.broadcast_schema(schema.clone());
         }
-
-        // TODO: no plugins for connectors? ^^'
-        let plugins: Vec<_> = Default::default();
-        let mut connector_builder = PluggableSupergraphServiceBuilder::new(extra_planner);
-
-        // todo: that's a lot of reparsing isnt it? :D
-        let connector_schema = Arc::new(Schema::parse(
-            &connector_schema.to_string(),
-            &configuration,
-        )?);
-
-        connector_builder = connector_builder.with_configuration(configuration.clone());
-        let subgraph_services =
-            create_connector_services(&plugins, Arc::clone(&connector_schema), &configuration)?;
-        for (name, subgraph_service) in subgraph_services {
-            connector_builder = connector_builder.with_subgraph_service(&name, subgraph_service);
-        }
-
-        // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
-        let connector_supergraph_creator: SupergraphCreator = connector_builder.build().await?;
-
-        let connector_subgraphs = connector_subgraph_names
-            .into_iter()
-            .map(|subgraph_name| {
-                (
-                    subgraph_name,
-                    SubgraphConnector::for_schema(
-                        connector_schema.clone(),
-                        configuration.clone(),
-                        connector_supergraph_creator.clone(),
-                    )
-                    // TODON'T
-                    .unwrap(),
-                )
-            })
-            .collect::<HashMap<_, _>>();
 
         // do the actual supergraph
 

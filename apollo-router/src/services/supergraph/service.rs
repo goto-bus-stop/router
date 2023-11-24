@@ -726,7 +726,6 @@ impl PluggableSupergraphServiceBuilder {
         }
 
         let plugins = Arc::new(plugins);
-        // let subgraph_connector = SubgraphConnector::for_schema(Arc::clone(&schema))?;
         let subgraph_service_factory = Arc::new(SubgraphServiceFactory::new(
             self.subgraph_services,
             plugins.clone(),

@@ -177,7 +177,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         let connectors = Arc::from(Connector::from_schema(&spec_schema)?);
         let connector_subgraphs = if !connectors.is_empty() {
             let connector_subgraph_names = connector_subgraph_names(&connectors);
-            let connector_schema = generate_connector_supergraph(&spec_schema, connectors)?;
+            let connector_schema = generate_connector_supergraph(&spec_schema, &connectors)?;
 
             // TODO: we can use a single bridge for both the regular planner and the extras.
             // wohoo we have a connector planner \o/
@@ -207,8 +207,12 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             )?);
 
             connector_builder = connector_builder.with_configuration(configuration.clone());
-            let subgraph_services =
-                create_connector_services(&plugins, Arc::clone(&connector_schema), &configuration)?;
+            let subgraph_services = create_connector_services(
+                &plugins,
+                Arc::clone(&connector_schema),
+                &configuration,
+                &connectors,
+            )?;
             for (name, subgraph_service) in subgraph_services {
                 connector_builder =
                     connector_builder.with_subgraph_service(&name, subgraph_service);
@@ -391,6 +395,7 @@ pub(crate) fn create_connector_services(
     _plugins: &[(String, Box<dyn DynPlugin>)],
     schema: Arc<Schema>,
     configuration: &Configuration,
+    connectors: &HashMap<String, Connector>,
 ) -> Result<
     IndexMap<
         String,
@@ -423,7 +428,15 @@ pub(crate) fn create_connector_services(
             None,
         )?;
 
-        let connector = HTTPConnector {}.layer(subgraph_service);
+        let connector = connectors
+            .get(name)
+            .ok_or(BoxError::from(format!(
+                "missing connector for subgraph {}",
+                name
+            )))?
+            .clone();
+
+        let connector = HTTPConnector::new(connector).layer(subgraph_service);
         subgraph_services.insert(name.clone(), connector);
     }
 

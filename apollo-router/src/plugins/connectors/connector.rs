@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use anyhow::bail;
@@ -8,6 +9,12 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
 use apollo_compiler::NodeStr;
 use apollo_compiler::Schema;
+use tower::BoxError;
+
+use crate::json_ext::Object;
+use crate::services::SubgraphRequest;
+use crate::services::SubgraphResponse;
+use crate::Context;
 
 use super::directives::SourceAPI;
 use super::directives::SourceField;
@@ -19,13 +26,15 @@ use super::join_spec_helpers::make_any_scalar;
 
 /// A connector wraps the API and type/field connector metadata and has
 /// a unique name used to construct a "subgraph" in the inner supergraph
+#[derive(Clone, Debug)]
 pub(crate) struct Connector {
     /// Internal name used to construct "subgraphs" in the inner supergraph
-    pub(crate) name: String,
-    api: SourceAPI,
-    ty: ConnectorType,
+    name: String,
+    api: Arc<SourceAPI>,
+    ty: Arc<ConnectorType>,
 }
 
+#[derive(Debug)]
 pub(super) enum ConnectorType {
     Type(SourceType),
     Field(SourceField),
@@ -56,11 +65,12 @@ impl Connector {
                 connector_name.clone(),
                 Connector {
                     name: connector_name,
-                    api: apis
-                        .get(&directive.api_name())
-                        .ok_or(anyhow!("missing API {}", directive.api_name()))? // TODO support default
-                        .clone(),
-                    ty: ConnectorType::Type(directive),
+                    api: Arc::new(
+                        apis.get(&directive.api_name())
+                            .ok_or(anyhow!("missing API {}", directive.api_name()))? // TODO support default
+                            .clone(),
+                    ),
+                    ty: Arc::new(ConnectorType::Type(directive)),
                 },
             );
         }
@@ -76,11 +86,12 @@ impl Connector {
                 connector_name.clone(),
                 Connector {
                     name: connector_name,
-                    api: apis
-                        .get(&directive.api_name())
-                        .ok_or(anyhow!("missing API {}", directive.api_name()))? // TODO support default
-                        .clone(),
-                    ty: ConnectorType::Field(directive),
+                    api: Arc::new(
+                        apis.get(&directive.api_name())
+                            .ok_or(anyhow!("missing API {}", directive.api_name()))? // TODO support default
+                            .clone(),
+                    ),
+                    ty: Arc::new(ConnectorType::Field(directive)),
                 },
             );
         }
@@ -91,7 +102,7 @@ impl Connector {
     /// Generate a list of changes to apply to the new schame
     pub(super) fn changes(&self, schema: &Schema) -> anyhow::Result<Vec<Change>> {
         let graph = self.name.clone();
-        match &self.ty {
+        match &*self.ty {
             ConnectorType::Type(ty) => {
                 let mut changes = vec![
                     Change::Type {
@@ -151,10 +162,57 @@ impl Connector {
     }
 
     pub(super) fn outer_subgraph_name(&self) -> String {
-        match self.ty {
+        match &*self.ty {
             ConnectorType::Type(ref ty) => ty.graph.clone(),
             ConnectorType::Field(ref field) => field.graph.clone(),
         }
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        self.name.as_str()
+    }
+
+    pub(crate) fn create_request(
+        &self,
+        subgraph_request: SubgraphRequest,
+    ) -> Result<(Context, http::Request<hyper::Body>), BoxError> {
+        // TODO but I'll hardcode a call to ipinfo.io for this example
+        let request = http::Request::builder()
+            .method("GET")
+            .uri("https://ipinfo.io/json")
+            .body(hyper::Body::empty())
+            .map_err(|e| BoxError::from(format!("couldn't create connector request {}", e)))?;
+
+        Ok((subgraph_request.context, request))
+    }
+
+    pub(crate) async fn map_http_response(
+        &self,
+        response: http::Response<hyper::Body>,
+        context: Context,
+    ) -> Result<SubgraphResponse, BoxError> {
+        // TODO (content type, status etc...) but I'll hardcode putting the JSON from ipinfo.io  in the "data" section for this example
+        let (parts, body) = response.into_parts();
+        let graphql_entity: serde_json_bytes::Value = serde_json::from_slice(
+            &hyper::body::to_bytes(body)
+                .await
+                .map_err(|_| "couldn't retrieve http response body")?,
+        )
+        .map_err(|_| "couldn't deserialize response body")?;
+
+        // TODO: selection set parent + entities etc etc etc
+        let graphql_data = serde_json_bytes::json! {{
+            "serverNetworkInfo": graphql_entity
+        }};
+
+        let response = SubgraphResponse::builder()
+            .data(graphql_data)
+            .context(context)
+            .headers(parts.headers)
+            .extensions(Object::default())
+            .build();
+
+        Ok(response)
     }
 }
 
@@ -365,7 +423,11 @@ fn recurse_selection(
                         let field = obj
                             .fields
                             .get(&NodeStr::new(selection.name.to_string().as_str()))
-                            .ok_or(anyhow!("missing field"))?;
+                            .ok_or(anyhow!(
+                                "missing field {} for type {}",
+                                selection.name.to_string().as_str(),
+                                type_name
+                            ))?;
 
                         let field_type_name = field.ty.inner_named_type();
 
@@ -379,7 +441,7 @@ fn recurse_selection(
                             let field_type = schema
                                 .types
                                 .get(field_type_name)
-                                .ok_or(anyhow!("missing type"))?;
+                                .ok_or(anyhow!("missing type {}", field_type_name))?;
 
                             mutations.extend(recurse_selection(
                                 graph.clone(),

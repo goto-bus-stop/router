@@ -20,6 +20,7 @@ use futures::Future;
 use futures::StreamExt;
 use http::uri::*;
 use http::Uri;
+use hyper_rustls::ConfigBuilderExt;
 use regex::Regex;
 use tower::Layer;
 use tower::ServiceBuilder;
@@ -28,12 +29,14 @@ use tower::ServiceExt;
 use super::directives::HTTPSourceAPI;
 use super::directives::SourceAPI;
 use super::directives::SOURCE_API_DIRECTIVE_NAME;
+use super::Connector;
 use crate::error::ConnectorDirectiveError;
 use crate::error::FetchError;
 use crate::layers::ServiceBuilderExt;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::subgraph;
+use crate::services::trust_dns_connector::new_async_http_connector;
 use crate::services::MakeSubgraphService;
 use crate::services::SupergraphCreator;
 use crate::services::SupergraphRequest;
@@ -44,7 +47,6 @@ use crate::Configuration;
 
 #[derive(Clone)]
 pub(crate) struct SubgraphConnector {
-    source_apis: Arc<HashMap<String, SourceAPI>>,
     creator: SupergraphCreator,
     query_analysis_layer: QueryAnalysisLayer,
 }
@@ -57,7 +59,6 @@ impl SubgraphConnector {
     ) -> Result<Self, ConnectorDirectiveError> {
         let query_analysis_layer = QueryAnalysisLayer::new(schema.clone(), configuration);
         Ok(Self {
-            source_apis: Arc::new(SourceAPI::from_schema(&schema.definitions)?),
             creator,
             query_analysis_layer,
         })
@@ -122,7 +123,15 @@ impl tower::Service<SubgraphRequest> for SubgraphConnector {
 /// INNER (CONNECTOR) SUBGRAPH SERVICE
 
 #[derive(Clone)]
-pub(crate) struct HTTPConnector {}
+pub(crate) struct HTTPConnector {
+    connector: Connector,
+}
+
+impl HTTPConnector {
+    pub(crate) fn new(connector: Connector) -> Self {
+        Self { connector }
+    }
+}
 
 impl<S> Layer<S> for HTTPConnector
 where
@@ -131,13 +140,17 @@ where
     type Service = HTTPConnectorService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        HTTPConnectorService { inner }
+        HTTPConnectorService {
+            inner,
+            connector: self.connector.clone(),
+        }
     }
 }
 
 #[derive(Clone)]
 pub(crate) struct HTTPConnectorService<S> {
     inner: S,
+    connector: Connector,
 }
 
 impl<S> tower::Service<SubgraphRequest> for HTTPConnectorService<S>
@@ -157,9 +170,50 @@ where
 
     fn call(&mut self, request: SubgraphRequest) -> Self::Future {
         dbg!(&request.subgraph_request, &request.subgraph_name);
+        let connector = self.connector.clone();
+        dbg!(&connector);
 
-        let fut = self.inner.call(request);
         // TODO: this is where actual connectors will be wired up!
-        Box::pin(async move { fut.await.map_err(BoxError::from) })
+        Box::pin(async move {
+            // left as an exercise for the reader (@geal :p)
+            let (context, request_to_make) = connector.create_request(request)?;
+
+            // TODO: in the hot path ? REALLY ?! :D
+            let mut http_connector = new_async_http_connector()?;
+            http_connector.set_nodelay(true);
+            http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
+            http_connector.enforce_http(false);
+
+            let tls_config = rustls::ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth();
+
+            let http_connector = hyper_rustls::HttpsConnectorBuilder::new()
+                .with_tls_config(tls_config)
+                .https_or_http()
+                .enable_http1()
+                .enable_http2()
+                .wrap_connector(http_connector);
+
+            let response = hyper::Client::builder()
+                .build(http_connector)
+                // TODO: tls, client builder etc.
+                .call(request_to_make)
+                .await
+                .map_err(|e| format!("connector http call failed {}", e))?;
+
+            // left as an exercise for the reader (@geal :p)
+            let subgraph_response = connector.map_http_response(response, context).await?;
+            dbg!(&subgraph_response);
+
+            Ok(subgraph_response)
+
+            // TODO: consider removing inner,
+            // unless we have a nice subgraph HTTP service sometimes
+            //
+            // let fut = self.inner.call(request);
+            // fut.await.map_err(BoxError::from)
+        })
     }
 }

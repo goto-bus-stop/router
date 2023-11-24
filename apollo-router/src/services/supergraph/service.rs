@@ -32,8 +32,6 @@ use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
 use crate::notification::HandleStream;
 use crate::plugin::DynPlugin;
-use crate::plugins::connectors::subgraph_connector::SubgraphConnector;
-use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;

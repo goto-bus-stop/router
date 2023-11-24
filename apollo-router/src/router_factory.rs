@@ -179,8 +179,6 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         let connector_subgraph_names = connector_subgraph_names(&connectors);
         let connector_schema = generate_connector_supergraph(&spec_schema, connectors)?;
 
-        println!("connector\n{}", connector_schema.to_string());
-
         // TODO: we can use a single bridge for both the regular planner and the extras.
         // wohoo we have a connector planner \o/
         let extra_planner = match previous_router.as_ref().map(|router| router.planner()) {
@@ -385,7 +383,7 @@ pub(crate) fn create_subgraph_services(
 }
 
 pub(crate) fn create_connector_services(
-    plugins: &[(String, Box<dyn DynPlugin>)],
+    _plugins: &[(String, Box<dyn DynPlugin>)],
     schema: Arc<Schema>,
     configuration: &Configuration,
 ) -> Result<

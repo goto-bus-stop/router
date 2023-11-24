@@ -91,7 +91,7 @@ impl tower::Service<SubgraphRequest> for SubgraphConnector {
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
@@ -119,9 +119,7 @@ impl tower::Service<SubgraphRequest> for SubgraphConnector {
             // todo: multipart support in connectors ? :D
             let response = http::Response::from_parts(
                 parts,
-                body.next()
-                    .await
-                    .ok_or_else(|| "connector: empty response body")?,
+                body.next().await.ok_or("connector: empty response body")?,
             );
 
             Ok(SubgraphResponse {

@@ -77,12 +77,14 @@ impl SubgraphConnector {
     }
 }
 
-use crate::services::SubgraphRequest;
-use crate::services::SubgraphResponse;
-use futures::future::BoxFuture;
 use std::task::Poll;
+
+use futures::future::BoxFuture;
 use tower::BoxError;
 use tower::Service;
+
+use crate::services::SubgraphRequest;
+use crate::services::SubgraphResponse;
 
 impl tower::Service<SubgraphRequest> for SubgraphConnector {
     type Response = SubgraphResponse;

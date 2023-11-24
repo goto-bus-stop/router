@@ -497,7 +497,7 @@ async fn subscription_task(
                         },
                     };
                     let plugins = Arc::new(IndexMap::from_iter(plugins));
-                    execution_service_factory = ExecutionServiceFactory { schema: execution_service_factory.schema.clone(), plugins: plugins.clone(), subgraph_service_factory: Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(), None, plugins.clone())) };
+                    execution_service_factory = ExecutionServiceFactory { schema: execution_service_factory.schema.clone(), plugins: plugins.clone(), subgraph_service_factory: Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(),  plugins.clone())) };
                 }
             }
             Some(new_schema) = schema_updated_rx.next() => {
@@ -729,7 +729,6 @@ impl PluggableSupergraphServiceBuilder {
         // let subgraph_connector = SubgraphConnector::for_schema(Arc::clone(&schema))?;
         let subgraph_service_factory = Arc::new(SubgraphServiceFactory::new(
             self.subgraph_services,
-            None,
             plugins.clone(),
         ));
 

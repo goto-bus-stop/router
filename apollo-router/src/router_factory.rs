@@ -15,6 +15,7 @@ use tower::service_fn;
 use tower::util::Either;
 use tower::util::Oneshot;
 use tower::BoxError;
+use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
@@ -28,6 +29,7 @@ use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
 use crate::plugins::connectors::connector_subgraph_names;
 use crate::plugins::connectors::generate_connector_supergraph;
+use crate::plugins::connectors::subgraph_connector::HTTPConnector;
 use crate::plugins::connectors::subgraph_connector::SubgraphConnector;
 use crate::plugins::connectors::Connector;
 use crate::plugins::subscription::Subscription;
@@ -417,7 +419,9 @@ pub(crate) fn create_connector_services(
             Http2Config::Enable,
             None,
         )?;
-        subgraph_services.insert(name.clone(), subgraph_service);
+
+        let connector = HTTPConnector {}.layer(subgraph_service);
+        subgraph_services.insert(name.clone(), connector);
     }
 
     Ok(subgraph_services)

@@ -217,3 +217,70 @@ where
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::{SocketAddr, TcpListener};
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::{router_factory::YamlRouterFactory, services::supergraph, TestHarness};
+
+    const SCHEMA: &str = include_str!("../../../../examples/connectors/starstuff.graphql");
+
+    #[tokio::test]
+    async fn nullability_formatting() {
+        /*let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
+                serde_json::json!{{"data": {"currentUser": { "activeOrganization": null }}}}
+            ).build()),
+        ("orga", MockSubgraph::default())
+        ].into_iter().collect());*/
+        let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let address = listener.local_addr().unwrap();
+
+        let schema = SCHEMA.replace(
+            "https://ipinfo.io/",
+            &format!("http://127.0.0.1:{}/", address.port()),
+        );
+
+        // we cannot use Testharness because the subgraph connectors are actually extracted in YamlRouterFactory
+        let mut factory = YamlRouterFactory;
+        use crate::router_factory::RouterSuperServiceFactory;
+        let router_creator = factory
+            .create(
+                Arc::new(
+                    serde_json::from_value(serde_json::json!({
+                        "include_subgraph_errors": { "all": true }
+                    }))
+                    .unwrap(),
+                ),
+                schema,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let service = router_creator.create();
+
+        let request = supergraph::Request::fake_builder()
+            .query("query { serverNetworkInfo { ip city country } }")
+            // Request building here
+            .build()
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let response = service
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap();
+        let response: serde_json::Value = serde_json::from_slice(&response).unwrap();
+
+        insta::assert_json_snapshot!(response);
+    }
+}

@@ -20,7 +20,9 @@ use futures::Future;
 use futures::StreamExt;
 use http::uri::*;
 use http::Uri;
+use hyper::client::HttpConnector;
 use hyper_rustls::ConfigBuilderExt;
+use hyper_rustls::HttpsConnector;
 use regex::Regex;
 use tower::Layer;
 use tower::ServiceBuilder;
@@ -37,6 +39,7 @@ use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::subgraph;
 use crate::services::trust_dns_connector::new_async_http_connector;
+use crate::services::trust_dns_connector::AsyncHyperResolver;
 use crate::services::MakeSubgraphService;
 use crate::services::SupergraphCreator;
 use crate::services::SupergraphRequest;
@@ -125,11 +128,31 @@ impl tower::Service<SubgraphRequest> for SubgraphConnector {
 #[derive(Clone)]
 pub(crate) struct HTTPConnector {
     connector: Connector,
+    client: hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>>,
 }
 
 impl HTTPConnector {
-    pub(crate) fn new(connector: Connector) -> Self {
-        Self { connector }
+    pub(crate) fn new(connector: Connector) -> Result<Self, BoxError> {
+        let mut http_connector = new_async_http_connector()?;
+        http_connector.set_nodelay(true);
+        http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
+        http_connector.enforce_http(false);
+
+        let tls_config = rustls::ClientConfig::builder()
+            .with_safe_defaults()
+            .with_native_roots()
+            .with_no_client_auth();
+
+        let http_connector = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_tls_config(tls_config)
+            .https_or_http()
+            .enable_http1()
+            .enable_http2()
+            .wrap_connector(http_connector);
+        //TODO: add decompression
+        let client = hyper::Client::builder().build(http_connector);
+
+        Ok(Self { connector, client })
     }
 }
 
@@ -143,6 +166,7 @@ where
         HTTPConnectorService {
             inner,
             connector: self.connector.clone(),
+            client: self.client.clone(),
         }
     }
 }
@@ -151,6 +175,7 @@ where
 pub(crate) struct HTTPConnectorService<S> {
     inner: S,
     connector: Connector,
+    client: hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>>,
 }
 
 impl<S> tower::Service<SubgraphRequest> for HTTPConnectorService<S>
@@ -173,32 +198,15 @@ where
         let connector = self.connector.clone();
         dbg!(&connector);
 
+        let mut client = self.client.clone();
         // TODO: this is where actual connectors will be wired up!
         Box::pin(async move {
             // left as an exercise for the reader (@geal :p)
             let (context, request_to_make) = connector.create_request(request)?;
 
-            // TODO: in the hot path ? REALLY ?! :D
-            let mut http_connector = new_async_http_connector()?;
-            http_connector.set_nodelay(true);
-            http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
-            http_connector.enforce_http(false);
+            println!("[{}] http connector service", line!());
 
-            let tls_config = rustls::ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth();
-
-            let http_connector = hyper_rustls::HttpsConnectorBuilder::new()
-                .with_tls_config(tls_config)
-                .https_or_http()
-                .enable_http1()
-                .enable_http2()
-                .wrap_connector(http_connector);
-
-            let response = hyper::Client::builder()
-                .build(http_connector)
-                // TODO: tls, client builder etc.
+            let response = client
                 .call(request_to_make)
                 .await
                 .map_err(|e| format!("connector http call failed {}", e))?;

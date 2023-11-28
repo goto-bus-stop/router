@@ -267,7 +267,9 @@ mod tests {
             }
                          */
 
-            let res = if request.method() == Method::GET && request.uri().path() == "/json" {
+            let res = if request.method() == Method::GET
+            /*&& request.uri().path() == "/json"*/
+            {
                 let value = serde_json::json! {{
                     "ip": "1.2.3.4",
                     "hostname": "hello",

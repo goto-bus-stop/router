@@ -28,7 +28,7 @@ const SOURCE_FIELD_DIRECTIVE_NAME: &str = "sourceField";
 pub(super) struct SourceAPI {
     graph: String,
     name: String,
-    http: Option<HTTPSourceAPI>,
+    pub(crate) http: Option<HTTPSourceAPI>,
 }
 
 impl SourceAPI {
@@ -85,9 +85,9 @@ impl SourceAPI {
 
 #[derive(Clone, Debug, Serialize)]
 pub(super) struct HTTPSourceAPI {
-    base_url: String,
+    pub(crate) base_url: String,
     default: Option<bool>,
-    headers: Vec<HTTPHeaderMapping>,
+    pub(crate) headers: Vec<HTTPHeaderMapping>,
 }
 
 impl HTTPSourceAPI {
@@ -155,9 +155,10 @@ impl HTTPSourceAPI {
 
 #[derive(Clone, Debug, Serialize)]
 pub(super) struct HTTPHeaderMapping {
-    name: String,
+    pub(crate) name: String,
+    //TODO: how to translate?
     r#as: Option<String>,
-    value: Option<String>,
+    pub(crate) value: Option<String>,
 }
 
 impl HTTPHeaderMapping {

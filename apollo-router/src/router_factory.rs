@@ -436,7 +436,7 @@ pub(crate) fn create_connector_services(
             )))?
             .clone();
 
-        let connector = HTTPConnector::new(connector).layer(subgraph_service);
+        let connector = HTTPConnector::new(connector)?.layer(subgraph_service);
         subgraph_services.insert(name.clone(), connector);
     }
 

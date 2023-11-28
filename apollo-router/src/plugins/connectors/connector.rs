@@ -175,12 +175,36 @@ impl Connector {
         &self,
         subgraph_request: SubgraphRequest,
     ) -> Result<(Context, http::Request<hyper::Body>), BoxError> {
-        // TODO but I'll hardcode a call to ipinfo.io for this example
-        let request = http::Request::builder()
-            .method("GET")
-            .uri("https://ipinfo.io/json")
-            .body(hyper::Body::empty())
-            .map_err(|e| BoxError::from(format!("couldn't create connector request {}", e)))?;
+        println!(
+            "create request: self={self:?}, subgraph req={:?}",
+            subgraph_request.subgraph_request
+        );
+
+        let request = if let Some(http) = &self.api.http {
+            let mut builder = http::Request::builder()
+                .method("GET") //TODO: do we support others methods?
+                .uri(http.base_url.clone());
+
+            for header in &http.headers {
+                if let Some(value) = &header.value {
+                    builder = builder.header(header.name.clone(), value.clone());
+                }
+            }
+            builder
+                .body(hyper::Body::empty())
+                .map_err(|e| BoxError::from(format!("couldn't create connector request {}", e)))?
+        } else {
+            let SubgraphRequest {
+                subgraph_request, ..
+            } = subgraph_request;
+
+            let (parts, body) = subgraph_request.into_parts();
+
+            let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
+
+            http::request::Request::from_parts(parts, body.into())
+        };
+        println!("generated req: {request:?}");
 
         Ok((subgraph_request.context, request))
     }

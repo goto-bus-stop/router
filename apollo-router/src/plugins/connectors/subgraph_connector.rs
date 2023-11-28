@@ -204,8 +204,6 @@ where
             // left as an exercise for the reader (@geal :p)
             let (context, request_to_make) = connector.create_request(request)?;
 
-            println!("[{}] http connector service", line!());
-
             let response = client
                 .call(request_to_make)
                 .await
@@ -228,25 +226,86 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::convert::Infallible;
     use std::net::{SocketAddr, TcpListener};
     use std::sync::Arc;
+
+    use http::header::CONTENT_TYPE;
+    use http::{Method, StatusCode};
+    use hyper::service::{make_service_fn, service_fn};
+    use hyper::{Body, Server};
+    use mime::APPLICATION_JSON;
 
     use super::*;
     use crate::{router_factory::YamlRouterFactory, services::supergraph, TestHarness};
 
     const SCHEMA: &str = include_str!("../../../../examples/connectors/starstuff.graphql");
 
+    async fn emulate_rest_connector(listener: TcpListener) {
+        async fn handle(
+            request: http::Request<Body>,
+        ) -> Result<http::Response<String>, Infallible> {
+            /*
+                        type IP
+              @join__type(graph: NETWORK, key: "ip")
+              @sourceType(
+                graph: "network"
+                api: "ipinfo"
+                http: { GET: "/json" }
+                selection: "ip hostname city region country loc org postal timezone readme"
+              ) {
+              ip: ID!
+              hostname: String
+              city: String
+              region: String
+              country: String
+              loc: String
+              org: String
+              postal: String
+              timezone: String
+              readme: String
+            }
+                         */
+
+            let res = if request.method() == Method::GET && request.uri().path() == "/json" {
+                let value = serde_json::json! {{
+                    "ip": "1.2.3.4",
+                    "hostname": "hello",
+                    "city": "Paris",
+                    "region": "Ile de France",
+                    "country": "France",
+                    "loc": "1",
+                    "org": "a",
+                    "postal": "75000",
+                    "timezone": "CEST",
+                    "readme": "readme"
+                }};
+                Ok(http::Response::builder()
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .status(StatusCode::OK)
+                    .body(serde_json::to_string(&value).expect("always valid"))
+                    .unwrap())
+            } else {
+                Ok(http::Response::builder()
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(String::new())
+                    .unwrap())
+            };
+            println!("generated service response: {res:?}");
+            res
+        }
+
+        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
+        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
+        server.await.unwrap();
+    }
+
     #[tokio::test]
     async fn nullability_formatting() {
-        /*let subgraphs = MockedSubgraphs([
-        ("user", MockSubgraph::builder().with_json(
-                serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
-                serde_json::json!{{"data": {"currentUser": { "activeOrganization": null }}}}
-            ).build()),
-        ("orga", MockSubgraph::default())
-        ].into_iter().collect());*/
         let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
         let address = listener.local_addr().unwrap();
+        let _spawned_task = tokio::task::spawn(emulate_rest_connector(listener));
 
         let schema = SCHEMA.replace(
             "https://ipinfo.io/",

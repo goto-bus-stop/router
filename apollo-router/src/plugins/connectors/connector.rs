@@ -187,7 +187,8 @@ impl Connector {
 
             for header in &http.headers {
                 if let Some(value) = &header.value {
-                    builder = builder.header(header.name.clone(), value.clone());
+                    let name = header.r#as.as_ref().unwrap_or(&header.name).clone();
+                    builder = builder.header(name, value.clone());
                 }
             }
             builder
@@ -486,4 +487,65 @@ fn recurse_selection(
     }
 
     Ok(mutations)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        plugins::connectors::{
+            directives::{HTTPSourceAPI, HTTPSourceType},
+            url_path_parser::Template,
+        },
+        services::subgraph,
+    };
+
+    use super::*;
+
+    /*
+
+    pub(crate) struct Connector {
+        /// Internal name used to construct "subgraphs" in the inner supergraph
+        name: String,
+        api: Arc<SourceAPI>,
+        ty: Arc<ConnectorType>,
+    }
+
+    #[derive(Debug)]
+    pub(super) enum ConnectorType {
+        Type(SourceType),
+        Field(SourceField),
+    }
+         */
+    #[test]
+    fn request() {
+        let subgraph_request = subgraph::Request::fake_builder().build();
+        let connector = Connector {
+            name: "API".to_string(),
+            api: Arc::new(SourceAPI {
+                graph: "B".to_string(),
+                name: "C".to_string(),
+                http: Some(HTTPSourceAPI {
+                    base_url: "http://localhost/api".to_string(),
+                    default: None,
+                    headers: vec![],
+                }),
+            }),
+            ty: Arc::new(ConnectorType::Type(SourceType {
+                graph: "B".to_string(),
+                type_name: "TypeB".to_string(),
+                api: "API".to_string(),
+                http: Some(HTTPSourceType {
+                    get: None,
+                    post: None,
+                    headers: vec![],
+                    body: None,
+                }),
+                selection: None,
+                key_type_map: None,
+            })),
+        };
+
+        let (context, request) = connector.create_request(subgraph_request).unwrap();
+        insta::assert_debug_snapshot!(request);
+    }
 }

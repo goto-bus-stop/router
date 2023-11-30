@@ -26,8 +26,8 @@ const SOURCE_FIELD_DIRECTIVE_NAME: &str = "sourceField";
 
 #[derive(Clone, Debug, Serialize)]
 pub(super) struct SourceAPI {
-    graph: String,
-    name: String,
+    pub(crate) graph: String,
+    pub(crate) name: String,
     pub(crate) http: Option<HTTPSourceAPI>,
 }
 
@@ -86,7 +86,7 @@ impl SourceAPI {
 #[derive(Clone, Debug, Serialize)]
 pub(super) struct HTTPSourceAPI {
     pub(crate) base_url: String,
-    default: Option<bool>,
+    pub(crate) default: Option<bool>,
     pub(crate) headers: Vec<HTTPHeaderMapping>,
 }
 
@@ -157,7 +157,7 @@ impl HTTPSourceAPI {
 pub(super) struct HTTPHeaderMapping {
     pub(crate) name: String,
     //TODO: how to translate?
-    r#as: Option<String>,
+    pub(crate) r#as: Option<String>,
     pub(crate) value: Option<String>,
 }
 
@@ -221,10 +221,10 @@ impl HTTPHeaderMapping {
 pub(super) struct SourceType {
     pub(super) graph: String,
     pub(super) type_name: String,
-    api: String,
-    http: Option<HTTPSourceType>,
-    selection: Option<JSONSelection>,
-    key_type_map: Option<KeyTypeMap>,
+    pub(crate) api: String,
+    pub(crate) http: Option<HTTPSourceType>,
+    pub(crate) selection: Option<JSONSelection>,
+    pub(crate) key_type_map: Option<KeyTypeMap>,
 }
 
 impl SourceType {
@@ -337,10 +337,10 @@ impl SourceType {
 // TODO: impl tryfrom with XOR validation on methods
 #[derive(Debug, Serialize)]
 pub(super) struct HTTPSourceType {
-    get: Option<URLPathTemplate>,
-    post: Option<URLPathTemplate>,
-    headers: Vec<HTTPHeaderMapping>,
-    body: Option<JSONSelection>,
+    pub(crate) get: Option<URLPathTemplate>,
+    pub(crate) post: Option<URLPathTemplate>,
+    pub(crate) headers: Vec<HTTPHeaderMapping>,
+    pub(crate) body: Option<JSONSelection>,
 }
 
 impl HTTPSourceType {

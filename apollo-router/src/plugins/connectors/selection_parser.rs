@@ -22,9 +22,9 @@ use nom::sequence::preceded;
 use nom::sequence::tuple;
 use nom::IResult;
 use serde::Serialize;
-use serde_json::json;
-use serde_json::Map;
-use serde_json::Value as JSON;
+use serde_json_bytes::json;
+use serde_json_bytes::Map;
+use serde_json_bytes::Value as JSON;
 
 // Consumes any amount of whitespace and/or comments starting with # until the
 // end of the line.

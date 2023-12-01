@@ -12,8 +12,9 @@ use nom::sequence::preceded;
 use nom::sequence::tuple;
 use nom::IResult;
 use serde::Serialize;
-use serde_json::Map;
-use serde_json::Value as JSON;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Map;
+use serde_json_bytes::Value as JSON;
 
 /// A parser accepting URLPathTemplate syntax, which is useful both for
 /// generating new URL paths from provided variables and for extracting variable
@@ -259,7 +260,7 @@ impl ParameterValue {
         Ok(ParameterValue { parts })
     }
 
-    fn interpolate(&self, vars: &Map<String, JSON>) -> Result<Option<String>, String> {
+    fn interpolate(&self, vars: &Map<ByteString, JSON>) -> Result<Option<String>, String> {
         let mut value = String::new();
         let mut missing_vars = vec![];
         let mut some_vars_required = false;
@@ -303,7 +304,10 @@ impl ParameterValue {
         Ok(Some(value))
     }
 
-    fn extract_vars(&self, concrete_value: &ParameterValue) -> Result<Map<String, JSON>, String> {
+    fn extract_vars(
+        &self,
+        concrete_value: &ParameterValue,
+    ) -> Result<Map<ByteString, JSON>, String> {
         let mut concrete_text = String::new();
         for part in &concrete_value.parts {
             concrete_text.push_str(match part {
@@ -318,17 +322,22 @@ impl ParameterValue {
         let mut pending_var: Option<&VariableExpression> = None;
         let mut output = Map::new();
 
-        fn add_var_value(var: &VariableExpression, value: &str, output: &mut Map<String, JSON>) {
+        fn add_var_value(
+            var: &VariableExpression,
+            value: &str,
+            output: &mut Map<ByteString, JSON>,
+        ) {
+            let key = ByteString::from(var.var_path.as_str());
             if let Some(separator) = &var.batch_separator {
                 let mut values = vec![];
                 for value in value.split(separator) {
                     if !value.is_empty() {
-                        values.push(JSON::String(value.to_string()));
+                        values.push(JSON::String(ByteString::from(value)));
                     }
                 }
-                output.insert(var.var_path.clone(), JSON::Array(values));
+                output.insert(key, JSON::Array(values));
             } else if !value.is_empty() {
-                output.insert(var.var_path.clone(), JSON::String(value.to_string()));
+                output.insert(key, JSON::String(ByteString::from(value)));
             }
         }
 
@@ -445,8 +454,9 @@ impl VariableExpression {
         )
     }
 
-    fn interpolate(&self, vars: &Map<String, JSON>) -> Result<Option<String>, String> {
-        if let Some(child_value) = vars.get(&self.var_path) {
+    fn interpolate(&self, vars: &Map<ByteString, JSON>) -> Result<Option<String>, String> {
+        let var_path_bytes = ByteString::from(self.var_path.as_str());
+        if let Some(child_value) = vars.get(&var_path_bytes) {
             if let Some(separator) = &self.batch_separator {
                 if let JSON::Array(array) = child_value {
                     let mut value_strings = vec![];
@@ -477,7 +487,7 @@ impl VariableExpression {
         // Need to remove quotes from string values, since the quotes don't
         // belong in the URL.
         if let JSON::String(string) = value {
-            string.to_string()
+            string.as_str().to_string()
         } else {
             value.to_string()
         }
@@ -518,7 +528,7 @@ fn nom_parse_identifier_path(input: &str) -> IResult<&str, String> {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json_bytes::json;
 
     use super::*;
 

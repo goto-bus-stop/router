@@ -26,9 +26,9 @@ const SOURCE_FIELD_DIRECTIVE_NAME: &str = "sourceField";
 
 #[derive(Clone, Debug, Serialize)]
 pub(super) struct SourceAPI {
-    graph: String,
-    name: String,
-    http: Option<HTTPSourceAPI>,
+    pub(crate) graph: String,
+    pub(crate) name: String,
+    pub(crate) http: Option<HTTPSourceAPI>,
 }
 
 impl SourceAPI {
@@ -85,9 +85,9 @@ impl SourceAPI {
 
 #[derive(Clone, Debug, Serialize)]
 pub(super) struct HTTPSourceAPI {
-    base_url: String,
-    default: Option<bool>,
-    headers: Vec<HTTPHeaderMapping>,
+    pub(crate) base_url: String,
+    pub(crate) default: Option<bool>,
+    pub(crate) headers: Vec<HTTPHeaderMapping>,
 }
 
 impl HTTPSourceAPI {
@@ -155,9 +155,10 @@ impl HTTPSourceAPI {
 
 #[derive(Clone, Debug, Serialize)]
 pub(super) struct HTTPHeaderMapping {
-    name: String,
-    r#as: Option<String>,
-    value: Option<String>,
+    pub(crate) name: String,
+    //TODO: how to translate?
+    pub(crate) r#as: Option<String>,
+    pub(crate) value: Option<String>,
 }
 
 impl HTTPHeaderMapping {
@@ -220,10 +221,10 @@ impl HTTPHeaderMapping {
 pub(super) struct SourceType {
     pub(super) graph: String,
     pub(super) type_name: String,
-    api: String,
-    http: Option<HTTPSourceType>,
-    selection: Option<JSONSelection>,
-    key_type_map: Option<KeyTypeMap>,
+    pub(crate) api: String,
+    pub(crate) http: Option<HTTPSourceType>,
+    pub(crate) selection: Option<JSONSelection>,
+    pub(crate) key_type_map: Option<KeyTypeMap>,
 }
 
 impl SourceType {
@@ -336,10 +337,10 @@ impl SourceType {
 // TODO: impl tryfrom with XOR validation on methods
 #[derive(Debug, Serialize)]
 pub(super) struct HTTPSourceType {
-    get: Option<URLPathTemplate>,
-    post: Option<URLPathTemplate>,
-    headers: Vec<HTTPHeaderMapping>,
-    body: Option<JSONSelection>,
+    pub(crate) get: Option<URLPathTemplate>,
+    pub(crate) post: Option<URLPathTemplate>,
+    pub(crate) headers: Vec<HTTPHeaderMapping>,
+    pub(crate) body: Option<JSONSelection>,
 }
 
 impl HTTPSourceType {

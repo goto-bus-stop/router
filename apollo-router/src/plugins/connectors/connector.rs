@@ -175,12 +175,37 @@ impl Connector {
         &self,
         subgraph_request: SubgraphRequest,
     ) -> Result<(Context, http::Request<hyper::Body>), BoxError> {
-        // TODO but I'll hardcode a call to ipinfo.io for this example
-        let request = http::Request::builder()
-            .method("GET")
-            .uri("https://ipinfo.io/json")
-            .body(hyper::Body::empty())
-            .map_err(|e| BoxError::from(format!("couldn't create connector request {}", e)))?;
+        println!(
+            "create request: self={self:?}, subgraph req={:?}",
+            subgraph_request.subgraph_request
+        );
+
+        let request = if let Some(http) = &self.api.http {
+            let mut builder = http::Request::builder()
+                .method("GET") //TODO: do we support others methods?
+                .uri(http.base_url.clone());
+
+            for header in &http.headers {
+                if let Some(value) = &header.value {
+                    let name = header.r#as.as_ref().unwrap_or(&header.name).clone();
+                    builder = builder.header(name, value.clone());
+                }
+            }
+            builder
+                .body(hyper::Body::empty())
+                .map_err(|e| BoxError::from(format!("couldn't create connector request {}", e)))?
+        } else {
+            let SubgraphRequest {
+                subgraph_request, ..
+            } = subgraph_request;
+
+            let (parts, body) = subgraph_request.into_parts();
+
+            let body = serde_json::to_string(&body)?;
+
+            http::request::Request::from_parts(parts, body.into())
+        };
+        println!("generated req: {request:?}");
 
         Ok((subgraph_request.context, request))
     }
@@ -462,4 +487,45 @@ fn recurse_selection(
     }
 
     Ok(mutations)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plugins::connectors::directives::HTTPSourceAPI;
+    use crate::plugins::connectors::directives::HTTPSourceType;
+    use crate::services::subgraph;
+
+    #[test]
+    fn request() {
+        let subgraph_request = subgraph::Request::fake_builder().build();
+        let connector = Connector {
+            name: "API".to_string(),
+            api: Arc::new(SourceAPI {
+                graph: "B".to_string(),
+                name: "C".to_string(),
+                http: Some(HTTPSourceAPI {
+                    base_url: "http://localhost/api".to_string(),
+                    default: None,
+                    headers: vec![],
+                }),
+            }),
+            ty: Arc::new(ConnectorType::Type(SourceType {
+                graph: "B".to_string(),
+                type_name: "TypeB".to_string(),
+                api: "API".to_string(),
+                http: Some(HTTPSourceType {
+                    get: None,
+                    post: None,
+                    headers: vec![],
+                    body: None,
+                }),
+                selection: None,
+                key_type_map: None,
+            })),
+        };
+
+        let (_context, request) = connector.create_request(subgraph_request).unwrap();
+        insta::assert_debug_snapshot!(request);
+    }
 }

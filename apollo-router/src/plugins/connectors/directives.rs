@@ -15,7 +15,7 @@ use indexmap::IndexMap;
 use serde::Serialize;
 
 use super::selection_parser::Selection as JSONSelection;
-use super::url_path_parser::Template as URLPathTemplate;
+use super::url_path_parser::URLPathTemplate;
 use crate::error::ConnectorDirectiveError;
 
 pub(super) const SOURCE_API_DIRECTIVE_NAME: &str = "sourceAPI";

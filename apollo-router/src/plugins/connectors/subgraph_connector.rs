@@ -227,17 +227,23 @@ where
 #[cfg(test)]
 mod tests {
     use std::convert::Infallible;
-    use std::net::{SocketAddr, TcpListener};
+    use std::net::SocketAddr;
+    use std::net::TcpListener;
     use std::sync::Arc;
 
     use http::header::CONTENT_TYPE;
-    use http::{Method, StatusCode};
-    use hyper::service::{make_service_fn, service_fn};
-    use hyper::{Body, Server};
+    use http::Method;
+    use http::StatusCode;
+    use hyper::service::make_service_fn;
+    use hyper::service::service_fn;
+    use hyper::Body;
+    use hyper::Server;
     use mime::APPLICATION_JSON;
 
     use super::*;
-    use crate::{router_factory::YamlRouterFactory, services::supergraph, TestHarness};
+    use crate::router_factory::YamlRouterFactory;
+    use crate::services::supergraph;
+    use crate::TestHarness;
 
     const SCHEMA: &str = include_str!("../../../../examples/connectors/starstuff.graphql");
 

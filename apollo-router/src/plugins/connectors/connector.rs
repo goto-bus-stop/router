@@ -201,7 +201,7 @@ impl Connector {
 
             let (parts, body) = subgraph_request.into_parts();
 
-            let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
+            let body = serde_json::to_string(&body)?;
 
             http::request::Request::from_parts(parts, body.into())
         };
@@ -491,31 +491,11 @@ fn recurse_selection(
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        plugins::connectors::{
-            directives::{HTTPSourceAPI, HTTPSourceType},
-            url_path_parser::Template,
-        },
-        services::subgraph,
-    };
-
     use super::*;
+    use crate::plugins::connectors::directives::HTTPSourceAPI;
+    use crate::plugins::connectors::directives::HTTPSourceType;
+    use crate::services::subgraph;
 
-    /*
-
-    pub(crate) struct Connector {
-        /// Internal name used to construct "subgraphs" in the inner supergraph
-        name: String,
-        api: Arc<SourceAPI>,
-        ty: Arc<ConnectorType>,
-    }
-
-    #[derive(Debug)]
-    pub(super) enum ConnectorType {
-        Type(SourceType),
-        Field(SourceField),
-    }
-         */
     #[test]
     fn request() {
         let subgraph_request = subgraph::Request::fake_builder().build();
@@ -545,7 +525,7 @@ mod tests {
             })),
         };
 
-        let (context, request) = connector.create_request(subgraph_request).unwrap();
+        let (_context, request) = connector.create_request(subgraph_request).unwrap();
         insta::assert_debug_snapshot!(request);
     }
 }

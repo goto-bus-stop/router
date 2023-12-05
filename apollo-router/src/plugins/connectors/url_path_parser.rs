@@ -1,6 +1,8 @@
+use std::collections::HashSet;
 use std::fmt::Display;
 
 use indexmap::IndexMap;
+use itertools::Itertools;
 use nom::bytes::complete::tag;
 use nom::character::complete::char;
 use nom::character::complete::one_of;
@@ -63,7 +65,7 @@ struct VariableExpression {
 
 impl URLPathTemplate {
     // Top-level parsing entry point for URLPathTemplate syntax.
-    fn parse(input: &str) -> Result<URLPathTemplate, String> {
+    pub(super) fn parse(input: &str) -> Result<URLPathTemplate, String> {
         let mut prefix_suffix = input.splitn(2, '?');
         let path_prefix = prefix_suffix.next();
         let query_suffix = prefix_suffix.next();
@@ -92,7 +94,7 @@ impl URLPathTemplate {
 
     // Given a URLPathTemplate and an IndexMap of variables to be interpolated
     // into its {...} expressions, generate a new URL path String.
-    fn generate_path(&self, vars: &JSON) -> Result<String, String> {
+    pub(super) fn generate_path(&self, vars: &JSON) -> Result<String, String> {
         let mut path = String::new();
         if let Some(var_map) = vars.as_object() {
             for (path_position, param_value) in self.path.iter().enumerate() {
@@ -173,6 +175,18 @@ impl URLPathTemplate {
         }
 
         Ok(JSON::Object(var_map))
+    }
+
+    pub(super) fn required_parameters(&self) -> Vec<String> {
+        let mut parameters = HashSet::new();
+        for param_value in &self.path {
+            parameters.extend(param_value.required_parameters());
+        }
+        for param_value in self.query.values() {
+            parameters.extend(param_value.required_parameters());
+        }
+        // sorted for a stable SDL
+        parameters.into_iter().sorted().collect()
     }
 }
 
@@ -385,6 +399,21 @@ impl ParameterValue {
         }
 
         Ok(output)
+    }
+
+    fn required_parameters(&self) -> Vec<String> {
+        let mut parameters = vec![];
+        for part in &self.parts {
+            match part {
+                ValuePart::Text(_) => {}
+                ValuePart::Var(var) => {
+                    if var.required {
+                        parameters.push(var.var_path.clone());
+                    }
+                }
+            }
+        }
+        parameters
     }
 }
 
@@ -1678,6 +1707,58 @@ mod tests {
                 URLPathTemplate::parse("/position?xyz=({x},{y},{z})").unwrap(),
             ),
             "/position?xyz=({x},{y},{z})".to_string(),
+        );
+    }
+
+    #[test]
+    fn test_required_parameters() {
+        assert_eq!(
+            URLPathTemplate::parse("/users/{user_id}?a={b}&c={d.e!}&e={f.g}")
+                .unwrap()
+                .required_parameters(),
+            vec!["d.e", "user_id"],
+        );
+
+        assert_eq!(
+            URLPathTemplate::parse("/users?ids={id,...}&names={name|...}")
+                .unwrap()
+                .required_parameters(),
+            Vec::<String>::new(),
+        );
+
+        assert_eq!(
+            URLPathTemplate::parse("/users?ids={id!,...}&names={user.name|...}")
+                .unwrap()
+                .required_parameters(),
+            vec!["id"],
+        );
+
+        assert_eq!(
+            URLPathTemplate::parse("/position/{x},{y}")
+                .unwrap()
+                .required_parameters(),
+            vec!["x", "y"],
+        );
+
+        assert_eq!(
+            URLPathTemplate::parse("/position/xyz({x},{y},{z})")
+                .unwrap()
+                .required_parameters(),
+            vec!["x", "y", "z"],
+        );
+
+        assert_eq!(
+            URLPathTemplate::parse("/position?xyz=({x!},{y},{z!})")
+                .unwrap()
+                .required_parameters(),
+            vec!["x", "z"],
+        );
+
+        assert_eq!(
+            URLPathTemplate::parse("/users/{id}?user_id={id}")
+                .unwrap()
+                .required_parameters(),
+            vec!["id"],
         );
     }
 }

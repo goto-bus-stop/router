@@ -692,7 +692,7 @@ mod tests {
             .unwrap(),
         );
 
-        let query_analysis_layer = QueryAnalysisLayer::new(schema, Arc::new(config)).await;
+        let query_analysis_layer = QueryAnalysisLayer::new(schema, Arc::new(config));
 
         // A random query is blocked.
         denied_by_safelist(

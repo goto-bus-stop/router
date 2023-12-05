@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use apollo_compiler::Schema;
 use itertools::Itertools;
@@ -12,16 +11,16 @@ use super::join_spec_helpers::join_graph_enum;
 /// Generates a new supergraph schema with one subgraph per connector. Copies
 /// types and fields from the original schema and adds directives to associate
 /// them with the appropriate connector.
-pub(super) fn generate_connector_supergraph(
+pub(crate) fn generate_connector_supergraph(
     schema: &Schema,
-    connectors: Arc<HashMap<String, Connector>>,
+    connectors: &HashMap<String, Connector>,
 ) -> Result<Schema, BoxError> {
     let mut new_schema = Schema::new();
     copy_definitions(schema, &mut new_schema);
 
     let mut changes = Vec::new();
     // sorted for stable SDL generation
-    for connector in connectors.values().sorted_by_key(|c| c.name.as_str()) {
+    for connector in connectors.values().sorted_by_key(|c| c.name()) {
         changes.extend(connector.changes(schema)?);
     }
 
@@ -32,12 +31,12 @@ pub(super) fn generate_connector_supergraph(
     let connector_graph_names = connectors
         .values()
         // sorted for stable SDL generation
-        .sorted_by_key(|c| c.name.as_str())
-        .map(|c| c.name.as_str())
+        .sorted_by_key(|c| c.name())
+        .map(|c| c.name())
         .collect::<Vec<_>>();
     new_schema.types.insert(
         "join__Graph".into(),
-        join_graph_enum(connector_graph_names[..].into()),
+        join_graph_enum(connector_graph_names.as_slice()),
     );
 
     Ok(new_schema)
@@ -64,7 +63,7 @@ mod tests {
         assert!(schema.validate().unwrap().is_empty());
 
         let connectors = Arc::from(Connector::from_schema(&schema).unwrap());
-        let inner = generate_connector_supergraph(&schema, connectors).unwrap();
+        let inner = generate_connector_supergraph(&schema, &connectors).unwrap();
 
         // new supergraph is valid
         assert!(inner.validate().unwrap().is_empty());

@@ -143,7 +143,7 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
         .unwrap();
 
     RouterCreator::new(
-        QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await,
+        QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)),
         Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
         Arc::new(supergraph_creator),
         configuration,
@@ -193,7 +193,7 @@ pub(crate) async fn empty() -> impl Service<
         .unwrap();
 
     RouterCreator::new(
-        QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
+        QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()),
         Arc::new(PersistedQueryLayer::new(&Default::default()).await.unwrap()),
         Arc::new(supergraph_creator),
         Arc::new(Configuration::default()),

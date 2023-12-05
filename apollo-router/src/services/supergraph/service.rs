@@ -32,7 +32,6 @@ use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
 use crate::notification::HandleStream;
 use crate::plugin::DynPlugin;
-use crate::plugins::connectors::subgraph_connector::SubgraphConnector;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use crate::plugins::telemetry::Telemetry;
@@ -490,7 +489,7 @@ async fn subscription_task(
                             break;
                         },
                     };
-                    let (subgraph_services, subgraph_connector) = match create_subgraph_services(&plugins, execution_service_factory.schema.clone(), &conf).await {
+                    let subgraph_services = match create_subgraph_services(&plugins, execution_service_factory.schema.clone(), &conf) {
                         Ok(subgraph_services) => subgraph_services,
                         Err(err) => {
                             tracing::error!("cannot re-create subgraph service with the new configuration (closing existing subscription): {err:?}");
@@ -498,7 +497,7 @@ async fn subscription_task(
                         },
                     };
                     let plugins = Arc::new(IndexMap::from_iter(plugins));
-                    execution_service_factory = ExecutionServiceFactory { schema: execution_service_factory.schema.clone(), plugins: plugins.clone(), subgraph_service_factory: Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(), subgraph_connector, plugins.clone())) };
+                    execution_service_factory = ExecutionServiceFactory { schema: execution_service_factory.schema.clone(), plugins: plugins.clone(), subgraph_service_factory: Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(),  plugins.clone())) };
                 }
             }
             Some(new_schema) = schema_updated_rx.next() => {
@@ -727,10 +726,8 @@ impl PluggableSupergraphServiceBuilder {
         }
 
         let plugins = Arc::new(plugins);
-        let subgraph_connector = SubgraphConnector::for_schema(Arc::clone(&schema))?;
         let subgraph_service_factory = Arc::new(SubgraphServiceFactory::new(
             self.subgraph_services,
-            subgraph_connector,
             plugins.clone(),
         ));
 
@@ -820,6 +817,43 @@ impl SupergraphCreator {
 
         let supergraph_service = AllowOnlyHttpPostMutationsLayer::default()
             .layer(shaping.supergraph_service_internal(supergraph_service));
+
+        ServiceBuilder::new()
+            .layer(content_negotiation::SupergraphLayer::default())
+            .service(
+                self.plugins
+                    .iter()
+                    .rev()
+                    .fold(supergraph_service.boxed(), |acc, (_, e)| {
+                        e.supergraph_service(acc)
+                    }),
+            )
+    }
+
+    // Like make() except without traffic shaping.
+    // TODO: there's a world in which plugins are Clone OR reuseable,
+    // gotta figure that one out before private preview
+    pub(crate) fn make_connector(
+        &self,
+    ) -> impl Service<
+        supergraph::Request,
+        Response = supergraph::Response,
+        Error = BoxError,
+        Future = BoxFuture<'static, supergraph::ServiceResult>,
+    > + Send {
+        let supergraph_service = SupergraphService::builder()
+            .query_planner_service(self.query_planner_service.clone())
+            .execution_service_factory(ExecutionServiceFactory {
+                schema: self.schema.clone(),
+                plugins: self.plugins.clone(),
+                subgraph_service_factory: self.subgraph_service_factory.clone(),
+            })
+            .schema(self.schema.clone())
+            .notify(self.config.notify.clone())
+            .build();
+
+        let supergraph_service =
+            AllowOnlyHttpPostMutationsLayer::default().layer(supergraph_service);
 
         ServiceBuilder::new()
             .layer(content_negotiation::SupergraphLayer::default())

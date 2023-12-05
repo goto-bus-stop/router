@@ -34,7 +34,7 @@ struct QueryAnalysisKey {
 }
 
 impl QueryAnalysisLayer {
-    pub(crate) async fn new(schema: Arc<Schema>, configuration: Arc<Configuration>) -> Self {
+    pub(crate) fn new(schema: Arc<Schema>, configuration: Arc<Configuration>) -> Self {
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema).unwrap_or(false);
         Self {

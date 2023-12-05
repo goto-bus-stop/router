@@ -605,7 +605,7 @@ mod test {
         let supergraph_creator = builder.build().await.expect("should build");
 
         RouterCreator::new(
-            QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
+            QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()),
             Arc::new(PersistedQueryLayer::new(&Default::default()).await.unwrap()),
             Arc::new(supergraph_creator),
             Arc::new(Configuration::default()),

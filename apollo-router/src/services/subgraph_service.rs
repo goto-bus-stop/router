@@ -61,7 +61,6 @@ use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
-use crate::plugins::connectors::subgraph_connector::SubgraphConnector;
 use crate::plugins::subscription::create_verifier;
 use crate::plugins::subscription::CallbackMode;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -1110,19 +1109,16 @@ pub(crate) async fn compress(body: String, headers: &HeaderMap) -> Result<Vec<u8
 #[derive(Clone, Default)]
 pub(crate) struct SubgraphServiceFactory {
     pub(crate) services: Arc<HashMap<String, Arc<dyn MakeSubgraphService>>>,
-    pub(crate) subgraph_connector: Option<SubgraphConnector>,
     pub(crate) plugins: Arc<Plugins>,
 }
 
 impl SubgraphServiceFactory {
     pub(crate) fn new(
         services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
-        subgraph_connector: SubgraphConnector,
         plugins: Arc<Plugins>,
     ) -> Self {
-        SubgraphServiceFactory {
+        Self {
             services: Arc::new(services.into_iter().collect()),
-            subgraph_connector: Some(subgraph_connector),
             plugins,
         }
     }
@@ -1132,13 +1128,11 @@ impl SubgraphServiceFactory {
         name: &str,
     ) -> Option<BoxService<SubgraphRequest, SubgraphResponse, BoxError>> {
         self.services.get(name).map(|service| {
-            self.plugins.iter().rev().fold(
-                self.subgraph_connector.as_ref().map_or_else(
-                    || service.make(),
-                    |connector| connector.subgraph_service(name, service.make()),
-                ),
-                |acc, (_, e)| e.subgraph_service(name, acc),
-            )
+            let service = service.make();
+            self.plugins
+                .iter()
+                .rev()
+                .fold(service, |acc, (_, e)| e.subgraph_service(name, acc))
         })
     }
 }

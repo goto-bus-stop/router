@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use anyhow::bail;
@@ -8,6 +9,7 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
 use apollo_compiler::NodeStr;
 use apollo_compiler::Schema;
+use tower::BoxError;
 
 use super::directives::SourceAPI;
 use super::directives::SourceField;
@@ -16,16 +18,22 @@ use super::join_spec_helpers::add_entities_field;
 use super::join_spec_helpers::add_join_field_directive;
 use super::join_spec_helpers::add_join_type_directive;
 use super::join_spec_helpers::make_any_scalar;
+use crate::json_ext::Object;
+use crate::services::SubgraphRequest;
+use crate::services::SubgraphResponse;
+use crate::Context;
 
 /// A connector wraps the API and type/field connector metadata and has
 /// a unique name used to construct a "subgraph" in the inner supergraph
+#[derive(Clone, Debug)]
 pub(crate) struct Connector {
     /// Internal name used to construct "subgraphs" in the inner supergraph
-    pub(crate) name: String,
-    api: SourceAPI,
-    ty: ConnectorType,
+    name: String,
+    api: Arc<SourceAPI>,
+    ty: Arc<ConnectorType>,
 }
 
+#[derive(Debug)]
 pub(super) enum ConnectorType {
     Type(SourceType),
     Field(SourceField),
@@ -33,7 +41,7 @@ pub(super) enum ConnectorType {
 
 /// The list of the subgraph names that should use the inner query planner
 /// instead of making a normal subgraph request.
-pub(crate) fn connector_subgraph_names(connectors: HashMap<String, Connector>) -> HashSet<String> {
+pub(crate) fn connector_subgraph_names(connectors: &HashMap<String, Connector>) -> HashSet<String> {
     connectors
         .values()
         .map(|c| c.outer_subgraph_name())
@@ -42,7 +50,7 @@ pub(crate) fn connector_subgraph_names(connectors: HashMap<String, Connector>) -
 
 impl Connector {
     /// Generate a map of connectors with unique names
-    pub(super) fn from_schema(schema: &Schema) -> anyhow::Result<HashMap<String, Self>> {
+    pub(crate) fn from_schema(schema: &Schema) -> anyhow::Result<HashMap<String, Self>> {
         let apis = SourceAPI::from_schema(schema)?;
         let types = SourceType::from_schema(schema)?;
         let fields = SourceField::from_schema(schema)?;
@@ -56,11 +64,12 @@ impl Connector {
                 connector_name.clone(),
                 Connector {
                     name: connector_name,
-                    api: apis
-                        .get(&directive.api_name())
-                        .ok_or(anyhow!("missing API {}", directive.api_name()))? // TODO support default
-                        .clone(),
-                    ty: ConnectorType::Type(directive),
+                    api: Arc::new(
+                        apis.get(&directive.api_name())
+                            .ok_or(anyhow!("missing API {}", directive.api_name()))? // TODO support default
+                            .clone(),
+                    ),
+                    ty: Arc::new(ConnectorType::Type(directive)),
                 },
             );
         }
@@ -76,11 +85,12 @@ impl Connector {
                 connector_name.clone(),
                 Connector {
                     name: connector_name,
-                    api: apis
-                        .get(&directive.api_name())
-                        .ok_or(anyhow!("missing API {}", directive.api_name()))? // TODO support default
-                        .clone(),
-                    ty: ConnectorType::Field(directive),
+                    api: Arc::new(
+                        apis.get(&directive.api_name())
+                            .ok_or(anyhow!("missing API {}", directive.api_name()))? // TODO support default
+                            .clone(),
+                    ),
+                    ty: Arc::new(ConnectorType::Field(directive)),
                 },
             );
         }
@@ -91,7 +101,7 @@ impl Connector {
     /// Generate a list of changes to apply to the new schame
     pub(super) fn changes(&self, schema: &Schema) -> anyhow::Result<Vec<Change>> {
         let graph = self.name.clone();
-        match &self.ty {
+        match &*self.ty {
             ConnectorType::Type(ty) => {
                 let mut changes = vec![
                     Change::Type {
@@ -151,10 +161,82 @@ impl Connector {
     }
 
     pub(super) fn outer_subgraph_name(&self) -> String {
-        match self.ty {
+        match &*self.ty {
             ConnectorType::Type(ref ty) => ty.graph.clone(),
             ConnectorType::Field(ref field) => field.graph.clone(),
         }
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        self.name.as_str()
+    }
+
+    pub(crate) fn create_request(
+        &self,
+        subgraph_request: SubgraphRequest,
+    ) -> Result<(Context, http::Request<hyper::Body>), BoxError> {
+        println!(
+            "create request: self={self:?}, subgraph req={:?}",
+            subgraph_request.subgraph_request
+        );
+
+        let request = if let Some(http) = &self.api.http {
+            let mut builder = http::Request::builder()
+                .method("GET") //TODO: do we support others methods?
+                .uri(http.base_url.clone());
+
+            for header in &http.headers {
+                if let Some(value) = &header.value {
+                    let name = header.r#as.as_ref().unwrap_or(&header.name).clone();
+                    builder = builder.header(name, value.clone());
+                }
+            }
+            builder
+                .body(hyper::Body::empty())
+                .map_err(|e| BoxError::from(format!("couldn't create connector request {}", e)))?
+        } else {
+            let SubgraphRequest {
+                subgraph_request, ..
+            } = subgraph_request;
+
+            let (parts, body) = subgraph_request.into_parts();
+
+            let body = serde_json::to_string(&body)?;
+
+            http::request::Request::from_parts(parts, body.into())
+        };
+        println!("generated req: {request:?}");
+
+        Ok((subgraph_request.context, request))
+    }
+
+    pub(crate) async fn map_http_response(
+        &self,
+        response: http::Response<hyper::Body>,
+        context: Context,
+    ) -> Result<SubgraphResponse, BoxError> {
+        // TODO (content type, status etc...) but I'll hardcode putting the JSON from ipinfo.io  in the "data" section for this example
+        let (parts, body) = response.into_parts();
+        let graphql_entity: serde_json_bytes::Value = serde_json::from_slice(
+            &hyper::body::to_bytes(body)
+                .await
+                .map_err(|_| "couldn't retrieve http response body")?,
+        )
+        .map_err(|_| "couldn't deserialize response body")?;
+
+        // TODO: selection set parent + entities etc etc etc
+        let graphql_data = serde_json_bytes::json! {{
+            "serverNetworkInfo": graphql_entity
+        }};
+
+        let response = SubgraphResponse::builder()
+            .data(graphql_data)
+            .context(context)
+            .headers(parts.headers)
+            .extensions(Object::default())
+            .build();
+
+        Ok(response)
     }
 }
 
@@ -365,7 +447,11 @@ fn recurse_selection(
                         let field = obj
                             .fields
                             .get(&NodeStr::new(selection.name.to_string().as_str()))
-                            .ok_or(anyhow!("missing field"))?;
+                            .ok_or(anyhow!(
+                                "missing field {} for type {}",
+                                selection.name.to_string().as_str(),
+                                type_name
+                            ))?;
 
                         let field_type_name = field.ty.inner_named_type();
 
@@ -379,7 +465,7 @@ fn recurse_selection(
                             let field_type = schema
                                 .types
                                 .get(field_type_name)
-                                .ok_or(anyhow!("missing type"))?;
+                                .ok_or(anyhow!("missing type {}", field_type_name))?;
 
                             mutations.extend(recurse_selection(
                                 graph.clone(),
@@ -401,4 +487,45 @@ fn recurse_selection(
     }
 
     Ok(mutations)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plugins::connectors::directives::HTTPSourceAPI;
+    use crate::plugins::connectors::directives::HTTPSourceType;
+    use crate::services::subgraph;
+
+    #[test]
+    fn request() {
+        let subgraph_request = subgraph::Request::fake_builder().build();
+        let connector = Connector {
+            name: "API".to_string(),
+            api: Arc::new(SourceAPI {
+                graph: "B".to_string(),
+                name: "C".to_string(),
+                http: Some(HTTPSourceAPI {
+                    base_url: "http://localhost/api".to_string(),
+                    default: None,
+                    headers: vec![],
+                }),
+            }),
+            ty: Arc::new(ConnectorType::Type(SourceType {
+                graph: "B".to_string(),
+                type_name: "TypeB".to_string(),
+                api: "API".to_string(),
+                http: Some(HTTPSourceType {
+                    get: None,
+                    post: None,
+                    headers: vec![],
+                    body: None,
+                }),
+                selection: None,
+                key_type_map: None,
+            })),
+        };
+
+        let (_context, request) = connector.create_request(subgraph_request).unwrap();
+        insta::assert_debug_snapshot!(request);
+    }
 }

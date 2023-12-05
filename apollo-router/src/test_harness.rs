@@ -283,7 +283,7 @@ impl<'a> TestHarness<'a> {
     pub async fn build_router(self) -> Result<router::BoxCloneService, BoxError> {
         let (config, supergraph_creator) = self.build_common().await?;
         let router_creator = RouterCreator::new(
-            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)).await,
+            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)),
             Arc::new(PersistedQueryLayer::new(&config).await.unwrap()),
             Arc::new(supergraph_creator),
             config.clone(),
@@ -311,7 +311,7 @@ impl<'a> TestHarness<'a> {
 
         let (config, supergraph_creator) = self.build_common().await?;
         let router_creator = RouterCreator::new(
-            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)).await,
+            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)),
             Arc::new(PersistedQueryLayer::new(&config).await.unwrap()),
             Arc::new(supergraph_creator),
             config.clone(),

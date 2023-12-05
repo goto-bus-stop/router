@@ -284,7 +284,7 @@ impl SourceType {
                         })?
                         .to_string()
                 }
-                "http" => http = Some(HTTPSourceType::from_arguments(&argument.value)?),
+                "http" => http = Some(HTTPSourceType::from_argument(&argument.value)?),
                 "selection" => {
                     selection = Some(
                         JSONSelection::parse(argument.value.as_str().ok_or_else(|| {
@@ -332,6 +332,21 @@ impl SourceType {
             None => vec![],
         }
     }
+
+    pub(super) fn path_required_parameters(&self) -> Vec<String> {
+        match &self.http {
+            Some(http) => {
+                if let Some(get) = &http.get {
+                    get.required_parameters()
+                } else if let Some(post) = &http.post {
+                    post.required_parameters()
+                } else {
+                    vec![]
+                }
+            }
+            None => vec![],
+        }
+    }
 }
 
 // TODO: impl tryfrom with XOR validation on methods
@@ -344,14 +359,87 @@ pub(super) struct HTTPSourceType {
 }
 
 impl HTTPSourceType {
-    pub(super) fn from_arguments(
-        _arguments: &Node<Value>,
-    ) -> Result<Self, ConnectorDirectiveError> {
+    pub(super) fn from_argument(argument: &Node<Value>) -> Result<Self, ConnectorDirectiveError> {
+        let mut get = Default::default();
+        let mut post = Default::default();
+        let mut body = Default::default();
+
+        let value = argument.as_object().ok_or_else(|| {
+            ConnectorDirectiveError::InvalidTypeForAttribute(
+                "object".to_string(),
+                HTTP_ARGUMENT_NAME.to_string(),
+            )
+        })?;
+
+        let mut methods_set = 0;
+
+        for (name, value) in value.iter() {
+            match name.as_str() {
+                "GET" => {
+                    get = Some(
+                        URLPathTemplate::parse(value.as_str().expect("must be a string")).map_err(
+                            |_| {
+                                ConnectorDirectiveError::ParseError(
+                                    "GET".to_string(),
+                                    "URLPathTemplate".to_string(),
+                                )
+                            },
+                        )?,
+                    );
+                    methods_set += 1;
+                }
+                "POST" => {
+                    post = Some(
+                        URLPathTemplate::parse(value.as_str().expect("must be a string")).map_err(
+                            |_| {
+                                ConnectorDirectiveError::ParseError(
+                                    "POST".to_string(),
+                                    "URLPathTemplate".to_string(),
+                                )
+                            },
+                        )?,
+                    );
+                    methods_set += 1;
+                }
+
+                "body" => {
+                    body = Some(
+                        JSONSelection::parse(value.as_str().ok_or_else(|| {
+                            ConnectorDirectiveError::InvalidTypeForAttribute(
+                                "string".to_string(),
+                                "selection".to_string(),
+                            )
+                        })?)
+                        .map_err(|e| {
+                            ConnectorDirectiveError::ParseError(
+                                e.to_string(),
+                                "selection".to_string(),
+                            )
+                        })?
+                        .1,
+                    )
+                }
+                other => {
+                    return Err(ConnectorDirectiveError::UnknownAttributeForType(
+                        other.to_string(),
+                        HTTP_ARGUMENT_NAME.to_string(),
+                    ))
+                }
+            }
+        }
+
+        if methods_set != 1 {
+            return Err(ConnectorDirectiveError::RequiresExactlyOne(
+                "HTTPSourceField".to_string(),
+                "GET, POST".to_string(),
+            ));
+        }
+
         Ok(Self {
-            get: Default::default(),
-            post: Default::default(),
+            get,
+            post,
             headers: Default::default(),
-            body: Default::default(),
+            body,
         })
     }
 }
@@ -517,16 +605,37 @@ impl SourceField {
             None => vec![],
         }
     }
+
+    pub(super) fn path_required_parameters(&self) -> Vec<String> {
+        match &self.http {
+            Some(http) => {
+                if let Some(get) = &http.get {
+                    get.required_parameters()
+                } else if let Some(post) = &http.post {
+                    post.required_parameters()
+                } else if let Some(put) = &http.put {
+                    put.required_parameters()
+                } else if let Some(patch) = &http.patch {
+                    patch.required_parameters()
+                } else if let Some(delete) = &http.delete {
+                    delete.required_parameters()
+                } else {
+                    vec![]
+                }
+            }
+            None => vec![],
+        }
+    }
 }
 
 // TODO: impl tryfrom with XOR validation on methods
 #[derive(Debug, Serialize)]
 pub(super) struct HTTPSourceField {
-    get: Option<String>,    // TODO URLPathTemplate
-    post: Option<String>,   // TODO URLPathTemplate
-    put: Option<String>,    // TODO URLPathTemplate
-    patch: Option<String>,  // TODO URLPathTemplate
-    delete: Option<String>, // TODO URLPathTemplate
+    get: Option<URLPathTemplate>,
+    post: Option<URLPathTemplate>,
+    put: Option<URLPathTemplate>,
+    patch: Option<URLPathTemplate>,
+    delete: Option<URLPathTemplate>,
     body: Option<JSONSelection>,
 }
 
@@ -551,23 +660,68 @@ impl HTTPSourceField {
         for (name, value) in value.iter() {
             match name.as_str() {
                 "GET" => {
-                    get = value.as_str().map(|s| s.to_string());
+                    get = Some(
+                        URLPathTemplate::parse(value.as_str().expect("must be a string")).map_err(
+                            |_| {
+                                ConnectorDirectiveError::ParseError(
+                                    "GET".to_string(),
+                                    "URLPathTemplate".to_string(),
+                                )
+                            },
+                        )?,
+                    );
                     methods_set += 1;
                 }
                 "POST" => {
-                    post = value.as_str().map(|s| s.to_string());
+                    post = Some(
+                        URLPathTemplate::parse(value.as_str().expect("must be a string")).map_err(
+                            |_| {
+                                ConnectorDirectiveError::ParseError(
+                                    "POST".to_string(),
+                                    "URLPathTemplate".to_string(),
+                                )
+                            },
+                        )?,
+                    );
                     methods_set += 1;
                 }
                 "PUT" => {
-                    put = value.as_str().map(|s| s.to_string());
+                    put = Some(
+                        URLPathTemplate::parse(value.as_str().expect("must be a string")).map_err(
+                            |_| {
+                                ConnectorDirectiveError::ParseError(
+                                    "PUT".to_string(),
+                                    "URLPathTemplate".to_string(),
+                                )
+                            },
+                        )?,
+                    );
                     methods_set += 1;
                 }
                 "PATCH" => {
-                    patch = value.as_str().map(|s| s.to_string());
+                    patch = Some(
+                        URLPathTemplate::parse(value.as_str().expect("must be a string")).map_err(
+                            |_| {
+                                ConnectorDirectiveError::ParseError(
+                                    "PATCH".to_string(),
+                                    "URLPathTemplate".to_string(),
+                                )
+                            },
+                        )?,
+                    );
                     methods_set += 1;
                 }
                 "DELETE" => {
-                    delete = value.as_str().map(|s| s.to_string());
+                    delete = Some(
+                        URLPathTemplate::parse(value.as_str().expect("must be a string")).map_err(
+                            |_| {
+                                ConnectorDirectiveError::ParseError(
+                                    "DELETE".to_string(),
+                                    "URLPathTemplate".to_string(),
+                                )
+                            },
+                        )?,
+                    );
                     methods_set += 1;
                 }
                 "body" => {

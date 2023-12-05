@@ -18,6 +18,9 @@ use super::join_spec_helpers::add_entities_field;
 use super::join_spec_helpers::add_join_field_directive;
 use super::join_spec_helpers::add_join_type_directive;
 use super::join_spec_helpers::make_any_scalar;
+use super::join_spec_helpers::parameters_to_selection_set;
+use super::join_spec_helpers::selection_set_to_string;
+use super::join_spec_helpers::Key;
 use crate::json_ext::Object;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
@@ -28,15 +31,16 @@ use crate::Context;
 #[derive(Clone, Debug)]
 pub(crate) struct Connector {
     /// Internal name used to construct "subgraphs" in the inner supergraph
-    name: String,
+    pub(super) name: String,
     api: Arc<SourceAPI>,
-    ty: Arc<ConnectorType>,
+    pub(super) ty: Arc<ConnectorType>,
 }
 
 #[derive(Debug)]
 pub(super) enum ConnectorType {
-    Type(SourceType),
-    Field(SourceField),
+    Entity(SourceType),
+    RootField(SourceField),
+    EntityField(SourceField),
 }
 
 /// The list of the subgraph names that should use the inner query planner
@@ -49,6 +53,14 @@ pub(crate) fn connector_subgraph_names(connectors: &HashMap<String, Connector>) 
 }
 
 impl Connector {
+    pub(super) fn new(name: String, api: SourceAPI, ty: ConnectorType) -> Self {
+        Self {
+            name,
+            api: Arc::new(api),
+            ty: Arc::new(ty),
+        }
+    }
+
     /// Generate a map of connectors with unique names
     pub(crate) fn from_schema(schema: &Schema) -> anyhow::Result<HashMap<String, Self>> {
         let apis = SourceAPI::from_schema(schema)?;
@@ -69,7 +81,7 @@ impl Connector {
                             .ok_or(anyhow!("missing API {}", directive.api_name()))? // TODO support default
                             .clone(),
                     ),
-                    ty: Arc::new(ConnectorType::Type(directive)),
+                    ty: Arc::new(ConnectorType::Entity(directive)),
                 },
             );
         }
@@ -81,16 +93,27 @@ impl Connector {
             )
             .to_uppercase();
 
+            let api_name = directive.api_name().clone();
+
+            // TODO better way to determine parent is Query or Mutation
+            let ty = if directive.parent_type_name == "Query"
+                || directive.parent_type_name == "Mutation"
+            {
+                ConnectorType::RootField(directive)
+            } else {
+                ConnectorType::EntityField(directive)
+            };
+
             connectors.insert(
                 connector_name.clone(),
                 Connector {
                     name: connector_name,
                     api: Arc::new(
-                        apis.get(&directive.api_name())
-                            .ok_or(anyhow!("missing API {}", directive.api_name()))? // TODO support default
+                        apis.get(&api_name)
+                            .ok_or(anyhow!("missing API {}", api_name))? // TODO support default
                             .clone(),
                     ),
-                    ty: Arc::new(ConnectorType::Field(directive)),
+                    ty: Arc::new(ty),
                 },
             );
         }
@@ -102,38 +125,14 @@ impl Connector {
     pub(super) fn changes(&self, schema: &Schema) -> anyhow::Result<Vec<Change>> {
         let graph = self.name.clone();
         match &*self.ty {
-            ConnectorType::Type(ty) => {
-                let mut changes = vec![
-                    Change::Type {
-                        name: ty.type_name.clone().into(),
-                        graph: graph.clone(),
-                        key: None, // TODO
-                    },
-                    Change::MagicFinder {
-                        type_name: ty.type_name.clone().into(),
-                        graph: graph.clone(),
-                    },
-                ];
-
-                changes.extend(recurse_selection(
-                    graph,
-                    schema,
-                    ty.type_name.clone(),
-                    schema
-                        .types
-                        .get(ty.type_name.as_str())
-                        .ok_or(anyhow!("missing type"))?,
-                    &ty.selections(),
-                )?);
-
-                Ok(changes)
-            }
-            ConnectorType::Field(field) => {
+            // Root fields: add the parent type and the field, then recursively
+            // add the selections
+            ConnectorType::RootField(field) => {
                 let mut changes = vec![
                     Change::Type {
                         name: field.parent_type_name.clone().into(),
                         graph: graph.clone(),
-                        key: None, // TODO,
+                        key: Key::None,
                     },
                     Change::Field {
                         type_name: field.parent_type_name.clone().into(),
@@ -153,7 +152,101 @@ impl Connector {
                     &field.selections(),
                 )?);
 
-                // TODO if field is on an entity type, add a magic finder for parent type
+                Ok(changes)
+            }
+            // Entity: add the type with appropriate keys, add a finder field,
+            // recursively add the selections, and recursively add the key fields if necessary
+            ConnectorType::Entity(ty) => {
+                let keys = ty.path_required_parameters();
+                let key_selection = parameters_to_selection_set(&keys);
+                let key_string = selection_set_to_string(&key_selection);
+
+                let mut changes = vec![
+                    Change::Type {
+                        name: ty.type_name.clone().into(),
+                        graph: graph.clone(),
+                        key: Key::Resolvable(key_string),
+                    },
+                    Change::MagicFinder {
+                        type_name: ty.type_name.clone().into(),
+                        graph: graph.clone(),
+                    },
+                ];
+
+                changes.extend(recurse_selection(
+                    graph.clone(),
+                    schema,
+                    ty.type_name.clone(),
+                    schema
+                        .types
+                        .get(ty.type_name.as_str())
+                        .ok_or(anyhow!("missing type"))?,
+                    &ty.selections(),
+                )?);
+
+                // TODO need a test with a nested composite key
+                // TODO mark key fields as external if necessary
+                changes.extend(recurse_selection(
+                    graph,
+                    schema,
+                    ty.type_name.clone(),
+                    schema
+                        .types
+                        .get(ty.type_name.as_str())
+                        .ok_or(anyhow!("missing type"))?,
+                    &key_selection,
+                )?);
+
+                Ok(changes)
+            }
+            // Entity field: add the parent entity type with appropriate keys,
+            // add the field itself, add a finder field, recursively add the
+            // selections, and recursively add the key fields if necessary
+            ConnectorType::EntityField(field) => {
+                let keys = field.path_required_parameters();
+                let key_selection = parameters_to_selection_set(&keys);
+                let key_string = selection_set_to_string(&key_selection);
+
+                let mut changes = vec![
+                    Change::Type {
+                        name: field.parent_type_name.clone().into(),
+                        graph: graph.clone(),
+                        key: Key::Resolvable(key_string),
+                    },
+                    Change::Field {
+                        type_name: field.parent_type_name.clone().into(),
+                        field_name: field.field_name.clone().into(),
+                        graph: graph.clone(),
+                    },
+                    Change::MagicFinder {
+                        type_name: field.parent_type_name.clone().into(),
+                        graph: graph.clone(),
+                    },
+                ];
+
+                changes.extend(recurse_selection(
+                    graph.clone(),
+                    schema,
+                    field.output_type_name.clone(),
+                    schema
+                        .types
+                        .get(field.output_type_name.as_str())
+                        .ok_or(anyhow!("missing type"))?,
+                    &field.selections(),
+                )?);
+
+                // TODO need a test with a nested composite key
+                // TODO mark key fields as external if necessary
+                changes.extend(recurse_selection(
+                    graph,
+                    schema,
+                    field.parent_type_name.clone(), // key fields are on the parent type, not the output type
+                    schema
+                        .types
+                        .get(field.parent_type_name.as_str())
+                        .ok_or(anyhow!("missing type"))?,
+                    &key_selection,
+                )?);
 
                 Ok(changes)
             }
@@ -162,8 +255,9 @@ impl Connector {
 
     pub(super) fn outer_subgraph_name(&self) -> String {
         match &*self.ty {
-            ConnectorType::Type(ref ty) => ty.graph.clone(),
-            ConnectorType::Field(ref field) => field.graph.clone(),
+            ConnectorType::Entity(ref ty) => ty.graph.clone(),
+            ConnectorType::RootField(ref field) => field.graph.clone(),
+            ConnectorType::EntityField(ref field) => field.graph.clone(),
         }
     }
 
@@ -250,10 +344,10 @@ pub(super) enum Change {
     Type {
         name: NodeStr,
         graph: String,
-        key: Option<String>, // TODO
+        key: Key,
     },
     /// Include a field on a type in the schema and add the `@join__field` directive
-    /// TODO: currently assumes that the type already exists
+    /// TODO: currently assumes that the type already exists (order matters!)
     Field {
         type_name: NodeStr,
         field_name: NodeStr,
@@ -273,7 +367,7 @@ impl Change {
         match self {
             Change::Type { name, graph, key } => {
                 let ty = upsert_type(original_schema, schema, name)?;
-                add_join_type_directive(ty, graph, key.as_deref(), false);
+                add_join_type_directive(ty, graph, key);
             }
             Change::Field {
                 type_name,
@@ -286,11 +380,11 @@ impl Change {
             Change::MagicFinder { type_name, graph } => {
                 {
                     let arg_ty = add_type(schema, "_Any", make_any_scalar())?;
-                    add_join_type_directive(arg_ty, graph, None, false);
+                    add_join_type_directive(arg_ty, graph, &Key::None);
                 }
 
                 let ty = upsert_type(original_schema, schema, "Query")?;
-                add_join_type_directive(ty, graph, None, false);
+                add_join_type_directive(ty, graph, &Key::None);
 
                 add_entities_field(
                     ty,
@@ -436,7 +530,7 @@ fn recurse_selection(
     mutations.push(Change::Type {
         name: NodeStr::new(&type_name.clone()),
         graph: graph.clone(),
-        key: None, // TODO
+        key: Key::None,
     });
 
     match ty {
@@ -483,7 +577,7 @@ fn recurse_selection(
         }
         ExtendedType::Interface(_) => todo!(),
         ExtendedType::InputObject(_) => todo!(),
-        _ => bail!("composite types only"),
+        _ => {} // hit a scalar and we're done
     }
 
     Ok(mutations)
@@ -510,7 +604,7 @@ mod tests {
                     headers: vec![],
                 }),
             }),
-            ty: Arc::new(ConnectorType::Type(SourceType {
+            ty: Arc::new(ConnectorType::Entity(SourceType {
                 graph: "B".to_string(),
                 type_name: "TypeB".to_string(),
                 api: "API".to_string(),

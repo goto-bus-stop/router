@@ -325,7 +325,7 @@ fn parse_string_literal(input: &str) -> IResult<&str, String> {
 /// ApplyTo is a trait for applying a Selection to a JSON value, collecting
 /// any/all errors encountered in the process.
 
-trait ApplyTo {
+pub(crate) trait ApplyTo {
     // Applying a selection to a JSON value produces a new JSON value, along
     // with any/all errors encountered in the process. The value is represented
     // as an Option to allow for undefined/missing values (which JSON does not
@@ -373,7 +373,7 @@ trait ApplyTo {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
-struct ApplyToError(JSON);
+pub(super) struct ApplyToError(JSON);
 
 impl Hash for ApplyToError {
     fn hash<H: Hasher>(&self, hasher: &mut H) {

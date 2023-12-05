@@ -236,6 +236,14 @@ impl SourceAPI {
 
         Ok(Self { graph, name, http })
     }
+
+    pub(super) fn base_uri(&self) -> Result<http::Uri, http::uri::InvalidUri> {
+        self.http
+            .as_ref()
+            .map(|http| http.base_url.as_str())
+            .unwrap_or_default()
+            .parse::<_>()
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -367,10 +375,10 @@ impl HTTPHeaderMapping {
 pub(super) struct SourceType {
     pub(super) graph: String,
     pub(super) type_name: String,
-    pub(crate) api: String,
-    pub(crate) http: Option<HTTPSourceType>,
-    pub(crate) selection: JSONSelection,
-    pub(crate) key_type_map: Option<KeyTypeMap>,
+    pub(super) api: String,
+    pub(super) http: Option<HTTPSourceType>,
+    pub(super) selection: JSONSelection,
+    pub(super) key_type_map: Option<KeyTypeMap>,
 }
 
 impl SourceType {
@@ -496,6 +504,20 @@ impl SourceType {
         format!("{}_{}", self.graph, self.api)
     }
 
+    pub(super) fn path_template(&self) -> &URLPathTemplate {
+        match &self.http {
+            Some(http) => &http.path_template,
+            None => unreachable!(),
+        }
+    }
+
+    pub(super) fn method(&self) -> &http::Method {
+        match &self.http {
+            Some(http) => &http.method,
+            None => unreachable!(),
+        }
+    }
+
     pub(super) fn selections(&self) -> Vec<Selection> {
         self.selection.clone().into()
     }
@@ -510,11 +532,11 @@ impl SourceType {
 
 #[derive(Debug, Serialize)]
 pub(super) struct HTTPSourceType {
-    pub(crate) path_template: URLPathTemplate,
+    pub(super) path_template: URLPathTemplate,
     #[serde(with = "http_serde::method")]
-    pub(crate) method: http::Method,
-    pub(crate) headers: Vec<HTTPHeaderMapping>,
-    pub(crate) body: Option<JSONSelection>,
+    pub(super) method: http::Method,
+    pub(super) headers: Vec<HTTPHeaderMapping>,
+    pub(super) body: Option<JSONSelection>,
 }
 
 impl HTTPSourceType {
@@ -772,6 +794,20 @@ impl SourceField {
         format!("{}_{}", self.graph, self.api)
     }
 
+    pub(super) fn path_template(&self) -> &URLPathTemplate {
+        match &self.http {
+            Some(http) => &http.path_template,
+            None => unreachable!(),
+        }
+    }
+
+    pub(super) fn method(&self) -> &http::Method {
+        match &self.http {
+            Some(http) => &http.method,
+            None => unreachable!(),
+        }
+    }
+
     pub(super) fn selections(&self) -> Vec<Selection> {
         self.selection.clone().into()
     }
@@ -786,10 +822,10 @@ impl SourceField {
 
 #[derive(Debug, Serialize)]
 pub(super) struct HTTPSourceField {
-    path_template: URLPathTemplate,
+    pub(super) path_template: URLPathTemplate,
     #[serde(with = "http_serde::method")]
-    method: http::Method,
-    body: Option<JSONSelection>,
+    pub(super) method: http::Method,
+    pub(super) body: Option<JSONSelection>,
 }
 
 impl HTTPSourceField {

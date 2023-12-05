@@ -177,8 +177,8 @@ pub(super) fn add_join_type_directive(ty: &mut ExtendedType, graph: &str, key: &
     let exists = ty.directives().iter().any(|d| {
         d.name == "join__type"
             && d.argument_by_name("graph")
-                .and_then(|val| val.as_str())
-                .map(|val| val == graph)
+                .and_then(|val| val.as_enum())
+                .map(|val| val.as_str() == graph)
                 .unwrap_or(false)
             && d.argument_by_name("key")
                 .and_then(|val| val.as_str())
@@ -260,8 +260,8 @@ pub(super) fn add_join_field_directive(
     let exists = field.directives.iter().any(|d| {
         d.name == "join__field"
             && d.argument_by_name("graph")
-                .and_then(|val| val.as_str())
-                .map(|val| val == graph)
+                .and_then(|val| val.as_enum())
+                .map(|val| val.as_str() == graph)
                 .unwrap_or(false)
     });
 

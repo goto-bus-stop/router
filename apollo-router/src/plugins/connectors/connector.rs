@@ -21,7 +21,11 @@ use super::join_spec_helpers::make_any_scalar;
 use super::join_spec_helpers::parameters_to_selection_set;
 use super::join_spec_helpers::selection_set_to_string;
 use super::join_spec_helpers::Key;
-use crate::json_ext::Object;
+use super::request_response::handle_responses;
+use super::request_response::make_requests;
+use super::request_response::ResponseParams;
+use super::selection_parser::Selection as JSONSelection;
+use super::url_path_parser::URLPathTemplate;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::Context;
@@ -267,72 +271,48 @@ impl Connector {
         self.name.as_str()
     }
 
-    pub(crate) fn create_request(
-        &self,
-        subgraph_request: SubgraphRequest,
-    ) -> Result<(Context, http::Request<hyper::Body>), BoxError> {
-        println!(
-            "create request: self={self:?}, subgraph req={:?}",
-            subgraph_request.subgraph_request
-        );
-
-        let request = if let Some(http) = &self.api.http {
-            let mut builder = http::Request::builder()
-                .method("GET") //TODO: do we support others methods?
-                .uri(http.base_url.clone());
-
-            for header in &http.headers {
-                if let Some(value) = &header.value {
-                    let name = header.r#as.as_ref().unwrap_or(&header.name).clone();
-                    builder = builder.header(name, value.clone());
-                }
-            }
-            builder
-                .body(hyper::Body::empty())
-                .map_err(|e| BoxError::from(format!("couldn't create connector request {}", e)))?
-        } else {
-            let SubgraphRequest {
-                subgraph_request, ..
-            } = subgraph_request;
-
-            let (parts, body) = subgraph_request.into_parts();
-
-            let body = serde_json::to_string(&body)?;
-
-            http::request::Request::from_parts(parts, body.into())
-        };
-        println!("generated req: {request:?}");
-
-        Ok((subgraph_request.context, request))
+    pub(super) fn base_uri(&self) -> Result<http::Uri, http::uri::InvalidUri> {
+        self.api.base_uri()
     }
 
-    pub(crate) async fn map_http_response(
+    pub(super) fn path_template(&self) -> &URLPathTemplate {
+        match self.ty.as_ref() {
+            ConnectorType::Entity(source_type) => source_type.path_template(),
+            ConnectorType::RootField(source_field) => source_field.path_template(),
+            ConnectorType::EntityField(source_field) => source_field.path_template(),
+        }
+    }
+
+    pub(super) fn method(&self) -> http::Method {
+        match self.ty.as_ref() {
+            ConnectorType::Entity(source_type) => source_type.method().clone(),
+            ConnectorType::RootField(source_field) => source_field.method().clone(),
+            ConnectorType::EntityField(source_field) => source_field.method().clone(),
+        }
+    }
+
+    pub(super) fn json_selection(&self) -> JSONSelection {
+        match self.ty.as_ref() {
+            ConnectorType::Entity(source_type) => source_type.selection.clone(),
+            ConnectorType::RootField(source_field) => source_field.selection.clone(),
+            ConnectorType::EntityField(source_field) => source_field.selection.clone(),
+        }
+    }
+
+    pub(crate) fn create_requests(
         &self,
-        response: http::Response<hyper::Body>,
+        subgraph_request: SubgraphRequest,
+        schema: Arc<Schema>,
+    ) -> Result<Vec<(http::Request<hyper::Body>, ResponseParams)>, BoxError> {
+        make_requests(subgraph_request, self, schema.clone())
+    }
+
+    pub(crate) async fn map_http_responses(
+        &self,
+        responses: Vec<http::Response<hyper::Body>>,
         context: Context,
     ) -> Result<SubgraphResponse, BoxError> {
-        // TODO (content type, status etc...) but I'll hardcode putting the JSON from ipinfo.io  in the "data" section for this example
-        let (parts, body) = response.into_parts();
-        let graphql_entity: serde_json_bytes::Value = serde_json::from_slice(
-            &hyper::body::to_bytes(body)
-                .await
-                .map_err(|_| "couldn't retrieve http response body")?,
-        )
-        .map_err(|_| "couldn't deserialize response body")?;
-
-        // TODO: selection set parent + entities etc etc etc
-        let graphql_data = serde_json_bytes::json! {{
-            "serverNetworkInfo": graphql_entity
-        }};
-
-        let response = SubgraphResponse::builder()
-            .data(graphql_data)
-            .context(context)
-            .headers(parts.headers)
-            .extensions(Object::default())
-            .build();
-
-        Ok(response)
+        handle_responses(context, self, responses).await
     }
 }
 
@@ -589,41 +569,55 @@ fn recurse_selection(
 mod tests {
     use super::*;
     use crate::plugins::connectors::directives::HTTPSourceAPI;
-    use crate::plugins::connectors::directives::HTTPSourceType;
+    use crate::plugins::connectors::directives::HTTPSourceField;
     use crate::plugins::connectors::selection_parser::Selection as JSONSelection;
     use crate::plugins::connectors::url_path_parser::URLPathTemplate;
     use crate::services::subgraph;
 
     #[test]
     fn request() {
-        let subgraph_request = subgraph::Request::fake_builder().build();
+        let subgraph_request = subgraph::Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(crate::graphql::Request::builder().query("{field}").build())
+                    .unwrap(),
+            )
+            .build();
         let connector = Connector {
-            name: "API".to_string(),
+            name: "CONNECTOR_QUERY_FIELDB".to_string(),
             api: Arc::new(SourceAPI {
                 graph: "B".to_string(),
-                name: "C".to_string(),
+                name: "API".to_string(),
                 http: Some(HTTPSourceAPI {
                     base_url: "http://localhost/api".to_string(),
-                    default: false,
+                    default: true,
                     headers: vec![],
                 }),
             }),
-            ty: Arc::new(ConnectorType::Entity(SourceType {
+            ty: Arc::new(ConnectorType::RootField(SourceField {
                 graph: "B".to_string(),
-                type_name: "TypeB".to_string(),
+                parent_type_name: "Query".to_string(),
+                field_name: "field".to_string(),
+                output_type_name: "String".to_string(),
                 api: "API".to_string(),
-                http: Some(HTTPSourceType {
-                    path_template: URLPathTemplate::parse("/path").unwrap(),
+                http: Some(HTTPSourceField {
                     method: http::Method::GET,
-                    headers: vec![],
+                    path_template: URLPathTemplate::parse("/path").unwrap(),
                     body: None,
                 }),
-                selection: JSONSelection::parse("id").unwrap().1,
-                key_type_map: None,
+                selection: JSONSelection::parse(".data").unwrap().1,
             })),
         };
 
-        let (_context, request) = connector.create_request(subgraph_request).unwrap();
-        insta::assert_debug_snapshot!(request);
+        let requests_and_params = connector
+            .create_requests(
+                subgraph_request,
+                Arc::new(Schema::parse(
+                    "type Query { field: String }".to_string(),
+                    "schema.graphql",
+                )),
+            )
+            .unwrap();
+        insta::assert_debug_snapshot!(requests_and_params);
     }
 }

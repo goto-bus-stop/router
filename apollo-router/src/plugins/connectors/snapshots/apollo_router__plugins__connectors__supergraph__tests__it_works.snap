@@ -34,7 +34,7 @@ enum link__Purpose {
 }
 
 type Hello @join__type(graph: CONNECTOR_HELLO_0, key: "id") @join__type(graph: CONNECTOR_HELLO_0) @join__type(graph: CONNECTOR_HELLO_0) @join__type(graph: CONNECTOR_HELLO_WORLD_0, key: "id") @join__type(graph: CONNECTOR_HELLO_WORLD_0) @join__type(graph: CONNECTOR_QUERY_HELLO_1) {
-  id: ID! @join__field(graph: CONNECTOR_HELLO_0) @join__field(graph: CONNECTOR_HELLO_0) @join__field(graph: CONNECTOR_HELLO_WORLD_0) @join__field(graph: CONNECTOR_QUERY_HELLO_1)
+  id: ID! @join__field(graph: CONNECTOR_HELLO_0) @join__field(graph: CONNECTOR_HELLO_WORLD_0) @join__field(graph: CONNECTOR_QUERY_HELLO_1)
   field: String @join__field(graph: CONNECTOR_HELLO_0)
   world: World @join__field(graph: CONNECTOR_HELLO_WORLD_0)
 }
@@ -48,6 +48,11 @@ type Query @join__type(graph: CONNECTOR_HELLO_0) @join__type(graph: CONNECTOR_HE
 }
 
 type World @join__type(graph: CONNECTOR_HELLO_WORLD_0) {
+  field: String @join__field(graph: CONNECTOR_HELLO_WORLD_0)
+  nested: Nested @join__field(graph: CONNECTOR_HELLO_WORLD_0)
+}
+
+type Nested @join__type(graph: CONNECTOR_HELLO_WORLD_0) {
   field: String @join__field(graph: CONNECTOR_HELLO_WORLD_0)
 }
 

@@ -259,7 +259,7 @@ pub(crate) enum QueryPlannerError {
     SchemaValidationErrors(PlannerErrors),
 
     /// invalid query
-    OperationValidationErrors(Vec<apollo_compiler::GraphQLError>),
+    OperationValidationErrors(Vec<apollo_compiler::execution::GraphQLError>),
 
     /// couldn't plan query: {0}
     PlanningErrors(PlanErrors),
@@ -292,7 +292,7 @@ pub(crate) enum QueryPlannerError {
     Unauthorized(Vec<Path>),
 }
 
-impl IntoGraphQLErrors for Vec<apollo_compiler::GraphQLError> {
+impl IntoGraphQLErrors for Vec<apollo_compiler::execution::GraphQLError> {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         Ok(self
             .into_iter()
@@ -560,7 +560,7 @@ pub(crate) enum ConnectorDirectiveError {
 /// Collection of schema validation errors.
 #[derive(Debug)]
 pub(crate) struct ParseErrors {
-    pub(crate) errors: apollo_compiler::Diagnostics,
+    pub(crate) errors: apollo_compiler::validation::DiagnosticList,
 }
 
 impl std::fmt::Display for ParseErrors {
@@ -583,7 +583,7 @@ impl std::fmt::Display for ParseErrors {
 /// Collection of schema validation errors.
 #[derive(Debug)]
 pub(crate) struct ValidationErrors {
-    pub(crate) errors: apollo_compiler::Diagnostics,
+    pub(crate) errors: apollo_compiler::validation::DiagnosticList,
 }
 
 impl IntoGraphQLErrors for ValidationErrors {

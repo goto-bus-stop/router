@@ -665,18 +665,15 @@ fn recurse_inputs(
         });
     }
 
-    match ty {
-        ExtendedType::InputObject(obj) => {
-            for field in obj.fields.values() {
-                changes.push(Change::InputField {
-                    type_name: output_type_name.clone(),
-                    field_name: field.name.clone(),
-                    graph: graph.clone(),
-                });
-                changes.extend(recurse_inputs(graph.clone(), schema, &field.node)?);
-            }
+    if let ExtendedType::InputObject(obj) = ty {
+        for field in obj.fields.values() {
+            changes.push(Change::InputField {
+                type_name: output_type_name.clone(),
+                field_name: field.name.clone(),
+                graph: graph.clone(),
+            });
+            changes.extend(recurse_inputs(graph.clone(), schema, &field.node)?);
         }
-        _ => {}
     }
 
     Ok(changes)

@@ -131,7 +131,7 @@ pub(super) enum Key {
     NonResolvable(String),
 }
 
-fn join_type_directive(graph: &str, key: &Key) -> Directive {
+fn join_type_directive(_graph: &str, key: &Key) -> Directive {
     let mut arguments = vec![Argument {
         name: name!("graph"),
         value: Value::Enum(name!(graph)).into(),
@@ -245,7 +245,7 @@ directive @join__field(
 ) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 */
 
-fn join_field_directive(graph: &str) -> Directive {
+fn join_field_directive(_graph: &str) -> Directive {
     Directive {
         name: name!("join__field"),
         arguments: vec![Argument {
@@ -297,8 +297,8 @@ directive @join__unionMember(
 pub(super) fn add_entities_field(
     ty: &mut ExtendedType,
     graph: &str,
-    name: &str,
-    entity_name: &str,
+    _name: &str,
+    _entity_name: &str,
 ) -> anyhow::Result<()> {
     match ty {
         ExtendedType::Object(ref mut ty) => {
@@ -323,11 +323,7 @@ pub(super) fn add_entities_field(
                         .into()],
                         directives: DirectiveList(vec![join_field_directive(graph).into()]),
                         description: None,
-                        ty: Type::Named(name!(entity_name))
-                            .non_null()
-                            .list()
-                            .non_null()
-                            .into(),
+                        ty: Type::Named(name!(entity_name)).non_null().list().non_null(),
                     }
                     .into()
                 });
@@ -362,7 +358,7 @@ pub(super) fn make_any_scalar() -> ExtendedType {
 
 use apollo_compiler::ast::Selection as GraphQLSelection;
 
-fn new_field(name: String, selection: Option<Vec<GraphQLSelection>>) -> GraphQLSelection {
+fn new_field(_name: String, selection: Option<Vec<GraphQLSelection>>) -> GraphQLSelection {
     GraphQLSelection::Field(
         apollo_compiler::ast::Field {
             alias: None,

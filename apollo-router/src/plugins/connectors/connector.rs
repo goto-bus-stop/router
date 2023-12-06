@@ -511,7 +511,7 @@ fn recurse_selection(
     let mut mutations = Vec::new();
 
     mutations.push(Change::Type {
-        name: ast::Name::new(&type_name.clone())?,
+        name: ast::Name::new(type_name.clone())?,
         graph: graph.clone(),
         key: Key::None,
     });

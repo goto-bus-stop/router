@@ -306,7 +306,7 @@ fn entities_with_fields_from_request(
 
     // Use the AST because the `_entities` field is not actually present in the supergraph
     let doc = apollo_compiler::ast::Document::parse(query, "op.graphql")
-        .map_err(|e| "cannot parse operation document")?;
+        .map_err(|_| "cannot parse operation document")?;
 
     let op = doc
         .definitions

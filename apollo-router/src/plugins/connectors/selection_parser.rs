@@ -705,7 +705,7 @@ impl From<Selection> for Vec<GraphQLSelection> {
     }
 }
 
-fn new_field(name: String, selection: Option<Vec<GraphQLSelection>>) -> GraphQLSelection {
+fn new_field(_name: String, selection: Option<Vec<GraphQLSelection>>) -> GraphQLSelection {
     GraphQLSelection::Field(
         apollo_compiler::ast::Field {
             alias: None,

@@ -69,21 +69,23 @@ impl Connector {
 
         let mut connectors = HashMap::new();
 
-        for (i, (type_name, directive)) in types.into_iter().enumerate() {
+        for (i, (type_name, directives)) in types.into_iter().enumerate() {
             let connector_name = format!("CONNECTOR_{}_{}", type_name, i).to_uppercase();
 
-            connectors.insert(
-                connector_name.clone(),
-                Connector {
-                    name: connector_name,
-                    api: Arc::new(
-                        apis.get(&directive.api_name())
-                            .ok_or(anyhow!("missing API {}", directive.api_name()))? // TODO support default
-                            .clone(),
-                    ),
-                    ty: Arc::new(ConnectorType::Entity(directive)),
-                },
-            );
+            for directive in directives {
+                connectors.insert(
+                    connector_name.clone(),
+                    Connector {
+                        name: connector_name.clone(),
+                        api: Arc::new(
+                            apis.get(&directive.api_name())
+                                .ok_or(anyhow!("missing API {}", directive.api_name()))? // TODO support default
+                                .clone(),
+                        ),
+                        ty: Arc::new(ConnectorType::Entity(directive)),
+                    },
+                );
+            }
         }
 
         for (i, directive) in fields.into_iter().enumerate() {
@@ -588,6 +590,8 @@ mod tests {
     use super::*;
     use crate::plugins::connectors::directives::HTTPSourceAPI;
     use crate::plugins::connectors::directives::HTTPSourceType;
+    use crate::plugins::connectors::selection_parser::Selection as JSONSelection;
+    use crate::plugins::connectors::url_path_parser::URLPathTemplate;
     use crate::services::subgraph;
 
     #[test]
@@ -600,7 +604,7 @@ mod tests {
                 name: "C".to_string(),
                 http: Some(HTTPSourceAPI {
                     base_url: "http://localhost/api".to_string(),
-                    default: None,
+                    default: false,
                     headers: vec![],
                 }),
             }),
@@ -609,12 +613,12 @@ mod tests {
                 type_name: "TypeB".to_string(),
                 api: "API".to_string(),
                 http: Some(HTTPSourceType {
-                    get: None,
-                    post: None,
+                    path_template: URLPathTemplate::parse("/path").unwrap(),
+                    method: http::Method::GET,
                     headers: vec![],
                     body: None,
                 }),
-                selection: None,
+                selection: JSONSelection::parse("id").unwrap().1,
                 key_type_map: None,
             })),
         };

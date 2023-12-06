@@ -1,17 +1,27 @@
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
-  @link(
-    url: "https://specs.apollo.dev/source/v0.1"
-    import: ["@sourceAPI", "@sourceType", "@sourceField"]
-  )
-  @sourceAPI(
-    graph: "simple"
-    name: "a"
-    http: { baseURL: "https://localhost:4001/" }
+  @link(url: "https://specs.apollo.dev/source/v0.1")
+  @join__schema(
+    graph: SIMPLE
+    directives: [
+      {
+        name: "sourceAPI"
+        args: { name: "a", http: { baseURL: "http://localhost:8080/v1" } }
+        source: {
+          url: "https://specs.apollo.dev/source/v0.1"
+          name: "sourceAPI"
+        }
+      }
+    ]
   ) {
   query: Query
 }
+
+directive @join__schema(
+  graph: join__Graph
+  directives: join__FieldSet
+) repeatable on SCHEMA
 
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
@@ -23,6 +33,7 @@ directive @join__field(
   external: Boolean
   override: String
   usedOverridden: Boolean
+  directives: join__FieldSet
 ) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
@@ -38,6 +49,7 @@ directive @join__type(
   extension: Boolean! = false
   resolvable: Boolean! = true
   isInterfaceObject: Boolean! = false
+  directives: join__FieldSet
 ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
 
 directive @join__unionMember(
@@ -52,73 +64,45 @@ directive @link(
   import: [link__Import]
 ) repeatable on SCHEMA
 
-directive @sourceAPI(
-  graph: String!
-  name: String!
-  http: HTTPSourceAPI
-) repeatable on SCHEMA
-
-directive @sourceField(
-  graph: String!
-  api: String
-  http: HTTPSourceField
-  selection: JSONSelection
-) repeatable on FIELD_DEFINITION
-
-directive @sourceType(
-  graph: String!
-  api: String
-  http: HTTPSourceType
-  selection: JSONSelection
-  keyTypeMap: JSON
-) repeatable on OBJECT | INTERFACE
-
 type Hello
-  @join__type(graph: SIMPLE, key: "id")
-  @sourceType(
-    graph: "simple"
-    api: "a"
-    http: { GET: "/hello/{id}" }
-    selection: ".data { id field }"
+  @join__type(
+    graph: SIMPLE
+    key: "id"
+    directives: [
+      {
+        name: "sourceType"
+        args: {
+          api: "a"
+          http: { GET: "/hello/{id}" }
+          selection: ".data { id field }"
+        }
+        source: {
+          url: "https://specs.apollo.dev/source/v0.1"
+          name: "sourceType"
+        }
+      }
+    ]
   ) {
   id: ID!
   field: String
   world: World
-    @sourceField(
-      graph: "simple"
-      api: "a"
-      http: { GET: "/hello/{id}/world" }
-      selection: ".data { field }"
+    @join__field(
+      graph: SIMPLE
+      directives: [
+        {
+          name: "sourceField"
+          args: {
+            api: "a"
+            http: { GET: "/hello/{id}/world" }
+            selection: ".data { field }"
+          }
+          source: {
+            url: "https://specs.apollo.dev/source/v0.1"
+            name: "sourceField"
+          }
+        }
+      ]
     )
-}
-
-input HTTPHeaderMapping @join__type(graph: SIMPLE) {
-  name: String!
-  as: String
-  value: String
-}
-
-input HTTPSourceAPI @join__type(graph: SIMPLE) {
-  baseURL: String!
-  default: Boolean
-  headers: [HTTPHeaderMapping!]
-}
-
-input HTTPSourceField @join__type(graph: SIMPLE) {
-  GET: URLPathTemplate
-  POST: URLPathTemplate
-  PUT: URLPathTemplate
-  PATCH: URLPathTemplate
-  DELETE: URLPathTemplate
-  headers: [HTTPHeaderMapping!]
-  body: JSONSelection
-}
-
-input HTTPSourceType @join__type(graph: SIMPLE) {
-  GET: URLPathTemplate
-  POST: URLPathTemplate
-  headers: [HTTPHeaderMapping!]
-  body: JSONSelection
 }
 
 scalar join__FieldSet
@@ -128,14 +112,6 @@ enum join__Graph {
   NORMAL @join__graph(name: "normal", url: "http://normal-subgraph")
   SIMPLE @join__graph(name: "simple", url: "http://connector-subgraph")
 }
-
-scalar JSON
-  @join__type(graph: SIMPLE)
-  @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc8259")
-
-scalar JSONSelection
-  @join__type(graph: SIMPLE)
-  @specifiedBy(url: "https://specs.apollo.dev/source/v1.0")
 
 scalar link__Import
   @specifiedBy(url: "http://just-to-avoid-valiadation-warnings")
@@ -155,22 +131,43 @@ enum link__Purpose {
 type Query @join__type(graph: NORMAL) @join__type(graph: SIMPLE) {
   fieldBackedByRealResolver: TypeWithResolver @join__field(graph: NORMAL)
   hello: Hello
-    @join__field(graph: SIMPLE)
-    @sourceField(
-      graph: "simple"
-      api: "a"
-      http: { GET: "/hello" }
-      selection: ".data { id }"
+    @join__field(
+      graph: SIMPLE
+      directives: [
+        {
+          name: "sourceField"
+          args: { api: "a", http: { GET: "/hello" }, selection: ".data { id }" }
+          source: {
+            url: "https://specs.apollo.dev/source/v0.1"
+            name: "sourceField"
+          }
+        }
+      ]
+    )
+
+  withArguments(value: String, done: Boolean): String
+    @join__field(
+      graph: SIMPLE
+      directives: [
+        {
+          name: "sourceField"
+          args: {
+            api: "a"
+            http: { GET: "/with-arguments?value={value}&done={done}" }
+            selection: ".data"
+          }
+          source: {
+            url: "https://specs.apollo.dev/source/v0.1"
+            name: "sourceField"
+          }
+        }
+      ]
     )
 }
 
 type TypeWithResolver @join__type(graph: NORMAL, key: "id") {
   id: ID!
 }
-
-scalar URLPathTemplate
-  @join__type(graph: SIMPLE)
-  @specifiedBy(url: "https://specs.apollo.dev/source/v1.0")
 
 type World @join__type(graph: SIMPLE) {
   field: String

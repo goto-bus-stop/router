@@ -30,7 +30,6 @@ use tower::ServiceExt;
 
 use super::directives::HTTPSourceAPI;
 use super::directives::SourceAPI;
-use super::directives::SOURCE_API_DIRECTIVE_NAME;
 use super::Connector;
 use crate::error::ConnectorDirectiveError;
 use crate::error::FetchError;

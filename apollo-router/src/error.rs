@@ -555,6 +555,8 @@ pub(crate) enum ConnectorDirectiveError {
     ParseError(String, String),
     /// Exactly one argument of '{1}' must be set for type '{0}'
     RequiresExactlyOne(String, String),
+    /// Invalid join directive: '{0}'
+    InvalidJoinDirective(String),
 }
 
 /// Collection of schema validation errors.

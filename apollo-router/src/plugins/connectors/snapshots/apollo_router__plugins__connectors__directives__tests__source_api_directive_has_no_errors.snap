@@ -8,7 +8,7 @@ expression: all_source_apis
     "name": "legacy_contacts",
     "http": {
       "base_url": "http://localhost:4002/legacy/contacts/",
-      "default": null,
+      "default": false,
       "headers": []
     }
   },
@@ -42,7 +42,7 @@ expression: all_source_apis
     "name": "rest_notes",
     "http": {
       "base_url": "http://localhost:4002/notes/",
-      "default": null,
+      "default": false,
       "headers": []
     }
   }

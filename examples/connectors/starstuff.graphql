@@ -5,14 +5,23 @@ schema
     url: "https://specs.apollo.dev/source/v0.1"
     import: ["@sourceAPI", "@sourceType", "@sourceField"]
   )
-  @sourceAPI(
-    graph: "network"
-    name: "ipinfo"
-    http: { baseURL: "https://ipinfo.io/" }
+  @join__schema(
+    graph: NETWORK
+    directives: [
+      {
+        name: "sourceAPI"
+        args: { name: "ipinfo", http: { baseURL: "https://ipinfo.io/" } }
+      }
+    ]
   ) {
   query: Query
   mutation: Mutation
 }
+
+directive @join__schema(
+  graph: join__Graph
+  directives: join__FieldSet
+) repeatable on SCHEMA
 
 directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
 
@@ -31,10 +40,6 @@ enum link__Purpose {
 scalar join__FieldSet
   @specifiedBy(url: "http://just-to-avoid-valiadation-warnings")
 
-scalar URLPathTemplate
-  @join__type(graph: NETWORK)
-  @specifiedBy(url: "https://specs.apollo.dev/source/v1.0")
-
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
 directive @join__field(
@@ -45,6 +50,7 @@ directive @join__field(
   external: Boolean
   override: String
   usedOverridden: Boolean
+  directives: join__FieldSet
 ) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
@@ -60,6 +66,7 @@ directive @join__type(
   extension: Boolean! = false
   resolvable: Boolean! = true
   isInterfaceObject: Boolean! = false
+  directives: join__FieldSet
 ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
 
 directive @join__unionMember(
@@ -73,64 +80,6 @@ directive @link(
   for: link__Purpose
   import: [link__Import]
 ) repeatable on SCHEMA
-
-directive @sourceAPI(
-  graph: String!
-  name: String!
-  http: HTTPSourceAPI
-) repeatable on SCHEMA
-
-directive @sourceField(
-  graph: String!
-  api: String
-  http: HTTPSourceField
-  selection: JSONSelection
-) repeatable on FIELD_DEFINITION
-
-directive @sourceType(
-  graph: String!
-  api: String
-  http: HTTPSourceType
-  selection: JSONSelection
-  keyTypeMap: JSON
-) repeatable on OBJECT | INTERFACE
-
-input HTTPHeaderMapping @join__type(graph: NETWORK) {
-  name: String!
-  as: String
-  value: String
-}
-
-input HTTPSourceAPI @join__type(graph: NETWORK) {
-  baseURL: String!
-  default: Boolean
-  headers: [HTTPHeaderMapping!]
-}
-
-input HTTPSourceField @join__type(graph: NETWORK) {
-  GET: URLPathTemplate
-  POST: URLPathTemplate
-  PUT: URLPathTemplate
-  PATCH: URLPathTemplate
-  DELETE: URLPathTemplate
-  headers: [HTTPHeaderMapping!]
-  body: JSONSelection
-}
-
-input HTTPSourceType @join__type(graph: NETWORK) {
-  GET: URLPathTemplate
-  POST: URLPathTemplate
-  headers: [HTTPHeaderMapping!]
-  body: JSONSelection
-}
-
-scalar JSON
-  @join__type(graph: NETWORK)
-  @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc8259")
-
-scalar JSONSelection
-  @join__type(graph: NETWORK)
-  @specifiedBy(url: "https://specs.apollo.dev/source/v1.0")
 
 scalar link__Import
   @specifiedBy(url: "http://just-to-avoid-valiadation-warnings")
@@ -153,12 +102,18 @@ type Query
   @join__type(graph: NETWORK) {
   me: User @join__field(graph: ACCOUNTS)
   serverNetworkInfo: IP
-    @join__field(graph: NETWORK)
-    @sourceField(
-      graph: "network"
-      api: "ipinfo"
-      http: { GET: "/json" }
-      selection: "ip hostname city region country loc org postal timezone readme"
+    @join__field(
+      graph: NETWORK
+      directives: [
+        {
+          name: "sourceField"
+          args: {
+            api: "ipinfo"
+            http: { GET: "/json" }
+            selection: "ip hostname city region country loc org postal timezone readme"
+          }
+        }
+      ]
     )
   topProducts(first: Int = 5): [Product] @join__field(graph: PRODUCTS)
 }
@@ -207,12 +162,19 @@ type User
 }
 
 type IP
-  @join__type(graph: NETWORK, key: "ip")
-  @sourceType(
-    graph: "network"
-    api: "ipinfo"
-    http: { GET: "/json" }
-    selection: "ip hostname city region country loc org postal timezone readme"
+  @join__type(
+    graph: NETWORK
+    key: "ip"
+    directives: [
+      {
+        name: "sourceType"
+        args: {
+          api: "ipinfo"
+          http: { GET: "/json" }
+          selection: "ip hostname city region country loc org postal timezone readme"
+        }
+      }
+    ]
   ) {
   ip: ID!
   hostname: String

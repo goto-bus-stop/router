@@ -988,7 +988,9 @@ mod tests {
                     method: GET,
                     uri: https://api/v1/hello,
                     version: HTTP/1.1,
-                    headers: {},
+                    headers: {
+                        "content-type": "application/json",
+                    },
                     body: Body(
                         Empty,
                     ),

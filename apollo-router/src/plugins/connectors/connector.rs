@@ -12,7 +12,6 @@ use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::schema::Name;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Node;
-use apollo_compiler::NodeStr;
 use apollo_compiler::Schema;
 use tower::BoxError;
 
@@ -362,8 +361,8 @@ pub(super) enum Change {
         graph: String,
     },
     InputField {
-        type_name: NodeStr,
-        field_name: NodeStr,
+        type_name: Name,
+        field_name: Name,
         graph: String,
     },
     /// Add a special field to Query that we can use instead of `_entities`
@@ -453,8 +452,8 @@ fn upsert_field<'a>(
 fn upsert_input_field<'a>(
     source: &Schema,
     dest: &'a mut Schema,
-    type_name: &NodeStr,
-    field_name: &NodeStr,
+    type_name: &Name,
+    field_name: &Name,
 ) -> anyhow::Result<&'a mut InputValueDefinition> {
     let new_ty = dest
         .types
@@ -660,7 +659,7 @@ fn recurse_inputs(
 
     if !ty.is_built_in() {
         changes.push(Change::Type {
-            name: ast::Name::new(output_type_name)?,
+            name: output_type_name.clone(),
             graph: graph.clone(),
             key: Key::None,
         });
@@ -670,7 +669,7 @@ fn recurse_inputs(
         ExtendedType::InputObject(obj) => {
             for field in obj.fields.values() {
                 changes.push(Change::InputField {
-                    type_name: ast::Name::new(output_type_name)?,
+                    type_name: output_type_name.clone(),
                     field_name: field.name.clone(),
                     graph: graph.clone(),
                 });

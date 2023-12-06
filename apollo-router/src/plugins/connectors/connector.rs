@@ -521,14 +521,11 @@ fn recurse_selection(
             for selection in selections {
                 match selection {
                     Selection::Field(selection) => {
-                        let field = obj
-                            .fields
-                            .get(&ast::Name::new(selection.name.to_string().as_str())?)
-                            .ok_or(anyhow!(
-                                "missing field {} for type {}",
-                                selection.name.to_string().as_str(),
-                                type_name
-                            ))?;
+                        let field = obj.fields.get(&selection.name).ok_or(anyhow!(
+                            "missing field {} for type {}",
+                            selection.name.to_string().as_str(),
+                            type_name
+                        ))?;
 
                         let field_type_name = field.ty.inner_named_type();
 

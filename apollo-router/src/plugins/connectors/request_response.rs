@@ -580,7 +580,7 @@ mod tests {
             type Query {
               a: String
               b(var: String): String
-              c(var1: Int, var2: Bool, var3: Float, var4: ID, var5: JSON, var6: [String], var7: String): String
+              c(var1: Int, var2: Boolean, var3: Float, var4: ID, var5: JSON, var6: [String], var7: String): String
             }
           "#,
             "test.graphql",
@@ -937,6 +937,17 @@ mod tests {
 
         let schema = Schema::parse_and_validate(
             r#"
+              directive @join__graph(name: String) on ENUM_VALUE
+              directive @join__schema(
+                graph: join__Graph!
+                directives: [join__Directive!] = []
+              ) on SCHEMA
+              directive @join__field(
+                graph: join__Graph!
+                directives: [join__Directive!] = []
+              ) on FIELD_DEFINITION
+              scalar join__Directive
+
               enum join__Graph { SUBGRAPH @join__graph(name: "subgraph") }
               schema @join__schema(
                 graph: SUBGRAPH
@@ -1022,6 +1033,17 @@ mod tests {
     async fn handle_requests() -> Result<(), BoxError> {
         let schema = Schema::parse_and_validate(
             r#"
+              directive @join__graph(name: String) on ENUM_VALUE
+              directive @join__schema(
+                graph: join__Graph!
+                directives: [join__Directive!] = []
+              ) on SCHEMA
+              directive @join__field(
+                graph: join__Graph!
+                directives: [join__Directive!] = []
+              ) on FIELD_DEFINITION
+              scalar join__Directive
+
               enum join__Graph { SUBGRAPH @join__graph(name: "subgraph") }
               schema @join__schema(
                 graph: SUBGRAPH

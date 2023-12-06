@@ -1,4 +1,5 @@
 use anyhow::bail;
+use apollo_compiler::ast;
 use apollo_compiler::ast::DirectiveList;
 use apollo_compiler::executable::Argument;
 use apollo_compiler::name;
@@ -70,9 +71,9 @@ pub(super) fn join_graph_enum(names: &[&str]) -> ExtendedType {
         .iter()
         .map(|name| {
             (
-                name!(name),
+                ast::Name::new_unchecked((*name).into()),
                 EnumValueDefinition {
-                    value: name!(name),
+                    value: ast::Name::new_unchecked((*name).into()),
                     directives: DirectiveList(vec![
                         join_graph_directive(name, "http://unused").into()
                     ]),
@@ -131,10 +132,10 @@ pub(super) enum Key {
     NonResolvable(String),
 }
 
-fn join_type_directive(_graph: &str, key: &Key) -> Directive {
+fn join_type_directive(graph: &str, key: &Key) -> Directive {
     let mut arguments = vec![Argument {
         name: name!("graph"),
-        value: Value::Enum(name!(graph)).into(),
+        value: Value::Enum(ast::Name::new_unchecked(graph.into())).into(),
     }
     .into()];
 
@@ -245,12 +246,12 @@ directive @join__field(
 ) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 */
 
-fn join_field_directive(_graph: &str) -> Directive {
+fn join_field_directive(graph: &str) -> Directive {
     Directive {
         name: name!("join__field"),
         arguments: vec![Argument {
             name: name!("graph"),
-            value: Value::Enum(name!(graph)).into(),
+            value: Value::Enum(ast::Name::new_unchecked(graph.into())).into(),
         }
         .into()],
     }
@@ -297,14 +298,14 @@ directive @join__unionMember(
 pub(super) fn add_entities_field(
     ty: &mut ExtendedType,
     graph: &str,
-    _name: &str,
-    _entity_name: &str,
+    name: &str,
+    entity_name: &str,
 ) -> anyhow::Result<()> {
     match ty {
         ExtendedType::Object(ref mut ty) => {
             let ty = ty.make_mut();
             ty.fields
-                .entry(name!(name))
+                .entry(ast::Name::new_unchecked(name.into()))
                 .and_modify(|f| {
                     f.make_mut()
                         .directives
@@ -312,7 +313,7 @@ pub(super) fn add_entities_field(
                 })
                 .or_insert_with(|| {
                     FieldDefinition {
-                        name: name!(name),
+                        name: ast::Name::new_unchecked(name.into()),
                         arguments: vec![InputValueDefinition {
                             description: Default::default(),
                             directives: Default::default(),
@@ -323,7 +324,10 @@ pub(super) fn add_entities_field(
                         .into()],
                         directives: DirectiveList(vec![join_field_directive(graph).into()]),
                         description: None,
-                        ty: Type::Named(name!(entity_name)).non_null().list().non_null(),
+                        ty: Type::Named(ast::Name::new_unchecked(entity_name.into()))
+                            .non_null()
+                            .list()
+                            .non_null(),
                     }
                     .into()
                 });
@@ -358,11 +362,11 @@ pub(super) fn make_any_scalar() -> ExtendedType {
 
 use apollo_compiler::ast::Selection as GraphQLSelection;
 
-fn new_field(_name: String, selection: Option<Vec<GraphQLSelection>>) -> GraphQLSelection {
+fn new_field(name: String, selection: Option<Vec<GraphQLSelection>>) -> GraphQLSelection {
     GraphQLSelection::Field(
         apollo_compiler::ast::Field {
             alias: None,
-            name: name!(name),
+            name: ast::Name::new_unchecked(name.into()),
             arguments: Default::default(),
             directives: Default::default(),
             selection_set: selection.unwrap_or_default(),

@@ -27,9 +27,13 @@ scalar join__FieldSet @specifiedBy(url: "http://just-to-avoid-valiadation-warnin
 scalar link__Import @specifiedBy(url: "http://just-to-avoid-valiadation-warnings")
 
 enum link__Purpose {
-  "`SECURITY` features provide metadata necessary to securely resolve fields."
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
   SECURITY
-  "`EXECUTION` features provide metadata necessary for operation execution."
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
   EXECUTION
 }
 

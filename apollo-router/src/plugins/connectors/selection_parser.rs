@@ -693,8 +693,8 @@ impl ApplyTo for SubSelection {
 
 // GraphQL Selection Set -------------------------------------------------------
 
+use apollo_compiler::ast;
 use apollo_compiler::ast::Selection as GraphQLSelection;
-use apollo_compiler::name;
 
 impl From<Selection> for Vec<GraphQLSelection> {
     fn from(val: Selection) -> Vec<GraphQLSelection> {
@@ -705,11 +705,11 @@ impl From<Selection> for Vec<GraphQLSelection> {
     }
 }
 
-fn new_field(_name: String, selection: Option<Vec<GraphQLSelection>>) -> GraphQLSelection {
+fn new_field(name: String, selection: Option<Vec<GraphQLSelection>>) -> GraphQLSelection {
     GraphQLSelection::Field(
         apollo_compiler::ast::Field {
             alias: None,
-            name: name!(name),
+            name: ast::Name::new_unchecked(name.into()),
             arguments: Default::default(),
             directives: Default::default(),
             selection_set: selection.unwrap_or_default(),

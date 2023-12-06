@@ -4,13 +4,12 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use anyhow::bail;
+use apollo_compiler::ast;
 use apollo_compiler::ast::Selection;
-use apollo_compiler::name;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
 use apollo_compiler::schema::Name;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::NodeStr;
 use apollo_compiler::Schema;
 use tower::BoxError;
 
@@ -139,13 +138,13 @@ impl Connector {
             ConnectorType::RootField(field) => {
                 let mut changes = vec![
                     Change::Type {
-                        name: name!(field.parent_type_name.clone()),
+                        name: ast::Name::new(field.parent_type_name.clone())?,
                         graph: graph.clone(),
                         key: Key::None,
                     },
                     Change::Field {
-                        type_name: name!(field.parent_type_name.clone()),
-                        field_name: name!(field.field_name.clone()),
+                        type_name: ast::Name::new(field.parent_type_name.clone())?,
+                        field_name: ast::Name::new(field.field_name.clone())?,
                         graph: graph.clone(),
                     },
                 ];
@@ -172,12 +171,12 @@ impl Connector {
 
                 let mut changes = vec![
                     Change::Type {
-                        name: name!(ty.type_name.clone()),
+                        name: ast::Name::new(ty.type_name.clone())?,
                         graph: graph.clone(),
                         key: Key::Resolvable(key_string),
                     },
                     Change::MagicFinder {
-                        type_name: name!(ty.type_name.clone()),
+                        type_name: ast::Name::new(ty.type_name.clone())?,
                         graph: graph.clone(),
                     },
                 ];
@@ -218,17 +217,17 @@ impl Connector {
 
                 let mut changes = vec![
                     Change::Type {
-                        name: name!(field.parent_type_name.clone()),
+                        name: ast::Name::new(field.parent_type_name.clone())?,
                         graph: graph.clone(),
                         key: Key::Resolvable(key_string),
                     },
                     Change::Field {
-                        type_name: name!(field.parent_type_name.clone()),
-                        field_name: name!(field.field_name.clone()),
+                        type_name: ast::Name::new(field.parent_type_name.clone())?,
+                        field_name: ast::Name::new(field.field_name.clone())?,
                         graph: graph.clone(),
                     },
                     Change::MagicFinder {
-                        type_name: name!(field.parent_type_name.clone()),
+                        type_name: ast::Name::new(field.parent_type_name.clone())?,
                         graph: graph.clone(),
                     },
                 ];
@@ -426,7 +425,7 @@ fn upsert_type<'a>(
         .map(|op| op.as_str() == name)
         .unwrap_or(false)
     {
-        dest.schema_definition.make_mut().query = Some(name!(name));
+        dest.schema_definition.make_mut().query = Some(ast::Name::new(name)?.into());
     }
 
     if source
@@ -434,12 +433,12 @@ fn upsert_type<'a>(
         .map(|op| op.as_str() == name)
         .unwrap_or(false)
     {
-        dest.schema_definition.make_mut().mutation = Some(name!(name));
+        dest.schema_definition.make_mut().mutation = Some(ast::Name::new(name)?.into());
     }
 
     let ty = dest
         .types
-        .entry(name!(name))
+        .entry(ast::Name::new(name)?)
         .or_insert_with(|| clean_copy_of_type(original));
 
     Ok(ty)
@@ -450,7 +449,10 @@ fn add_type<'a>(
     name: &str,
     ty: ExtendedType,
 ) -> anyhow::Result<&'a mut ExtendedType> {
-    Ok(dest.types.entry(name!(name)).or_insert_with(|| ty))
+    Ok(dest
+        .types
+        .entry(ast::Name::new(name)?)
+        .or_insert_with(|| ty))
 }
 
 fn clean_copy_of_field(f: &FieldDefinition) -> FieldDefinition {
@@ -509,7 +511,7 @@ fn recurse_selection(
     let mut mutations = Vec::new();
 
     mutations.push(Change::Type {
-        name: NodeStr::new(&type_name.clone()),
+        name: ast::Name::new(&type_name.clone())?,
         graph: graph.clone(),
         key: Key::None,
     });
@@ -521,7 +523,7 @@ fn recurse_selection(
                     Selection::Field(selection) => {
                         let field = obj
                             .fields
-                            .get(&NodeStr::new(selection.name.to_string().as_str()))
+                            .get(&ast::Name::new(selection.name.to_string().as_str())?)
                             .ok_or(anyhow!(
                                 "missing field {} for type {}",
                                 selection.name.to_string().as_str(),
@@ -531,7 +533,7 @@ fn recurse_selection(
                         let field_type_name = field.ty.inner_named_type();
 
                         mutations.push(Change::Field {
-                            type_name: NodeStr::new(&type_name.clone()),
+                            type_name: ast::Name::new(&type_name.clone())?,
                             field_name: selection.name.clone(),
                             graph: graph.clone(),
                         });

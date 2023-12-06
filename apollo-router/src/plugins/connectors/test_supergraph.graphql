@@ -16,6 +16,7 @@ schema
     ]
   ) {
   query: Query
+  mutation: Mutation
 }
 
 directive @join__schema(
@@ -126,6 +127,48 @@ enum link__Purpose {
   `EXECUTION` features provide metadata necessary for operation execution.
   """
   EXECUTION
+}
+
+type Mutation @join__type(graph: SIMPLE) {
+  mutation(input: MutationInput): MutationOutput
+    @join__field(
+      graph: SIMPLE
+      directives: [
+        {
+          name: "sourceField"
+          args: {
+            api: "a"
+            http: {
+              POST: "/mutation"
+              body: """
+              nums: .input.nums
+              values: .input.values {
+                num
+              }
+              """
+            }
+            selection: ".data { success }"
+          }
+          source: {
+            url: "https://specs.apollo.dev/source/v0.1"
+            name: "sourceField"
+          }
+        }
+      ]
+    )
+}
+
+input MutationInput @join__type(graph: SIMPLE) {
+  nums: [Int!]
+  values: [MutationNestedInput!]
+}
+
+input MutationNestedInput @join__type(graph: SIMPLE) {
+  num: Int
+}
+
+type MutationOutput @join__type(graph: SIMPLE) {
+  success: Boolean
 }
 
 type Nested @join__type(graph: SIMPLE) {

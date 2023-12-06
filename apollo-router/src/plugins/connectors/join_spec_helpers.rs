@@ -278,6 +278,27 @@ pub(super) fn add_join_field_directive(
     Ok(())
 }
 
+pub(super) fn add_input_join_field_directive(
+    field: &mut InputValueDefinition,
+    graph: &str,
+) -> anyhow::Result<()> {
+    let exists = field.directives.iter().any(|d| {
+        d.name == "join__field"
+            && d.argument_by_name("graph")
+                .and_then(|val| val.as_enum())
+                .map(|val| val.as_str() == graph)
+                .unwrap_or(false)
+    });
+
+    if exists {
+        return Ok(());
+    }
+
+    field.directives.push(join_field_directive(graph).into());
+
+    Ok(())
+}
+
 /*
 TODO:
 

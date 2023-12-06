@@ -529,6 +529,10 @@ impl SourceType {
             None => vec![],
         }
     }
+
+    pub(super) fn body(&self) -> Option<JSONSelection> {
+        self.http.as_ref().and_then(|http| http.body.clone())
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -818,6 +822,10 @@ impl SourceField {
             Some(http) => http.path_template.required_parameters(),
             None => vec![],
         }
+    }
+
+    pub(super) fn body(&self) -> Option<JSONSelection> {
+        self.http.as_ref().and_then(|http| http.body.clone())
     }
 }
 

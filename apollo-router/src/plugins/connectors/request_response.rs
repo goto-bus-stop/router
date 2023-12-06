@@ -28,8 +28,7 @@ struct RequestParams {
     base_uri: http::Uri,
     path_template: URLPathTemplate,
     method: http::Method,
-    #[allow(dead_code)]
-    body: Option<Selection>, // TODO
+    body: Option<JSONSelection>,
     inputs: RequestInputs,
 }
 
@@ -44,16 +43,22 @@ impl TryFrom<RequestParams> for http::Request<hyper::Body> {
             .path_template
             .generate_path(&inputs)
             .map_err(BoxError::from)?;
-        let uri = append_path(&uri, &path)?; // TODO
-
-        // TODO construct body if necessary
+        let uri = append_path(&uri, &path)?;
 
         // TODO construct headers if necessary
+
+        let body = if let Some(sel) = params.body {
+            let (body, _) = sel.apply_to(&inputs);
+            hyper::Body::from(serde_json::to_vec(&body)?)
+        } else {
+            hyper::Body::empty()
+        };
 
         http::Request::builder()
             .method(params.method)
             .uri(uri)
-            .body(hyper::Body::empty())
+            .header("content-type", "application/json") // TODO
+            .body(body)
             .map_err(BoxError::from)
     }
 }
@@ -164,7 +169,7 @@ fn request_params_to_requests(
                 base_uri: connector.base_uri()?,
                 path_template: connector.path_template().clone(),
                 method: connector.method(),
-                body: None, // TODO
+                body: connector.body(),
                 inputs,
             }
             .try_into()

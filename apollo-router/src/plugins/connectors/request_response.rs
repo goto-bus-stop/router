@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use apollo_compiler::ast::Definition;
 use apollo_compiler::executable::Selection;
+use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Schema;
 use serde_json_bytes::ByteString;
@@ -134,7 +135,7 @@ enum ResponseTypeName {
 pub(super) fn make_requests(
     request: SubgraphRequest,
     connector: &Connector,
-    schema: Arc<Schema>,
+    schema: Arc<Valid<Schema>>,
 ) -> Result<Vec<(http::Request<hyper::Body>, ResponseParams)>, BoxError> {
     match connector.ty.as_ref() {
         ConnectorType::RootField(..) => {
@@ -186,7 +187,7 @@ fn request_params_to_requests(
 /// used multiple times with aliases.
 fn root_fields(
     request: &SubgraphRequest,
-    schema: Arc<Schema>,
+    schema: Arc<Valid<Schema>>,
 ) -> Result<Vec<(ResponseKey, RequestInputs)>, BoxError> {
     let query = request
         .subgraph_request
@@ -195,7 +196,8 @@ fn root_fields(
         .clone()
         .ok_or_else(|| BoxError::from("missing query"))?;
 
-    let doc = ExecutableDocument::parse(&schema, query, "op.graphql");
+    let doc = ExecutableDocument::parse(&schema, query, "op.graphql")
+        .map_err(|_| "cannot parse operation document")?;
 
     let op = doc
         .get_operation(request.subgraph_request.body().operation_name.as_deref())
@@ -244,7 +246,7 @@ fn root_fields(
 /// Return a list of requests to make, as well as the response key (index in list) for each.
 fn entities_from_request(
     request: &SubgraphRequest,
-    _schema: Arc<Schema>,
+    _schema: Arc<Valid<Schema>>,
 ) -> Result<Vec<(ResponseKey, RequestInputs)>, BoxError> {
     request
         .subgraph_request
@@ -293,7 +295,7 @@ fn entities_from_request(
 /// Return a list of requests to make, as well as the response key (index in list and name/alias of field) for each.
 fn entities_with_fields_from_request(
     request: &SubgraphRequest,
-    _schema: Arc<Schema>,
+    _schema: Arc<Valid<Schema>>,
 ) -> Result<Vec<(ResponseKey, RequestInputs)>, BoxError> {
     let query = request
         .subgraph_request
@@ -303,7 +305,8 @@ fn entities_with_fields_from_request(
         .ok_or_else(|| BoxError::from("missing query"))?;
 
     // Use the AST because the `_entities` field is not actually present in the supergraph
-    let doc = apollo_compiler::ast::Document::parse(query, "op.graphql");
+    let doc = apollo_compiler::ast::Document::parse(query, "op.graphql")
+        .map_err(|e| "cannot parse operation document")?;
 
     let op = doc
         .definitions
@@ -571,7 +574,7 @@ mod tests {
 
     #[test]
     fn root_fields() -> anyhow::Result<()> {
-        let schema = Arc::new(Schema::parse(
+        let schema = Arc::new(Schema::parse_and_validate(
             r#"
             scalar JSON
             type Query {
@@ -581,7 +584,7 @@ mod tests {
             }
           "#,
             "test.graphql",
-        ));
+        ).unwrap());
 
         let req = crate::services::SubgraphRequest::fake_builder()
             .subgraph_request(
@@ -791,10 +794,9 @@ mod tests {
 
     #[test]
     fn entities_with_fields_from_request() -> anyhow::Result<()> {
-        let schema = Arc::new(Schema::parse(
-            r#"type Query { hello: String }"#,
-            "test.graphql",
-        ));
+        let schema = Arc::new(
+            Schema::parse_and_validate(r#"type Query { hello: String }"#, "test.graphql").unwrap(),
+        );
 
         let req = crate::services::SubgraphRequest::fake_builder()
             .subgraph_request(
@@ -933,7 +935,7 @@ mod tests {
             )
             .build();
 
-        let schema = Schema::parse(
+        let schema = Schema::parse_and_validate(
             r#"
               enum join__Graph { SUBGRAPH @join__graph(name: "subgraph") }
               schema @join__schema(
@@ -949,7 +951,7 @@ mod tests {
               }
             "#,
             "test.graphql",
-        );
+        ).unwrap();
 
         let apis = SourceAPI::from_schema(&schema)?;
         let mut fields = SourceField::from_schema(&schema)?;
@@ -1018,7 +1020,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_requests() -> Result<(), BoxError> {
-        let schema = Schema::parse(
+        let schema = Schema::parse_and_validate(
             r#"
               enum join__Graph { SUBGRAPH @join__graph(name: "subgraph") }
               schema @join__schema(
@@ -1034,7 +1036,7 @@ mod tests {
               }
             "#,
             "test.graphql",
-        );
+        ).unwrap();
 
         let apis = SourceAPI::from_schema(&schema)?;
         let mut fields = SourceField::from_schema(&schema)?;

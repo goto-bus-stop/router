@@ -5,8 +5,11 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use anyhow::bail;
 use apollo_compiler::ast::Selection;
+use apollo_compiler::name;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
+use apollo_compiler::schema::Name;
+use apollo_compiler::validation::Valid;
 use apollo_compiler::NodeStr;
 use apollo_compiler::Schema;
 use tower::BoxError;
@@ -136,13 +139,13 @@ impl Connector {
             ConnectorType::RootField(field) => {
                 let mut changes = vec![
                     Change::Type {
-                        name: field.parent_type_name.clone().into(),
+                        name: name!(field.parent_type_name.clone()),
                         graph: graph.clone(),
                         key: Key::None,
                     },
                     Change::Field {
-                        type_name: field.parent_type_name.clone().into(),
-                        field_name: field.field_name.clone().into(),
+                        type_name: name!(field.parent_type_name.clone()),
+                        field_name: name!(field.field_name.clone()),
                         graph: graph.clone(),
                     },
                 ];
@@ -169,12 +172,12 @@ impl Connector {
 
                 let mut changes = vec![
                     Change::Type {
-                        name: ty.type_name.clone().into(),
+                        name: name!(ty.type_name.clone()),
                         graph: graph.clone(),
                         key: Key::Resolvable(key_string),
                     },
                     Change::MagicFinder {
-                        type_name: ty.type_name.clone().into(),
+                        type_name: name!(ty.type_name.clone()),
                         graph: graph.clone(),
                     },
                 ];
@@ -215,17 +218,17 @@ impl Connector {
 
                 let mut changes = vec![
                     Change::Type {
-                        name: field.parent_type_name.clone().into(),
+                        name: name!(field.parent_type_name.clone()),
                         graph: graph.clone(),
                         key: Key::Resolvable(key_string),
                     },
                     Change::Field {
-                        type_name: field.parent_type_name.clone().into(),
-                        field_name: field.field_name.clone().into(),
+                        type_name: name!(field.parent_type_name.clone()),
+                        field_name: name!(field.field_name.clone()),
                         graph: graph.clone(),
                     },
                     Change::MagicFinder {
-                        type_name: field.parent_type_name.clone().into(),
+                        type_name: name!(field.parent_type_name.clone()),
                         graph: graph.clone(),
                     },
                 ];
@@ -302,7 +305,7 @@ impl Connector {
     pub(crate) fn create_requests(
         &self,
         subgraph_request: SubgraphRequest,
-        schema: Arc<Schema>,
+        schema: Arc<Valid<Schema>>,
     ) -> Result<Vec<(http::Request<hyper::Body>, ResponseParams)>, BoxError> {
         make_requests(subgraph_request, self, schema.clone())
     }
@@ -323,20 +326,16 @@ impl Connector {
 #[derive(Debug)]
 pub(super) enum Change {
     /// Include a type in the schema and add the `@join__type` directive
-    Type {
-        name: NodeStr,
-        graph: String,
-        key: Key,
-    },
+    Type { name: Name, graph: String, key: Key },
     /// Include a field on a type in the schema and add the `@join__field` directive
     /// TODO: currently assumes that the type already exists (order matters!)
     Field {
-        type_name: NodeStr,
-        field_name: NodeStr,
+        type_name: Name,
+        field_name: Name,
         graph: String,
     },
     /// Add a special field to Query that we can use instead of `_entities`
-    MagicFinder { type_name: NodeStr, graph: String },
+    MagicFinder { type_name: Name, graph: String },
 }
 
 impl Change {
@@ -383,8 +382,8 @@ impl Change {
 fn upsert_field<'a>(
     source: &Schema,
     dest: &'a mut Schema,
-    type_name: &NodeStr,
-    field_name: &NodeStr,
+    type_name: &Name,
+    field_name: &Name,
 ) -> anyhow::Result<&'a mut FieldDefinition> {
     let new_ty = dest
         .types
@@ -427,7 +426,7 @@ fn upsert_type<'a>(
         .map(|op| op.as_str() == name)
         .unwrap_or(false)
     {
-        dest.schema_definition.make_mut().query = Some(name.into());
+        dest.schema_definition.make_mut().query = Some(name!(name));
     }
 
     if source
@@ -435,12 +434,12 @@ fn upsert_type<'a>(
         .map(|op| op.as_str() == name)
         .unwrap_or(false)
     {
-        dest.schema_definition.make_mut().mutation = Some(name.into());
+        dest.schema_definition.make_mut().mutation = Some(name!(name));
     }
 
     let ty = dest
         .types
-        .entry(name.into())
+        .entry(name!(name))
         .or_insert_with(|| clean_copy_of_type(original));
 
     Ok(ty)
@@ -451,7 +450,7 @@ fn add_type<'a>(
     name: &str,
     ty: ExtendedType,
 ) -> anyhow::Result<&'a mut ExtendedType> {
-    Ok(dest.types.entry(NodeStr::new(name)).or_insert_with(|| ty))
+    Ok(dest.types.entry(name!(name)).or_insert_with(|| ty))
 }
 
 fn clean_copy_of_field(f: &FieldDefinition) -> FieldDefinition {
@@ -612,10 +611,13 @@ mod tests {
         let requests_and_params = connector
             .create_requests(
                 subgraph_request,
-                Arc::new(Schema::parse(
-                    "type Query { field: String }".to_string(),
-                    "schema.graphql",
-                )),
+                Arc::new(
+                    Schema::parse_and_validate(
+                        "type Query { field: String }".to_string(),
+                        "schema.graphql",
+                    )
+                    .unwrap(),
+                ),
             )
             .unwrap();
         insta::assert_debug_snapshot!(requests_and_params);

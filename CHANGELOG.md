@@ -944,7 +944,7 @@ By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apol
 
 ### Fix validation error with `ID` variable values overflowing 32-bit integers ([Issue #3873](https://github.com/apollographql/router/issues/3873))
 
-Input values for variables of type `ID` were previously validated as "either like a GraphQL `Int` or like a GraphQL `String`". GraphQL `Int` is specified as a signed 32-bit integer, such that values that overflow fail validation. Applying this range restriction to `ID` values was incorrect. Instead, validation for `ID` now accepts any JSON integer or JSON string value, so that IDs larger than 32 bits can be used.
+Input values for variables of type `ID` were previously validated as "either like a GraphQL `Int` or like a GraphQL `String`". GraphQL `Int` is specified as a signed 32-bit integer, such that values that overflow fail validation. Applying this range restriction to `ID` values was incorrect. Instead, validation for `ID` now accepts any JSON integer or JSON string value, so that IDs larger than 32 bits can be used.
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/3896
 
@@ -2834,7 +2834,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Small gzip'd responses no longer cause a panic
 
-A regression introduced in v1.17.0 — again related to compression — has been resolved.  This occurred when small responses used invalid buffer management, causing a panic.
+A regression introduced in v1.17.0 — again related to compression — has been resolved.  This occurred when small responses used invalid buffer management, causing a panic.
 
 By [@dbanty](https://github.com/dbanty) in https://github.com/apollographql/router/pull/3047
 
@@ -3368,7 +3368,7 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 
 ### Distributed caching: Don't send Redis' `CLIENT SETNAME` ([PR #2825](https://github.com/apollographql/router/pull/2825))
 
-We won't send [the `CLIENT SETNAME` command](https://redis.io/commands/client-setname/) to connected Redis servers.  This resolves an incompatibility with some Redis-compatible servers since not all "Redis-compatible" offerings (like Google Memorystore) actually support _every_ Redis command.  We weren't actually necessitating this feature, it was just a feature that could be enabled optionally on our Redis client.  No Router functionality is impacted.
+We won't send [the `CLIENT SETNAME` command](https://redis.io/commands/client-setname/) to connected Redis servers.  This resolves an incompatibility with some Redis-compatible servers since not all "Redis-compatible" offerings (like Google Memorystore) actually support _every_ Redis command.  We weren't actually necessitating this feature, it was just a feature that could be enabled optionally on our Redis client.  No Router functionality is impacted.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2825
 
@@ -4538,7 +4538,7 @@ By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 ### Optimize header propagation plugin's regular expression matching ([PR #2392](https://github.com/apollographql/router/pull/2392))
 
-We've changed the header propagation plugins' behavior to reduce the chance of memory allocations occurring when applying regex-based header propagation rules.
+We've changed the header propagation plugins' behavior to reduce the chance of memory allocations occurring when applying regex-based header propagation rules.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2392
 
@@ -4588,7 +4588,7 @@ By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 Configuration changes will be [automatically migrated on load](https://www.apollographql.com/docs/router/configuration/overview#upgrading-your-router-configuration). However, you should update your source configuration files as these will become breaking changes in a future major release.
 
-### Defer support graduates from preview ([Issue #2368](https://github.com/apollographql/router/issues/2368))
+### Defer support graduates from preview ([Issue #2368](https://github.com/apollographql/router/issues/2368))
 
 We're pleased to announce that [`@defer` support](https://www.apollographql.com/docs/router/executing-operations/defer-support/) has been promoted to general availability in accordance with our [product launch stages](https://www.apollographql.com/docs/resources/product-launch-stages/).
 

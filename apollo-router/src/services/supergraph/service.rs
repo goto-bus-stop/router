@@ -327,7 +327,6 @@ async fn service_call(
                             .build()
                             .await,
                     )
-                    .instrument(tracing::info_span!("execution", "otel.kind" = "INTERNAL"))
                     .await?;
 
                 let ExecutionResponse { response, context } = execution_response;

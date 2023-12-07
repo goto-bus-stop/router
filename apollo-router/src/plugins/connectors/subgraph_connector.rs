@@ -30,6 +30,9 @@ use tower::ServiceExt;
 
 use super::directives::HTTPSourceAPI;
 use super::directives::SourceAPI;
+use super::outer::map_request;
+use super::outer::map_response;
+use super::request_response::HackEntityResponseKey;
 use super::Connector;
 use crate::error::ConnectorDirectiveError;
 use crate::error::FetchError;
@@ -76,7 +79,7 @@ use tower::Service;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 
-/// OUTER SUBGRAPH SERVICE
+/// "OUTER" SUBGRAPH -> "INNER" SUPERGRAPH SERVICE
 
 impl tower::Service<SubgraphRequest> for SubgraphConnector {
     type Response = SubgraphResponse;
@@ -88,36 +91,22 @@ impl tower::Service<SubgraphRequest> for SubgraphConnector {
     }
 
     fn call(&mut self, request: SubgraphRequest) -> Self::Future {
-        let supergraph_request = SupergraphRequest {
-            supergraph_request: request.subgraph_request,
-            context: request.context,
+        let context = request.context.clone();
+        let inner = match map_request(request) {
+            Ok(inner) => inner,
+            Err(e) => return Box::pin(async move { Err(BoxError::from(e)) }),
         };
 
         let query_analysis_layer = self.query_analysis_layer.clone();
-
         let service = self.creator.make_connector();
 
         Box::pin(async move {
-            let res = match query_analysis_layer
-                .supergraph_request(supergraph_request)
-                .await
-            {
+            let res = match query_analysis_layer.supergraph_request(inner).await {
                 Ok(req) => service.oneshot(req).await?,
                 Err(res) => res,
             };
 
-            let (parts, mut body) = res.response.into_parts();
-
-            // todo: multipart support in connectors ? :D
-            let response = http::Response::from_parts(
-                parts,
-                body.next().await.ok_or("connector: empty response body")?,
-            );
-
-            Ok(SubgraphResponse {
-                response,
-                context: res.context,
-            })
+            map_response(res, &context).await.map_err(BoxError::from)
         })
     }
 }
@@ -227,7 +216,7 @@ where
             };
 
             let subgraph_response = connector.map_http_responses(responses, context).await?;
-            // dbg!(&subgraph_response);
+            dbg!(&subgraph_response.response.body().data);
 
             Ok(subgraph_response)
 

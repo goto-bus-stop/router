@@ -23,6 +23,8 @@ use crate::Context;
 const REPRESENTATIONS_VAR: &str = "representations";
 const ENTITIES: &str = "_entities";
 
+pub(super) struct HackEntityResponseKey(pub(super) String);
+
 #[derive(Debug)]
 struct RequestParams {
     base_uri: http::Uri,
@@ -152,7 +154,7 @@ pub(super) fn make_requests(
             Ok(request_params_to_requests(connector, parts)?)
         }
         ConnectorType::EntityField(..) => {
-            let parts = entities_with_fields_from_request(&request, schema)?;
+            let parts = entities_with_fields_from_request(&request, schema, connector)?;
             Ok(request_params_to_requests(connector, parts)?)
         }
     }
@@ -301,7 +303,21 @@ fn entities_from_request(
 fn entities_with_fields_from_request(
     request: &SubgraphRequest,
     _schema: Arc<Valid<Schema>>,
+    connector: &Connector,
 ) -> Result<Vec<(ResponseKey, RequestInputs)>, BoxError> {
+    let typename = match connector.ty.as_ref() {
+        ConnectorType::EntityField(source_field) => &source_field.parent_type_name,
+        _ => unreachable!(),
+    };
+
+    let entity_response_key = request
+        .context
+        .private_entries
+        .lock()
+        .get::<HackEntityResponseKey>()
+        .map(|k| k.0.clone())
+        .unwrap_or(ENTITIES.to_string());
+
     let query = request
         .subgraph_request
         .body()
@@ -313,6 +329,7 @@ fn entities_with_fields_from_request(
     let doc = apollo_compiler::ast::Document::parse(query, "op.graphql")
         .map_err(|_| "cannot parse operation document")?;
 
+    // Assume a single operation (because this is from a query plan)
     let op = doc
         .definitions
         .iter()
@@ -331,7 +348,7 @@ fn entities_with_fields_from_request(
         }
         _ => unreachable!(),
     }?;
-    debug_assert!(entities_field.name.as_str() == ENTITIES);
+    debug_assert!(entities_field.name.as_str() == entity_response_key);
 
     let types_and_fields = entities_field
         .selection_set
@@ -339,10 +356,12 @@ fn entities_with_fields_from_request(
         .map(|selection| match selection {
             apollo_compiler::ast::Selection::Field(f) => {
                 // allow __typename outside of the type condition
-                if f.response_name().to_string().starts_with("__") {
+                if f.name == "__typename" {
                     Ok(vec![])
                 } else {
-                    Err(BoxError::from("_entities selection can't be a field"))
+                    // if we're using the magic finder field, the query planner doesn't use an inline fragment
+                    // (because the output type in not an interface)
+                    Ok(vec![(typename.clone(), f)])
                 }
             }
 
@@ -424,6 +443,13 @@ pub(super) async fn handle_responses(
     let mut data = serde_json_bytes::Map::new();
     let mut errors = Vec::new();
 
+    let entity_response_key = context
+        .private_entries
+        .lock()
+        .get::<HackEntityResponseKey>()
+        .map(|k| k.0.clone())
+        .unwrap_or(ENTITIES.to_string());
+
     for response in responses {
         let (parts, body) = response.into_parts();
 
@@ -486,7 +512,9 @@ pub(super) async fn handle_responses(
                             d => Some(d),
                         };
 
-                        let entities = data.entry(ENTITIES).or_insert(Value::Array(vec![]));
+                        let entities = data
+                            .entry(entity_response_key.clone())
+                            .or_insert(Value::Array(vec![]));
                         entities
                             .as_array_mut()
                             .ok_or_else(|| BoxError::from("entities is not an array"))?
@@ -503,7 +531,7 @@ pub(super) async fn handle_responses(
                         let ResponseTypeName::Concrete(typename) = typename;
 
                         let entities = data
-                            .entry(ENTITIES)
+                            .entry(entity_response_key.clone())
                             .or_insert(Value::Array(vec![]))
                             .as_array_mut()
                             .ok_or_else(|| BoxError::from("entities is not an array"))?;
@@ -799,9 +827,55 @@ mod tests {
 
     #[test]
     fn entities_with_fields_from_request() -> anyhow::Result<()> {
-        let schema = Arc::new(
-            Schema::parse_and_validate(r#"type Query { hello: String }"#, "test.graphql").unwrap(),
-        );
+        let partial_sdl = r#"
+        directive @join__graph(name: String) on ENUM_VALUE
+        directive @join__schema(
+          graph: join__Graph!
+          directives: [join__Directive!] = []
+        ) on SCHEMA
+        directive @join__field(
+          graph: join__Graph!
+          directives: [join__Directive!] = []
+        ) on FIELD_DEFINITION
+        scalar join__Directive
+
+        enum join__Graph {
+          CONTACTS @join__graph(name: "contacts")
+        }
+
+        schema
+          @join__schema(
+            graph: CONTACTS
+            directives: [
+              {
+                name: "sourceAPI"
+                args: {
+                  name: "api"
+                  http: { baseURL: "http://localhost:4002/contacts/" }
+                }
+              }
+            ]
+          )
+        { query: Query }
+
+        type Query {
+          field: String
+            @join__field(
+              graph: CONTACTS
+              directives: [
+                {
+                  name: "sourceField"
+                  args: {
+                    api: "contacts"
+                    http: { GET: "/contacts/{contactId}" }
+                    selection: "id name"
+                  }
+                }
+              ]
+            )
+        }
+        "#;
+        let schema = Arc::new(Schema::parse_and_validate(partial_sdl, "test.graphql").unwrap());
 
         let req = crate::services::SubgraphRequest::fake_builder()
             .subgraph_request(
@@ -838,7 +912,16 @@ mod tests {
             )
             .build();
 
-        assert_debug_snapshot!(super::entities_with_fields_from_request(&req, schema.clone()).unwrap(), @r###"
+        let mut source_apis = SourceAPI::from_schema(&schema).unwrap();
+        let mut source_fields = SourceField::from_schema(&schema).unwrap();
+
+        let connector = Connector::new(
+            "CONNECTOR_0".to_string(),
+            source_apis.remove("contacts_api").unwrap(),
+            ConnectorType::EntityField(source_fields.remove(0)),
+        );
+
+        assert_debug_snapshot!(super::entities_with_fields_from_request(&req, schema.clone(), &connector).unwrap(), @r###"
         [
             (
                 EntityField {

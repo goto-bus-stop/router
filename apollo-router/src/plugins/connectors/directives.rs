@@ -383,14 +383,12 @@ pub(super) struct SourceType {
 }
 
 impl SourceType {
-    pub(super) fn from_schema(
-        schema: &Schema,
-    ) -> Result<HashMap<String, Vec<Self>>, ConnectorDirectiveError> {
+    pub(super) fn from_schema(schema: &Schema) -> Result<Vec<Self>, ConnectorDirectiveError> {
         let graph_names = graph_enum_map(schema).ok_or_else(|| {
             ConnectorDirectiveError::InvalidJoinDirective("Missing join__Graph enum".to_string())
         })?;
 
-        let mut result: HashMap<String, Vec<Self>> = HashMap::new();
+        let mut result: Vec<Self> = Vec::new();
 
         for (name, ty) in &schema.types {
             let directives = ty
@@ -413,8 +411,7 @@ impl SourceType {
                 .collect::<Vec<_>>();
 
             if !source_types.is_empty() {
-                result.insert(
-                    name.to_string(),
+                result.extend(
                     source_types
                         .iter()
                         .map(|(graph, args)| {

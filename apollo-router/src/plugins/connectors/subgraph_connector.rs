@@ -27,6 +27,7 @@ use regex::Regex;
 use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tracing::Instrument;
 
 use super::directives::HTTPSourceAPI;
 use super::directives::SourceAPI;
@@ -50,6 +51,10 @@ use crate::spec::Schema;
 use crate::spec::Selection;
 use crate::Configuration;
 
+pub(crate) const CONNECTOR_SPAN_NAME: &str = "connector";
+pub(crate) const CONNECTOR_HTTP_CALL_SPAN_NAME: &str = "http_connector";
+pub(crate) const CONNECTOR_RESPONSE_PROCESSING_SPAN_NAME: &str =
+    "http_connector_response_processing";
 #[derive(Clone)]
 pub(crate) struct SubgraphConnector {
     creator: SupergraphCreator,
@@ -102,7 +107,12 @@ impl tower::Service<SubgraphRequest> for SubgraphConnector {
 
         Box::pin(async move {
             let res = match query_analysis_layer.supergraph_request(inner).await {
-                Ok(req) => service.oneshot(req).await?,
+                Ok(req) => {
+                    service
+                        .oneshot(req)
+                        .instrument(tracing::info_span!(CONNECTOR_SPAN_NAME))
+                        .await?
+                }
                 Err(res) => res,
             };
 
@@ -208,14 +218,19 @@ where
                 Ok::<_, BoxError>(res)
             });
 
-            let results = futures::future::try_join_all(tasks).await;
+            let results = futures::future::try_join_all(tasks)
+                .instrument(tracing::info_span!(CONNECTOR_HTTP_CALL_SPAN_NAME))
+                .await;
 
             let responses = match results {
                 Ok(responses) => responses,
                 Err(e) => return Err(BoxError::from(e)),
             };
 
-            let subgraph_response = connector.map_http_responses(responses, context).await?;
+            let subgraph_response = connector
+                .map_http_responses(responses, context)
+                .instrument(tracing::info_span!(CONNECTOR_RESPONSE_PROCESSING_SPAN_NAME))
+                .await?;
             dbg!(&subgraph_response.response.body().data);
 
             Ok(subgraph_response)

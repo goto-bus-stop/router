@@ -79,11 +79,13 @@ mod tests {
                 .cloned()
                 .collect::<Vec<_>>(),
             vec![
-                "CONNECTOR_HELLO_0".to_string(),
-                "CONNECTOR_HELLO_WORLD_0".to_string(),
-                "CONNECTOR_MUTATION_MUTATION_1".to_string(),
-                "CONNECTOR_QUERY_HELLO_2".to_string(),
-                "CONNECTOR_QUERY_WITHARGUMENTS_3".to_string(),
+                "CONNECTOR_ENTITYACROSSBOTH_0".to_string(),
+                "CONNECTOR_ENTITYACROSSBOTH_E_0".to_string(),
+                "CONNECTOR_HELLO_1".to_string(),
+                "CONNECTOR_HELLO_WORLD_1".to_string(),
+                "CONNECTOR_MUTATION_MUTATION_2".to_string(),
+                "CONNECTOR_QUERY_HELLO_3".to_string(),
+                "CONNECTOR_QUERY_WITHARGUMENTS_4".to_string()
             ]
         );
 

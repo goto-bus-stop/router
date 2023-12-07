@@ -38,51 +38,61 @@ enum link__Purpose {
   EXECUTION
 }
 
-type Hello @join__type(graph: CONNECTOR_HELLO_0, key: "id") @join__type(graph: CONNECTOR_HELLO_0) @join__type(graph: CONNECTOR_HELLO_0) @join__type(graph: CONNECTOR_HELLO_WORLD_0, key: "id") @join__type(graph: CONNECTOR_HELLO_WORLD_0) @join__type(graph: CONNECTOR_QUERY_HELLO_2) {
-  id: ID! @join__field(graph: CONNECTOR_HELLO_0) @join__field(graph: CONNECTOR_HELLO_WORLD_0) @join__field(graph: CONNECTOR_QUERY_HELLO_2)
-  field: String @join__field(graph: CONNECTOR_HELLO_0)
-  world: World @join__field(graph: CONNECTOR_HELLO_WORLD_0)
+type EntityAcrossBoth @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0, key: "a b") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0, key: "a b") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) {
+  d: String @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_0)
+  a: ID @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_E_0)
+  b: ID @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_E_0)
+  e: String @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_E_0)
 }
 
-scalar _Any @specifiedBy(url: "https://whatever") @join__type(graph: CONNECTOR_HELLO_0) @join__type(graph: CONNECTOR_HELLO_WORLD_0)
+scalar _Any @specifiedBy(url: "https://whatever") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) @join__type(graph: CONNECTOR_HELLO_1) @join__type(graph: CONNECTOR_HELLO_WORLD_1)
 
-type Query @join__type(graph: CONNECTOR_HELLO_0) @join__type(graph: CONNECTOR_HELLO_WORLD_0) @join__type(graph: CONNECTOR_QUERY_HELLO_2) @join__type(graph: CONNECTOR_QUERY_WITHARGUMENTS_3) {
-  _Hello_finder(representations: [_Any!]!): [Hello!]! @join__field(graph: CONNECTOR_HELLO_0) @join__field(graph: CONNECTOR_HELLO_WORLD_0)
-  hello: Hello @join__field(graph: CONNECTOR_QUERY_HELLO_2)
-  withArguments(value: String, done: Boolean): String @join__field(graph: CONNECTOR_QUERY_WITHARGUMENTS_3)
+type Query @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) @join__type(graph: CONNECTOR_HELLO_1) @join__type(graph: CONNECTOR_HELLO_WORLD_1) @join__type(graph: CONNECTOR_QUERY_HELLO_3) @join__type(graph: CONNECTOR_QUERY_WITHARGUMENTS_4) {
+  _EntityAcrossBoth_finder(representations: [_Any!]!): [EntityAcrossBoth!]! @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_E_0)
+  _Hello_finder(representations: [_Any!]!): [Hello!]! @join__field(graph: CONNECTOR_HELLO_1) @join__field(graph: CONNECTOR_HELLO_WORLD_1)
+  hello: Hello @join__field(graph: CONNECTOR_QUERY_HELLO_3)
+  withArguments(value: String, done: Boolean): String @join__field(graph: CONNECTOR_QUERY_WITHARGUMENTS_4)
 }
 
-type World @join__type(graph: CONNECTOR_HELLO_WORLD_0) {
-  field: String @join__field(graph: CONNECTOR_HELLO_WORLD_0)
-  nested: Nested @join__field(graph: CONNECTOR_HELLO_WORLD_0)
+type Hello @join__type(graph: CONNECTOR_HELLO_1, key: "id") @join__type(graph: CONNECTOR_HELLO_1) @join__type(graph: CONNECTOR_HELLO_1) @join__type(graph: CONNECTOR_HELLO_WORLD_1, key: "id") @join__type(graph: CONNECTOR_HELLO_WORLD_1) @join__type(graph: CONNECTOR_QUERY_HELLO_3) {
+  id: ID! @join__field(graph: CONNECTOR_HELLO_1) @join__field(graph: CONNECTOR_HELLO_WORLD_1) @join__field(graph: CONNECTOR_QUERY_HELLO_3)
+  field: String @join__field(graph: CONNECTOR_HELLO_1)
+  world: World @join__field(graph: CONNECTOR_HELLO_WORLD_1)
 }
 
-type Nested @join__type(graph: CONNECTOR_HELLO_WORLD_0) {
-  field: String @join__field(graph: CONNECTOR_HELLO_WORLD_0)
+type World @join__type(graph: CONNECTOR_HELLO_WORLD_1) {
+  field: String @join__field(graph: CONNECTOR_HELLO_WORLD_1)
+  nested: Nested @join__field(graph: CONNECTOR_HELLO_WORLD_1)
 }
 
-type Mutation @join__type(graph: CONNECTOR_MUTATION_MUTATION_1) {
-  mutation(input: MutationInput): MutationOutput @join__field(graph: CONNECTOR_MUTATION_MUTATION_1)
+type Nested @join__type(graph: CONNECTOR_HELLO_WORLD_1) {
+  field: String @join__field(graph: CONNECTOR_HELLO_WORLD_1)
 }
 
-type MutationOutput @join__type(graph: CONNECTOR_MUTATION_MUTATION_1) {
-  success: Boolean @join__field(graph: CONNECTOR_MUTATION_MUTATION_1)
+type Mutation @join__type(graph: CONNECTOR_MUTATION_MUTATION_2) {
+  mutation(input: MutationInput): MutationOutput @join__field(graph: CONNECTOR_MUTATION_MUTATION_2)
 }
 
-input MutationInput @join__type(graph: CONNECTOR_MUTATION_MUTATION_1) {
-  nums: [Int!] @join__field(graph: CONNECTOR_MUTATION_MUTATION_1)
-  values: [MutationNestedInput!] @join__field(graph: CONNECTOR_MUTATION_MUTATION_1)
+type MutationOutput @join__type(graph: CONNECTOR_MUTATION_MUTATION_2) {
+  success: Boolean @join__field(graph: CONNECTOR_MUTATION_MUTATION_2)
 }
 
-input MutationNestedInput @join__type(graph: CONNECTOR_MUTATION_MUTATION_1) {
-  num: Int @join__field(graph: CONNECTOR_MUTATION_MUTATION_1)
+input MutationInput @join__type(graph: CONNECTOR_MUTATION_MUTATION_2) {
+  nums: [Int!] @join__field(graph: CONNECTOR_MUTATION_MUTATION_2)
+  values: [MutationNestedInput!] @join__field(graph: CONNECTOR_MUTATION_MUTATION_2)
+}
+
+input MutationNestedInput @join__type(graph: CONNECTOR_MUTATION_MUTATION_2) {
+  num: Int @join__field(graph: CONNECTOR_MUTATION_MUTATION_2)
 }
 
 enum join__Graph {
-  CONNECTOR_HELLO_0 @join__graph(name: "CONNECTOR_HELLO_0", url: "http://unused")
-  CONNECTOR_HELLO_WORLD_0 @join__graph(name: "CONNECTOR_HELLO_WORLD_0", url: "http://unused")
-  CONNECTOR_MUTATION_MUTATION_1 @join__graph(name: "CONNECTOR_MUTATION_MUTATION_1", url: "http://unused")
-  CONNECTOR_QUERY_HELLO_2 @join__graph(name: "CONNECTOR_QUERY_HELLO_2", url: "http://unused")
-  CONNECTOR_QUERY_WITHARGUMENTS_3 @join__graph(name: "CONNECTOR_QUERY_WITHARGUMENTS_3", url: "http://unused")
+  CONNECTOR_ENTITYACROSSBOTH_0 @join__graph(name: "CONNECTOR_ENTITYACROSSBOTH_0", url: "http://unused")
+  CONNECTOR_ENTITYACROSSBOTH_E_0 @join__graph(name: "CONNECTOR_ENTITYACROSSBOTH_E_0", url: "http://unused")
+  CONNECTOR_HELLO_1 @join__graph(name: "CONNECTOR_HELLO_1", url: "http://unused")
+  CONNECTOR_HELLO_WORLD_1 @join__graph(name: "CONNECTOR_HELLO_WORLD_1", url: "http://unused")
+  CONNECTOR_MUTATION_MUTATION_2 @join__graph(name: "CONNECTOR_MUTATION_MUTATION_2", url: "http://unused")
+  CONNECTOR_QUERY_HELLO_3 @join__graph(name: "CONNECTOR_QUERY_HELLO_3", url: "http://unused")
+  CONNECTOR_QUERY_WITHARGUMENTS_4 @join__graph(name: "CONNECTOR_QUERY_WITHARGUMENTS_4", url: "http://unused")
 }
 

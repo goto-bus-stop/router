@@ -59,6 +59,7 @@ pub(crate) struct BridgeQueryPlanner {
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
     subgraph_schemas: Arc<HashMap<String, Arc<Schema>>>,
+    subgraph_planners: Arc<HashMap<String, Arc<Planner<QueryPlanResult>>>>,
 }
 
 impl BridgeQueryPlanner {
@@ -184,8 +185,31 @@ impl BridgeQueryPlanner {
 
         let subgraph_schema_strings = planner.subgraphs().await?;
         let mut subgraph_schemas = HashMap::with_capacity(subgraph_schema_strings.len());
+        let mut subgraph_planners = HashMap::with_capacity(subgraph_schema_strings.len());
+
         for (name, schema) in subgraph_schema_strings {
-            subgraph_schemas.insert(name, Arc::new(Schema::parse(&schema, &configuration)?));
+            subgraph_schemas.insert(
+                name.clone(),
+                Arc::new(Schema::parse(&schema, &configuration)?),
+            );
+            let subgraph_planner = Arc::new(
+                planner
+                    .update(
+                        schema.clone(),
+                        QueryPlannerConfig {
+                            incremental_delivery: Some(IncrementalDeliverySupport {
+                                enable_defer: Some(configuration.supergraph.defer_support),
+                            }),
+                            graphql_validation: matches!(
+                                configuration.experimental_graphql_validation_mode,
+                                GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
+                            ),
+                            reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
+                        },
+                    )
+                    .await?,
+            );
+            subgraph_planners.insert(name, subgraph_planner);
         }
 
         let introspection = if configuration.supergraph.introspection {
@@ -203,6 +227,7 @@ impl BridgeQueryPlanner {
             enable_authorization_directives,
             configuration,
             subgraph_schemas: Arc::new(subgraph_schemas),
+            subgraph_planners: Arc::new(subgraph_planners),
         })
     }
 
@@ -234,10 +259,32 @@ impl BridgeQueryPlanner {
 
         let subgraph_schema_strings = planner.subgraphs().await?;
         let mut subgraph_schemas = HashMap::with_capacity(subgraph_schema_strings.len());
-        for (name, schema) in subgraph_schema_strings {
-            subgraph_schemas.insert(name, Arc::new(Schema::parse(&schema, &configuration)?));
-        }
+        let mut subgraph_planners = HashMap::with_capacity(subgraph_schema_strings.len());
 
+        for (name, schema) in subgraph_schema_strings {
+            subgraph_schemas.insert(
+                name.clone(),
+                Arc::new(Schema::parse(&schema, &configuration)?),
+            );
+            let subgraph_planner = Arc::new(
+                planner
+                    .update(
+                        schema.clone(),
+                        QueryPlannerConfig {
+                            incremental_delivery: Some(IncrementalDeliverySupport {
+                                enable_defer: Some(configuration.supergraph.defer_support),
+                            }),
+                            graphql_validation: matches!(
+                                configuration.experimental_graphql_validation_mode,
+                                GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
+                            ),
+                            reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
+                        },
+                    )
+                    .await?,
+            );
+            subgraph_planners.insert(name, subgraph_planner);
+        }
         let schema = Arc::new(Schema::parse(&schema, &configuration)?.with_api_schema(api_schema));
 
         let introspection = if configuration.supergraph.introspection {
@@ -255,6 +302,7 @@ impl BridgeQueryPlanner {
             enable_authorization_directives,
             configuration,
             subgraph_schemas: Arc::new(subgraph_schemas),
+            subgraph_planners: Arc::new(subgraph_planners),
         })
     }
 

@@ -125,7 +125,7 @@ directive @join__type(
 ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
 */
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) enum Key {
     None,
     Resolvable(String),

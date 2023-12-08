@@ -16,3 +16,5 @@ mod request_response;
 // TODO remove this once URLPathTemplate is fully used
 #[allow(dead_code)]
 mod url_path_parser;
+
+mod http_json_transport;

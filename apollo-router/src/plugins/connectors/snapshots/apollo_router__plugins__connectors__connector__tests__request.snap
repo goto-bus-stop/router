@@ -22,14 +22,6 @@ expression: requests_and_params
                     "String",
                 ),
             },
-            selection: Path(
-                Path(
-                    Field(
-                        "data",
-                    ),
-                    Empty,
-                ),
-            ),
         },
     ),
 ]

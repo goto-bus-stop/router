@@ -155,6 +155,10 @@ impl Connector {
         let types = SourceType::from_schema(schema)?;
         let fields = SourceField::from_schema(schema)?;
 
+        if apis.is_empty() || (types.is_empty() && fields.is_empty()) {
+            return Ok(Default::default());
+        }
+
         let default_api = apis
             .values()
             .find(|api| api.is_default())

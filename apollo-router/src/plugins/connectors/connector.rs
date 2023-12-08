@@ -8,8 +8,10 @@ use apollo_compiler::ast;
 use apollo_compiler::ast::Selection;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
+use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::schema::Name;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use tower::BoxError;
 
@@ -17,6 +19,7 @@ use super::directives::SourceAPI;
 use super::directives::SourceField;
 use super::directives::SourceType;
 use super::join_spec_helpers::add_entities_field;
+use super::join_spec_helpers::add_input_join_field_directive;
 use super::join_spec_helpers::add_join_field_directive;
 use super::join_spec_helpers::add_join_type_directive;
 use super::join_spec_helpers::make_any_scalar;
@@ -150,7 +153,7 @@ impl Connector {
                 ];
 
                 changes.extend(recurse_selection(
-                    graph,
+                    graph.clone(),
                     schema,
                     field.output_type_name.clone(),
                     schema
@@ -159,6 +162,14 @@ impl Connector {
                         .ok_or(anyhow!("missing type"))?,
                     &field.selections(),
                 )?);
+
+                let field_def = schema
+                    .type_field(&field.parent_type_name, &field.field_name)
+                    .map_err(|_| anyhow::anyhow!("missing field"))?;
+
+                for arg in field_def.arguments.iter() {
+                    changes.extend(recurse_inputs(graph.clone(), schema, arg)?);
+                }
 
                 Ok(changes)
             }
@@ -246,7 +257,7 @@ impl Connector {
                 // TODO need a test with a nested composite key
                 // TODO mark key fields as external if necessary
                 changes.extend(recurse_selection(
-                    graph,
+                    graph.clone(),
                     schema,
                     field.parent_type_name.clone(), // key fields are on the parent type, not the output type
                     schema
@@ -255,6 +266,14 @@ impl Connector {
                         .ok_or(anyhow!("missing type"))?,
                     &key_selection,
                 )?);
+
+                let field_def = schema
+                    .type_field(&field.parent_type_name, &field.field_name)
+                    .map_err(|_| anyhow::anyhow!("missing field"))?;
+
+                for arg in field_def.arguments.iter() {
+                    changes.extend(recurse_inputs(graph.clone(), schema, arg)?);
+                }
 
                 Ok(changes)
             }
@@ -301,6 +320,14 @@ impl Connector {
         }
     }
 
+    pub(super) fn body(&self) -> Option<JSONSelection> {
+        match self.ty.as_ref() {
+            ConnectorType::Entity(source_type) => source_type.body(),
+            ConnectorType::RootField(source_field) => source_field.body(),
+            ConnectorType::EntityField(source_field) => source_field.body(),
+        }
+    }
+
     pub(crate) fn create_requests(
         &self,
         subgraph_request: SubgraphRequest,
@@ -333,6 +360,11 @@ pub(super) enum Change {
         field_name: Name,
         graph: String,
     },
+    InputField {
+        type_name: Name,
+        field_name: Name,
+        graph: String,
+    },
     /// Add a special field to Query that we can use instead of `_entities`
     MagicFinder { type_name: Name, graph: String },
 }
@@ -356,6 +388,14 @@ impl Change {
             } => {
                 let field = upsert_field(original_schema, schema, type_name, field_name)?;
                 add_join_field_directive(field, graph)?;
+            }
+            Change::InputField {
+                type_name,
+                field_name,
+                graph,
+            } => {
+                let field = upsert_input_field(original_schema, schema, type_name, field_name)?;
+                add_input_join_field_directive(field, graph)?;
             }
             Change::MagicFinder { type_name, graph } => {
                 {
@@ -388,7 +428,6 @@ fn upsert_field<'a>(
         .types
         .get_mut(type_name)
         .ok_or(anyhow!("Cannot copy field to type that does not exist"))?;
-
     let field = source
         .type_field(type_name, field_name)
         .map_err(|_| anyhow!("Missing field {}.{}", type_name, field_name))?;
@@ -404,6 +443,41 @@ fn upsert_field<'a>(
             .fields
             .entry(field_name.clone())
             .or_insert_with(|| clean_copy_of_field(field).into()),
+        _ => bail!("Cannot copy field into non-composite type"),
+    };
+
+    Ok(new_field.make_mut())
+}
+
+fn upsert_input_field<'a>(
+    source: &Schema,
+    dest: &'a mut Schema,
+    type_name: &Name,
+    field_name: &Name,
+) -> anyhow::Result<&'a mut InputValueDefinition> {
+    let new_ty = dest
+        .types
+        .get_mut(type_name)
+        .ok_or(anyhow!("Cannot copy field to type that does not exist"))?;
+
+    let ty = source.get_input_object(type_name).ok_or_else(|| {
+        anyhow!(
+            "Cannot copy field to type that does not exist: {}",
+            type_name
+        )
+    })?;
+
+    let field = ty
+        .fields
+        .get(field_name)
+        .ok_or_else(|| anyhow!("Missing field {}.{}", type_name, field_name))?;
+
+    let new_field = match new_ty {
+        ExtendedType::InputObject(ref mut ty) => ty
+            .make_mut()
+            .fields
+            .entry(field_name.clone())
+            .or_insert_with(|| clean_copy_of_input_field(field).into()),
         _ => bail!("Cannot copy field into non-composite type"),
     };
 
@@ -456,6 +530,12 @@ fn add_type<'a>(
 }
 
 fn clean_copy_of_field(f: &FieldDefinition) -> FieldDefinition {
+    let mut f = f.clone();
+    f.directives.clear();
+    f
+}
+
+fn clean_copy_of_input_field(f: &InputValueDefinition) -> InputValueDefinition {
     let mut f = f.clone();
     f.directives.clear();
     f
@@ -561,6 +641,42 @@ fn recurse_selection(
     }
 
     Ok(mutations)
+}
+
+fn recurse_inputs(
+    graph: String,
+    schema: &Schema,
+    input_value_def: &Node<InputValueDefinition>,
+) -> anyhow::Result<Vec<Change>> {
+    let mut changes = Vec::new();
+
+    let output_type_name = input_value_def.ty.inner_named_type();
+
+    let ty = schema
+        .types
+        .get(output_type_name.as_str())
+        .ok_or(anyhow!("missing type {}", output_type_name))?;
+
+    if !ty.is_built_in() {
+        changes.push(Change::Type {
+            name: output_type_name.clone(),
+            graph: graph.clone(),
+            key: Key::None,
+        });
+    }
+
+    if let ExtendedType::InputObject(obj) = ty {
+        for field in obj.fields.values() {
+            changes.push(Change::InputField {
+                type_name: output_type_name.clone(),
+                field_name: field.name.clone(),
+                graph: graph.clone(),
+            });
+            changes.extend(recurse_inputs(graph.clone(), schema, &field.node)?);
+        }
+    }
+
+    Ok(changes)
 }
 
 #[cfg(test)]

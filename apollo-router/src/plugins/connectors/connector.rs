@@ -78,23 +78,21 @@ impl Connector {
 
         let mut connectors = HashMap::new();
 
-        for (i, (type_name, directives)) in types.into_iter().enumerate() {
-            let connector_name = format!("CONNECTOR_{}_{}", type_name, i).to_uppercase();
+        for (i, directive) in types.into_iter().enumerate() {
+            let connector_name = format!("CONNECTOR_{}_{}", directive.type_name, i).to_uppercase();
 
-            for directive in directives {
-                connectors.insert(
-                    connector_name.clone(),
-                    Connector {
-                        name: connector_name.clone(),
-                        api: Arc::new(
-                            apis.get(&directive.api_name())
-                                .ok_or(anyhow!("missing API {}", directive.api_name()))? // TODO support default
-                                .clone(),
-                        ),
-                        ty: Arc::new(ConnectorType::Entity(directive)),
-                    },
-                );
-            }
+            connectors.insert(
+                connector_name.clone(),
+                Connector {
+                    name: connector_name.clone(),
+                    api: Arc::new(
+                        apis.get(&directive.api_name())
+                            .ok_or(anyhow!("missing API {}", directive.api_name()))? // TODO support default
+                            .clone(),
+                    ),
+                    ty: Arc::new(ConnectorType::Entity(directive)),
+                },
+            );
         }
 
         for (i, directive) in fields.into_iter().enumerate() {

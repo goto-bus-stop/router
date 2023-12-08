@@ -1,6 +1,8 @@
 use anyhow::bail;
+use apollo_compiler::ast;
+use apollo_compiler::ast::DirectiveList;
 use apollo_compiler::executable::Argument;
-use apollo_compiler::executable::Directives;
+use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::EnumValueDefinition;
@@ -10,6 +12,7 @@ use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::schema::ScalarType;
 use apollo_compiler::schema::Type;
 use apollo_compiler::schema::Value;
+use apollo_compiler::ty;
 use apollo_compiler::NodeStr;
 use apollo_compiler::Schema;
 use indexmap::IndexMap;
@@ -68,12 +71,12 @@ pub(super) fn join_graph_enum(names: &[&str]) -> ExtendedType {
         .iter()
         .map(|name| {
             (
-                NodeStr::new(name),
+                ast::Name::new_unchecked((*name).into()),
                 EnumValueDefinition {
-                    value: NodeStr::new(name),
-                    directives: Directives(
-                        vec![join_graph_directive(name, "http://unused").into()],
-                    ),
+                    value: ast::Name::new_unchecked((*name).into()),
+                    directives: DirectiveList(vec![
+                        join_graph_directive(name, "http://unused").into()
+                    ]),
                     description: None,
                 }
                 .into(),
@@ -83,6 +86,7 @@ pub(super) fn join_graph_enum(names: &[&str]) -> ExtendedType {
 
     ExtendedType::Enum(
         EnumType {
+            name: name!("join__Graph"),
             description: None,
             directives: Default::default(),
             values,
@@ -95,15 +99,15 @@ pub(super) fn join_graph_enum(names: &[&str]) -> ExtendedType {
 
 fn join_graph_directive(name: &str, url: &str) -> Directive {
     Directive {
-        name: "join__graph".into(),
+        name: name!("join__graph"),
         arguments: vec![
             Argument {
-                name: "name".into(),
+                name: name!("name"),
                 value: Value::String(name.into()).into(),
             }
             .into(),
             Argument {
-                name: "url".into(),
+                name: name!("url"),
                 value: Value::String(url.into()).into(),
             }
             .into(),
@@ -130,8 +134,8 @@ pub(super) enum Key {
 
 fn join_type_directive(graph: &str, key: &Key) -> Directive {
     let mut arguments = vec![Argument {
-        name: NodeStr::new("graph"),
-        value: Value::Enum(NodeStr::new(graph)).into(),
+        name: name!("graph"),
+        value: Value::Enum(ast::Name::new_unchecked(graph.into())).into(),
     }
     .into()];
 
@@ -139,7 +143,7 @@ fn join_type_directive(graph: &str, key: &Key) -> Directive {
         Key::Resolvable(fields) => {
             arguments.push(
                 Argument {
-                    name: NodeStr::new("key"),
+                    name: name!("key"),
                     value: Value::String(NodeStr::new(fields.as_str())).into(),
                 }
                 .into(),
@@ -148,7 +152,7 @@ fn join_type_directive(graph: &str, key: &Key) -> Directive {
         Key::NonResolvable(fields) => {
             arguments.push(
                 Argument {
-                    name: NodeStr::new("key"),
+                    name: name!("key"),
                     value: Value::String(NodeStr::new(fields.as_str())).into(),
                 }
                 .into(),
@@ -156,7 +160,7 @@ fn join_type_directive(graph: &str, key: &Key) -> Directive {
 
             arguments.push(
                 Argument {
-                    name: NodeStr::new("resolveable"),
+                    name: name!("resolveable"),
                     value: Value::Boolean(false).into(),
                 }
                 .into(),
@@ -166,7 +170,7 @@ fn join_type_directive(graph: &str, key: &Key) -> Directive {
     }
 
     Directive {
-        name: NodeStr::new("join__type"),
+        name: name!("join__type"),
         arguments,
     }
 }
@@ -177,8 +181,8 @@ pub(super) fn add_join_type_directive(ty: &mut ExtendedType, graph: &str, key: &
     let exists = ty.directives().iter().any(|d| {
         d.name == "join__type"
             && d.argument_by_name("graph")
-                .and_then(|val| val.as_str())
-                .map(|val| val == graph)
+                .and_then(|val| val.as_enum())
+                .map(|val| val.as_str() == graph)
                 .unwrap_or(false)
             && d.argument_by_name("key")
                 .and_then(|val| val.as_str())
@@ -244,10 +248,10 @@ directive @join__field(
 
 fn join_field_directive(graph: &str) -> Directive {
     Directive {
-        name: NodeStr::new("join__field"),
+        name: name!("join__field"),
         arguments: vec![Argument {
-            name: NodeStr::new("graph"),
-            value: Value::Enum(NodeStr::new(graph)).into(),
+            name: name!("graph"),
+            value: Value::Enum(ast::Name::new_unchecked(graph.into())).into(),
         }
         .into()],
     }
@@ -260,8 +264,8 @@ pub(super) fn add_join_field_directive(
     let exists = field.directives.iter().any(|d| {
         d.name == "join__field"
             && d.argument_by_name("graph")
-                .and_then(|val| val.as_str())
-                .map(|val| val == graph)
+                .and_then(|val| val.as_enum())
+                .map(|val| val.as_str() == graph)
                 .unwrap_or(false)
     });
 
@@ -301,7 +305,7 @@ pub(super) fn add_entities_field(
         ExtendedType::Object(ref mut ty) => {
             let ty = ty.make_mut();
             ty.fields
-                .entry(NodeStr::new(name))
+                .entry(ast::Name::new_unchecked(name.into()))
                 .and_modify(|f| {
                     f.make_mut()
                         .directives
@@ -309,21 +313,21 @@ pub(super) fn add_entities_field(
                 })
                 .or_insert_with(|| {
                     FieldDefinition {
-                        name: NodeStr::new(name),
+                        name: ast::Name::new_unchecked(name.into()),
                         arguments: vec![InputValueDefinition {
                             description: Default::default(),
                             directives: Default::default(),
                             default_value: Default::default(),
-                            name: NodeStr::new("representations"),
-                            ty: Type::non_null(Type::list(Type::non_null(Type::new_named("_Any"))))
-                                .into(),
+                            name: name!("representations"),
+                            ty: ty!([_Any!]!).into(),
                         }
                         .into()],
-                        directives: Directives(vec![join_field_directive(graph).into()]),
+                        directives: DirectiveList(vec![join_field_directive(graph).into()]),
                         description: None,
-                        ty: Type::non_null(Type::list(Type::non_null(Type::new_named(
-                            entity_name,
-                        )))),
+                        ty: Type::Named(ast::Name::new_unchecked(entity_name.into()))
+                            .non_null()
+                            .list()
+                            .non_null(),
                     }
                     .into()
                 });
@@ -337,15 +341,16 @@ pub(super) fn add_entities_field(
 pub(super) fn make_any_scalar() -> ExtendedType {
     ExtendedType::Scalar(
         ScalarType {
+            name: name!("_Any"),
             description: None,
-            directives: apollo_compiler::schema::Directives(vec![Directive {
+            directives: apollo_compiler::schema::DirectiveList(vec![Directive {
                 arguments: vec![Argument {
-                    name: NodeStr::new("url"),
+                    name: name!("url"),
                     // just to avoid validation warnings
                     value: Value::String(NodeStr::new("https://whatever")).into(),
                 }
                 .into()],
-                name: NodeStr::new("specifiedBy"),
+                name: name!("specifiedBy"),
             }
             .into()]),
         }
@@ -361,7 +366,7 @@ fn new_field(name: String, selection: Option<Vec<GraphQLSelection>>) -> GraphQLS
     GraphQLSelection::Field(
         apollo_compiler::ast::Field {
             alias: None,
-            name: name.into(),
+            name: ast::Name::new_unchecked(name.into()),
             arguments: Default::default(),
             directives: Default::default(),
             selection_set: selection.unwrap_or_default(),

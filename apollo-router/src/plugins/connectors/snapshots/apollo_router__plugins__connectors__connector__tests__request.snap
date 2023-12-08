@@ -1,13 +1,33 @@
 ---
 source: apollo-router/src/plugins/connectors/connector.rs
-expression: request
+expression: requests_and_params
 ---
-Request {
-    method: GET,
-    uri: http://localhost/api,
-    version: HTTP/1.1,
-    headers: {},
-    body: Body(
-        Empty,
+[
+    (
+        Request {
+            method: GET,
+            uri: http://localhost/api/path,
+            version: HTTP/1.1,
+            headers: {},
+            body: Body(
+                Empty,
+            ),
+        },
+        ResponseParams {
+            key: RootField {
+                name: "field",
+                typename: Concrete(
+                    "String",
+                ),
+            },
+            selection: Path(
+                Path(
+                    Field(
+                        "data",
+                    ),
+                    Empty,
+                ),
+            ),
+        },
     ),
-}
+]

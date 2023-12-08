@@ -172,7 +172,8 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             }
         };
 
-        let spec_schema = apollo_compiler::Schema::parse(schema.as_str(), "outer.graphql");
+        let spec_schema = apollo_compiler::Schema::parse(schema.as_str(), "outer.graphql")
+            .map_err(|_| "could not parse schema")?;
 
         let connectors = Arc::from(Connector::from_schema(&spec_schema)?);
         let connector_subgraphs = if !connectors.is_empty() {
@@ -436,7 +437,7 @@ pub(crate) fn create_connector_services(
             )))?
             .clone();
 
-        let connector = HTTPConnector::new(connector)?.layer(subgraph_service);
+        let connector = HTTPConnector::new(schema.clone(), connector)?.layer(subgraph_service);
         subgraph_services.insert(name.clone(), connector);
     }
 

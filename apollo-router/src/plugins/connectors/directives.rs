@@ -3,13 +3,14 @@
 use std::collections::HashMap;
 
 use apollo_compiler::ast::Selection;
+use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
+use apollo_compiler::schema::Name;
 use apollo_compiler::schema::Value;
 use apollo_compiler::Node;
-use apollo_compiler::NodeStr;
 use apollo_compiler::Schema;
 use indexmap::IndexMap;
 use serde::Serialize;
@@ -101,7 +102,7 @@ impl JoinWithDirectives {
 #[derive(Debug)]
 struct DirectiveAsObject {
     name: String,
-    args: HashMap<NodeStr, Node<apollo_compiler::ast::Value>>,
+    args: HashMap<Name, Node<apollo_compiler::ast::Value>>,
 }
 
 impl TryFrom<&Node<apollo_compiler::ast::Value>> for DirectiveAsObject {
@@ -120,7 +121,7 @@ impl TryFrom<&Node<apollo_compiler::ast::Value>> for DirectiveAsObject {
             .collect::<HashMap<_, _>>();
 
         let name = directive
-            .get(&NodeStr::new("name"))
+            .get(&name!("name"))
             .ok_or_else(|| {
                 ConnectorDirectiveError::InvalidJoinDirective(
                     "Expected directive to have a name".to_string(),
@@ -135,7 +136,7 @@ impl TryFrom<&Node<apollo_compiler::ast::Value>> for DirectiveAsObject {
             .to_string();
 
         let args = directive
-            .get(&NodeStr::new("args"))
+            .get(&name!("args"))
             .ok_or_else(|| {
                 ConnectorDirectiveError::InvalidJoinDirective(
                     "Expected directive to have args".to_string(),
@@ -210,10 +211,10 @@ impl SourceAPI {
 
     pub(super) fn from_schema_directive(
         graph: String,
-        args: HashMap<NodeStr, Node<apollo_compiler::ast::Value>>,
+        args: HashMap<Name, Node<apollo_compiler::ast::Value>>,
     ) -> Result<Self, ConnectorDirectiveError> {
         let name = args
-            .get(&NodeStr::new("name"))
+            .get(&name!("name"))
             .ok_or_else(|| {
                 ConnectorDirectiveError::MissingAttributeForType(
                     "name".to_string(),
@@ -230,11 +231,19 @@ impl SourceAPI {
             .to_string();
 
         let http = args
-            .get(&NodeStr::new("http"))
+            .get(&name!("http"))
             .map(HTTPSourceAPI::from_directive)
             .transpose()?;
 
         Ok(Self { graph, name, http })
+    }
+
+    pub(super) fn base_uri(&self) -> Result<http::Uri, http::uri::InvalidUri> {
+        self.http
+            .as_ref()
+            .map(|http| http.base_url.as_str())
+            .unwrap_or_default()
+            .parse::<_>()
     }
 }
 
@@ -262,7 +271,7 @@ impl HTTPSourceAPI {
             .collect::<HashMap<_, _>>();
 
         let base_url = directive
-            .get(&NodeStr::new("baseURL"))
+            .get(&name!("baseURL"))
             .ok_or_else(|| {
                 ConnectorDirectiveError::MissingAttributeForType(
                     "baseURL".to_string(),
@@ -279,12 +288,12 @@ impl HTTPSourceAPI {
             .to_string();
 
         let default = directive
-            .get(&NodeStr::new("default"))
+            .get(&name!("default"))
             .and_then(|v| v.to_bool())
             .unwrap_or_default();
 
         let headers = directive
-            .get(&NodeStr::new("headers"))
+            .get(&name!("headers"))
             .map(HTTPHeaderMapping::from_header_arguments)
             .transpose()?
             .unwrap_or_default();
@@ -367,10 +376,10 @@ impl HTTPHeaderMapping {
 pub(super) struct SourceType {
     pub(super) graph: String,
     pub(super) type_name: String,
-    pub(crate) api: String,
-    pub(crate) http: Option<HTTPSourceType>,
-    pub(crate) selection: JSONSelection,
-    pub(crate) key_type_map: Option<KeyTypeMap>,
+    pub(super) api: String,
+    pub(super) http: Option<HTTPSourceType>,
+    pub(super) selection: JSONSelection,
+    pub(super) key_type_map: Option<KeyTypeMap>,
 }
 
 impl SourceType {
@@ -428,10 +437,10 @@ impl SourceType {
     pub(super) fn from_directive(
         graph: String,
         type_name: String,
-        directive: &HashMap<NodeStr, Node<apollo_compiler::ast::Value>>,
+        directive: &HashMap<Name, Node<apollo_compiler::ast::Value>>,
     ) -> Result<Self, ConnectorDirectiveError> {
         let api = directive
-            .get(&NodeStr::new("api"))
+            .get(&name!("api"))
             .ok_or_else(|| {
                 ConnectorDirectiveError::MissingAttributeForType(
                     "api".to_string(),
@@ -448,7 +457,7 @@ impl SourceType {
             .to_string();
 
         let selection = directive
-            .get(&NodeStr::new("selection"))
+            .get(&name!("selection"))
             .ok_or_else(|| {
                 ConnectorDirectiveError::MissingAttributeForType(
                     "selection".to_string(),
@@ -473,12 +482,12 @@ impl SourceType {
             .1;
 
         let http = directive
-            .get(&NodeStr::new("http"))
+            .get(&name!("http"))
             .map(HTTPSourceType::from_argument)
             .transpose()?;
 
         let key_type_map = directive
-            .get(&NodeStr::new("keyTypeMap"))
+            .get(&name!("keyTypeMap"))
             .map(KeyTypeMap::from_argument)
             .transpose()?;
 
@@ -496,6 +505,20 @@ impl SourceType {
         format!("{}_{}", self.graph, self.api)
     }
 
+    pub(super) fn path_template(&self) -> &URLPathTemplate {
+        match &self.http {
+            Some(http) => &http.path_template,
+            None => unreachable!(),
+        }
+    }
+
+    pub(super) fn method(&self) -> &http::Method {
+        match &self.http {
+            Some(http) => &http.method,
+            None => unreachable!(),
+        }
+    }
+
     pub(super) fn selections(&self) -> Vec<Selection> {
         self.selection.clone().into()
     }
@@ -510,11 +533,11 @@ impl SourceType {
 
 #[derive(Debug, Serialize)]
 pub(super) struct HTTPSourceType {
-    pub(crate) path_template: URLPathTemplate,
+    pub(super) path_template: URLPathTemplate,
     #[serde(with = "http_serde::method")]
-    pub(crate) method: http::Method,
-    pub(crate) headers: Vec<HTTPHeaderMapping>,
-    pub(crate) body: Option<JSONSelection>,
+    pub(super) method: http::Method,
+    pub(super) headers: Vec<HTTPHeaderMapping>,
+    pub(super) body: Option<JSONSelection>,
 }
 
 impl HTTPSourceType {
@@ -544,9 +567,9 @@ impl HTTPSourceType {
             .map_err(|e| ConnectorDirectiveError::ParseError(name.to_string(), e))
         }
 
-        let (path_template, method) = if let Some(get) = argument.get(&NodeStr::new("GET")) {
+        let (path_template, method) = if let Some(get) = argument.get(&name!("GET")) {
             (parse_template(get, "GET")?, http::Method::GET)
-        } else if let Some(post) = argument.get(&NodeStr::new("POST")) {
+        } else if let Some(post) = argument.get(&name!("POST")) {
             (parse_template(post, "POST")?, http::Method::POST)
         } else {
             return Err(ConnectorDirectiveError::RequiresExactlyOne(
@@ -556,13 +579,13 @@ impl HTTPSourceType {
         };
 
         let headers = argument
-            .get(&NodeStr::new("headers"))
+            .get(&name!("headers"))
             .map(|v| HTTPHeaderMapping::from_header_arguments(v))
             .transpose()?
             .unwrap_or_default();
 
         let body = argument
-            .get(&NodeStr::new("body"))
+            .get(&name!("body"))
             .map(|v| {
                 let v = v.as_str().ok_or_else(|| {
                     ConnectorDirectiveError::InvalidTypeForAttribute(
@@ -657,7 +680,7 @@ impl SourceField {
     fn from_fields(
         graph_names: &HashMap<String, String>,
         parent_type_name: String,
-        fields: &IndexMap<NodeStr, Component<FieldDefinition>>,
+        fields: &IndexMap<Name, Component<FieldDefinition>>,
     ) -> Result<Vec<Self>, ConnectorDirectiveError> {
         let mut result: Vec<Self> = vec![];
 
@@ -708,10 +731,10 @@ impl SourceField {
         parent_type_name: String,
         field_name: String,
         output_type_name: String,
-        directive: &HashMap<NodeStr, Node<apollo_compiler::ast::Value>>,
+        directive: &HashMap<Name, Node<apollo_compiler::ast::Value>>,
     ) -> Result<Self, ConnectorDirectiveError> {
         let api = directive
-            .get(&NodeStr::new("api"))
+            .get(&name!("api"))
             .ok_or_else(|| {
                 ConnectorDirectiveError::MissingAttributeForType(
                     "api".to_string(),
@@ -728,7 +751,7 @@ impl SourceField {
             .to_string();
 
         let selection = directive
-            .get(&NodeStr::new("selection"))
+            .get(&name!("selection"))
             .ok_or_else(|| {
                 ConnectorDirectiveError::MissingAttributeForType(
                     "selection".to_string(),
@@ -753,7 +776,7 @@ impl SourceField {
             .1;
 
         let http = directive
-            .get(&NodeStr::new("http"))
+            .get(&name!("http"))
             .map(HTTPSourceField::from_argument)
             .transpose()?;
 
@@ -772,6 +795,20 @@ impl SourceField {
         format!("{}_{}", self.graph, self.api)
     }
 
+    pub(super) fn path_template(&self) -> &URLPathTemplate {
+        match &self.http {
+            Some(http) => &http.path_template,
+            None => unreachable!(),
+        }
+    }
+
+    pub(super) fn method(&self) -> &http::Method {
+        match &self.http {
+            Some(http) => &http.method,
+            None => unreachable!(),
+        }
+    }
+
     pub(super) fn selections(&self) -> Vec<Selection> {
         self.selection.clone().into()
     }
@@ -786,10 +823,10 @@ impl SourceField {
 
 #[derive(Debug, Serialize)]
 pub(super) struct HTTPSourceField {
-    path_template: URLPathTemplate,
+    pub(super) path_template: URLPathTemplate,
     #[serde(with = "http_serde::method")]
-    method: http::Method,
-    body: Option<JSONSelection>,
+    pub(super) method: http::Method,
+    pub(super) body: Option<JSONSelection>,
 }
 
 impl HTTPSourceField {
@@ -819,15 +856,15 @@ impl HTTPSourceField {
             .map_err(|e| ConnectorDirectiveError::ParseError(name.to_string(), e))
         }
 
-        let (path_template, method) = if let Some(get) = argument.get(&NodeStr::new("GET")) {
+        let (path_template, method) = if let Some(get) = argument.get(&name!("GET")) {
             (parse_template(get, "GET")?, http::Method::GET)
-        } else if let Some(post) = argument.get(&NodeStr::new("POST")) {
+        } else if let Some(post) = argument.get(&name!("POST")) {
             (parse_template(post, "POST")?, http::Method::POST)
-        } else if let Some(patch) = argument.get(&NodeStr::new("PATCH")) {
+        } else if let Some(patch) = argument.get(&name!("PATCH")) {
             (parse_template(patch, "PATCH")?, http::Method::PATCH)
-        } else if let Some(put) = argument.get(&NodeStr::new("PUT")) {
+        } else if let Some(put) = argument.get(&name!("PUT")) {
             (parse_template(put, "PUT")?, http::Method::PUT)
-        } else if let Some(delete) = argument.get(&NodeStr::new("DELETE")) {
+        } else if let Some(delete) = argument.get(&name!("DELETE")) {
             (parse_template(delete, "DELETE")?, http::Method::DELETE)
         } else {
             return Err(ConnectorDirectiveError::RequiresExactlyOne(
@@ -837,7 +874,7 @@ impl HTTPSourceField {
         };
 
         let body = argument
-            .get(&NodeStr::new("body"))
+            .get(&name!("body"))
             .map(|v| {
                 let v = v.as_str().ok_or_else(|| {
                     ConnectorDirectiveError::InvalidTypeForAttribute(
@@ -921,7 +958,7 @@ mod tests {
                 query: Query
             }
             "#;
-        let partial_schema = apollo_compiler::Schema::parse(partial_sdl, "schema.graphql");
+        let partial_schema = apollo_compiler::Schema::parse(partial_sdl, "schema.graphql").unwrap();
 
         let all_source_apis = SourceAPI::from_schema(&partial_schema).unwrap();
 
@@ -954,7 +991,7 @@ mod tests {
             { query: Query }
             "#;
 
-        let partial_schema = apollo_compiler::Schema::parse(partial_sdl, "schema.graphql");
+        let partial_schema = apollo_compiler::Schema::parse(partial_sdl, "schema.graphql").unwrap();
         let missing_name_error = SourceAPI::from_schema(&partial_schema).unwrap_err();
         assert_eq!(
             ConnectorDirectiveError::MissingAttributeForType(
@@ -987,7 +1024,7 @@ mod tests {
             { query: Query }
             "#;
 
-        let partial_schema = apollo_compiler::Schema::parse(partial_sdl, "schema.graphql");
+        let partial_schema = apollo_compiler::Schema::parse(partial_sdl, "schema.graphql").unwrap();
         let missing_base_url_error = SourceAPI::from_schema(&partial_schema).unwrap_err();
         assert_eq!(
             ConnectorDirectiveError::MissingAttributeForType(
@@ -1021,7 +1058,7 @@ mod tests {
             { query: Query }
             "#;
 
-        let partial_schema = apollo_compiler::Schema::parse(partial_sdl, "schema.graphql");
+        let partial_schema = apollo_compiler::Schema::parse(partial_sdl, "schema.graphql").unwrap();
         let missing_header_name_error = SourceAPI::from_schema(&partial_schema).unwrap_err();
         assert_eq!(
             ConnectorDirectiveError::MissingAttributeForType(
@@ -1072,7 +1109,7 @@ mod tests {
         }
         "#;
 
-        let partial_schema = apollo_compiler::Schema::parse(partial_sdl, "schema.graphql");
+        let partial_schema = apollo_compiler::Schema::parse(partial_sdl, "schema.graphql").unwrap();
         let source_types = SourceType::from_schema(&partial_schema).unwrap();
 
         insta::with_settings!({sort_maps => true}, {
@@ -1105,7 +1142,7 @@ mod tests {
         }
         "#;
 
-        let partial_schema = apollo_compiler::Schema::parse(partial_sdl, "schema.graphql");
+        let partial_schema = apollo_compiler::Schema::parse(partial_sdl, "schema.graphql").unwrap();
         let source_fields = SourceField::from_schema(&partial_schema).unwrap();
 
         insta::with_settings!({sort_maps => true}, {
@@ -1171,7 +1208,7 @@ mod tests {
         }
         "#;
 
-        let partial_schema = apollo_compiler::Schema::parse(partial_sdl, "schema.graphql");
+        let partial_schema = apollo_compiler::Schema::parse(partial_sdl, "schema.graphql").unwrap();
 
         assert_eq!(
             SourceField::from_schema(&partial_schema).unwrap_err(),

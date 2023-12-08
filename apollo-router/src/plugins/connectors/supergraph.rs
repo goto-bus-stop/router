@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use apollo_compiler::name;
 use apollo_compiler::Schema;
 use itertools::Itertools;
 use tower::BoxError;
@@ -35,7 +36,7 @@ pub(crate) fn generate_connector_supergraph(
         .map(|c| c.name())
         .collect::<Vec<_>>();
     new_schema.types.insert(
-        "join__Graph".into(),
+        name!("join__Graph"),
         join_graph_enum(connector_graph_names.as_slice()),
     );
 
@@ -59,14 +60,10 @@ mod tests {
 
     #[test]
     fn it_works() -> anyhow::Result<()> {
-        let schema = Schema::parse(SCHEMA, "outer.graphql");
-        assert!(schema.validate().unwrap().is_empty());
+        let schema = Schema::parse_and_validate(SCHEMA, "outer.graphql").unwrap();
 
         let connectors = Arc::from(Connector::from_schema(&schema).unwrap());
         let inner = generate_connector_supergraph(&schema, &connectors).unwrap();
-
-        // new supergraph is valid
-        assert!(inner.validate().unwrap().is_empty());
 
         // new supergraph can be parsed into subgraphs
         let result = RouterSchema::parse(

@@ -126,12 +126,13 @@ impl tower::Service<SubgraphRequest> for SubgraphConnector {
 
 #[derive(Clone)]
 pub(crate) struct HTTPConnector {
+    schema: Arc<Schema>,
     connector: Connector,
     client: hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>>,
 }
 
 impl HTTPConnector {
-    pub(crate) fn new(connector: Connector) -> Result<Self, BoxError> {
+    pub(crate) fn new(schema: Arc<Schema>, connector: Connector) -> Result<Self, BoxError> {
         let mut http_connector = new_async_http_connector()?;
         http_connector.set_nodelay(true);
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
@@ -151,7 +152,11 @@ impl HTTPConnector {
         //TODO: add decompression
         let client = hyper::Client::builder().build(http_connector);
 
-        Ok(Self { connector, client })
+        Ok(Self {
+            schema,
+            connector,
+            client,
+        })
     }
 }
 
@@ -164,6 +169,7 @@ where
     fn layer(&self, inner: S) -> Self::Service {
         HTTPConnectorService {
             inner,
+            schema: self.schema.clone(),
             connector: self.connector.clone(),
             client: self.client.clone(),
         }
@@ -173,6 +179,7 @@ where
 #[derive(Clone)]
 pub(crate) struct HTTPConnectorService<S> {
     inner: S,
+    schema: Arc<Schema>,
     connector: Connector,
     client: hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>>,
 }
@@ -193,24 +200,34 @@ where
     }
 
     fn call(&mut self, request: SubgraphRequest) -> Self::Future {
-        dbg!(&request.subgraph_request, &request.subgraph_name);
+        // dbg!(&request.subgraph_request, &request.subgraph_name);
+        let schema = self.schema.clone();
         let connector = self.connector.clone();
-        dbg!(&connector);
+        let context = request.context.clone();
+        // dbg!(&connector);
 
-        let mut client = self.client.clone();
-        // TODO: this is where actual connectors will be wired up!
+        let client = self.client.clone();
+
         Box::pin(async move {
-            // left as an exercise for the reader (@geal :p)
-            let (context, request_to_make) = connector.create_request(request)?;
+            let requests =
+                connector.create_requests(request, Arc::from(schema.definitions.clone()))?;
 
-            let response = client
-                .call(request_to_make)
-                .await
-                .map_err(|e| format!("connector http call failed {}", e))?;
+            let tasks = requests.into_iter().map(|(req, res_params)| async {
+                println!("HTTP {} {}", &req.method(), &req.uri());
+                let mut res = client.request(req).await?;
+                res.extensions_mut().insert(res_params);
+                Ok::<_, BoxError>(res)
+            });
 
-            // left as an exercise for the reader (@geal :p)
-            let subgraph_response = connector.map_http_response(response, context).await?;
-            dbg!(&subgraph_response);
+            let results = futures::future::try_join_all(tasks).await;
+
+            let responses = match results {
+                Ok(responses) => responses,
+                Err(e) => return Err(BoxError::from(e)),
+            };
+
+            let subgraph_response = connector.map_http_responses(responses, context).await?;
+            // dbg!(&subgraph_response);
 
             Ok(subgraph_response)
 

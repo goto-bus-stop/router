@@ -94,7 +94,7 @@ type Hello
           args: {
             api: "a"
             http: { GET: "/hello/{id}/world" }
-            selection: ".data { field }"
+            selection: ".data { field nested { field } }"
           }
           source: {
             url: "https://specs.apollo.dev/source/v0.1"
@@ -126,6 +126,10 @@ enum link__Purpose {
   `EXECUTION` features provide metadata necessary for operation execution.
   """
   EXECUTION
+}
+
+type Nested @join__type(graph: SIMPLE) {
+  field: String
 }
 
 type Query @join__type(graph: NORMAL) @join__type(graph: SIMPLE) {
@@ -171,4 +175,5 @@ type TypeWithResolver @join__type(graph: NORMAL, key: "id") {
 
 type World @join__type(graph: SIMPLE) {
   field: String
+  nested: Nested
 }

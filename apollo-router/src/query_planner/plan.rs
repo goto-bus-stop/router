@@ -329,12 +329,12 @@ impl PlanNode {
         }
     }
 
-    pub(crate) fn generate_connector_plan(
-        &mut self,
-        subgraph_schemas: &HashMap<String, Arc<Schema>>,
-        subgraph_planners: &HashMap<String, Arc<Planner<QueryPlanResult>>>,
+    pub(crate) fn generate_connector_plan<'a>(
+        &'a mut self,
+        subgraph_schemas: &'a HashMap<String, Arc<Schema>>,
+        subgraph_planners: &'a HashMap<String, Arc<Planner<QueryPlanResult>>>,
     ) -> future::BoxFuture<Result<(), QueryPlannerError>> {
-        Box::pin(async {
+        Box::pin(async move {
             match self {
                 PlanNode::Fetch(fetch_node) => {
                     fetch_node
@@ -377,7 +377,7 @@ impl PlanNode {
                     }
                     Ok(())
                 }
-                PlanNode::Subscription { primary, rest } => {
+                PlanNode::Subscription { primary: _, rest } => {
                     if let Some(node) = rest.as_mut() {
                         node.generate_connector_plan(subgraph_schemas, subgraph_planners)
                             .await?;
@@ -385,7 +385,7 @@ impl PlanNode {
                     Ok(())
                 }
                 PlanNode::Condition {
-                    condition,
+                    condition: _,
                     if_clause,
                     else_clause,
                 } => {

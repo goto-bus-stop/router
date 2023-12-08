@@ -30,6 +30,9 @@ use crate::json_ext::Path;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::UnauthorizedPaths;
+use crate::plugins::connectors::connector_subgraph_names;
+use crate::plugins::connectors::generate_connector_supergraph;
+use crate::plugins::connectors::Connector;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
@@ -183,33 +186,48 @@ impl BridgeQueryPlanner {
 
         let schema = Arc::new(schema.with_api_schema(api_schema));
 
+        let connectors = Arc::from(Connector::from_schema(&schema.definitions).unwrap());
+        let mut subgraph_planners = HashMap::new();
+        if !connectors.is_empty() {
+            let connector_subgraph_names = connector_subgraph_names(&connectors);
+            let connector_schema =
+                generate_connector_supergraph(&schema.definitions, &connectors).unwrap();
+            let connector_schema_s = connector_schema.serialize().to_string();
+
+            for name in connector_subgraph_names {
+                println!("creating subgraph planner '{name}' for schema:\n{connector_schema_s}");
+
+                let subgraph_planner = Arc::new(
+                    planner
+                        .update(
+                            connector_schema_s.clone(),
+                            QueryPlannerConfig {
+                                incremental_delivery: Some(IncrementalDeliverySupport {
+                                    enable_defer: Some(configuration.supergraph.defer_support),
+                                }),
+                                graphql_validation: matches!(
+                                    configuration.experimental_graphql_validation_mode,
+                                    GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
+                                ),
+                                reuse_query_fragments: configuration
+                                    .supergraph
+                                    .reuse_query_fragments,
+                            },
+                        )
+                        .await?,
+                );
+                subgraph_planners.insert(name, subgraph_planner);
+            }
+        };
+
         let subgraph_schema_strings = planner.subgraphs().await?;
         let mut subgraph_schemas = HashMap::with_capacity(subgraph_schema_strings.len());
-        let mut subgraph_planners = HashMap::with_capacity(subgraph_schema_strings.len());
 
         for (name, schema) in subgraph_schema_strings {
             subgraph_schemas.insert(
                 name.clone(),
                 Arc::new(Schema::parse(&schema, &configuration)?),
             );
-            let subgraph_planner = Arc::new(
-                planner
-                    .update(
-                        schema.clone(),
-                        QueryPlannerConfig {
-                            incremental_delivery: Some(IncrementalDeliverySupport {
-                                enable_defer: Some(configuration.supergraph.defer_support),
-                            }),
-                            graphql_validation: matches!(
-                                configuration.experimental_graphql_validation_mode,
-                                GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
-                            ),
-                            reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
-                        },
-                    )
-                    .await?,
-            );
-            subgraph_planners.insert(name, subgraph_planner);
         }
 
         let introspection = if configuration.supergraph.introspection {
@@ -257,33 +275,48 @@ impl BridgeQueryPlanner {
         let api_schema = planner.api_schema().await?;
         let api_schema = Schema::parse(&api_schema.schema, &configuration)?;
 
+        let connectors = Arc::from(Connector::from_schema(&schema.definitions).unwrap());
+        let mut subgraph_planners = HashMap::new();
+        if !connectors.is_empty() {
+            let connector_subgraph_names = connector_subgraph_names(&connectors);
+            let connector_schema =
+                generate_connector_supergraph(&schema.definitions, &connectors).unwrap();
+            let connector_schema_s = connector_schema.serialize().to_string();
+
+            for name in connector_subgraph_names {
+                println!("creating subgraph planner '{name}' for schema:\n{connector_schema_s}");
+
+                let subgraph_planner = Arc::new(
+                    planner
+                        .update(
+                            connector_schema_s.clone(),
+                            QueryPlannerConfig {
+                                incremental_delivery: Some(IncrementalDeliverySupport {
+                                    enable_defer: Some(configuration.supergraph.defer_support),
+                                }),
+                                graphql_validation: matches!(
+                                    configuration.experimental_graphql_validation_mode,
+                                    GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
+                                ),
+                                reuse_query_fragments: configuration
+                                    .supergraph
+                                    .reuse_query_fragments,
+                            },
+                        )
+                        .await?,
+                );
+                subgraph_planners.insert(name, subgraph_planner);
+            }
+        };
+
         let subgraph_schema_strings = planner.subgraphs().await?;
         let mut subgraph_schemas = HashMap::with_capacity(subgraph_schema_strings.len());
-        let mut subgraph_planners = HashMap::with_capacity(subgraph_schema_strings.len());
 
         for (name, schema) in subgraph_schema_strings {
             subgraph_schemas.insert(
                 name.clone(),
                 Arc::new(Schema::parse(&schema, &configuration)?),
             );
-            let subgraph_planner = Arc::new(
-                planner
-                    .update(
-                        schema.clone(),
-                        QueryPlannerConfig {
-                            incremental_delivery: Some(IncrementalDeliverySupport {
-                                enable_defer: Some(configuration.supergraph.defer_support),
-                            }),
-                            graphql_validation: matches!(
-                                configuration.experimental_graphql_validation_mode,
-                                GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
-                            ),
-                            reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
-                        },
-                    )
-                    .await?,
-            );
-            subgraph_planners.insert(name, subgraph_planner);
         }
         let schema = Arc::new(Schema::parse(&schema, &configuration)?.with_api_schema(api_schema));
 
@@ -757,7 +790,7 @@ pub(crate) struct QueryPlanResult {
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 /// The root query plan container.
-struct QueryPlan {
+pub(crate) struct QueryPlan {
     /// The hierarchical nodes that make up the query plan
     pub(crate) node: Option<PlanNode>,
 }

@@ -493,7 +493,7 @@ impl FetchNode {
 
     pub(crate) async fn generate_connector_plan(
         &mut self,
-        subgraph_schemas: &HashMap<String, Arc<Schema>>,
+        _subgraph_schemas: &HashMap<String, Arc<Schema>>,
         subgraph_planners: &HashMap<String, Arc<Planner<QueryPlanResult>>>,
     ) -> Result<(), QueryPlannerError> {
         if let Some(planner) = subgraph_planners.get(&self.service_name) {
@@ -503,27 +503,10 @@ impl FetchNode {
                 .map_err(QueryPlannerError::RouterBridgeError)?
                 .into_result()
             {
-                Ok(mut plan) => {
+                Ok(plan) => {
                     self.connector_plan = plan.data.query_plan.node.map(Arc::new);
-                    /*if let Some(node) = plan.data.query_plan.node.as_mut() {
-                        node.extract_authorization_metadata(&self.schema.definitions, &key);
-                        node.generate_connector_plan(&self.subgraph_schemas, &self.subgraph_planners)
-                            .await;
-                    }
-                    plan*/
                 }
                 Err(err) => {
-                    /*if matches!(
-                        self.configuration.experimental_graphql_validation_mode,
-                        GraphQLValidationMode::Both
-                    ) {
-                        compare_validation_errors(Some(&err), selections.validation_error.as_ref());
-
-                        // If we had a validation error from apollo-rs, return it now.
-                        if let Some(errors) = selections.validation_error {
-                            return Err(QueryPlannerError::from(errors));
-                        }
-                    }*/
                     return Err(QueryPlannerError::from(err));
                 }
             }

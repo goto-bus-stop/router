@@ -445,6 +445,8 @@ impl BridgeQueryPlanner {
             Ok(mut plan) => {
                 if let Some(node) = plan.data.query_plan.node.as_mut() {
                     node.extract_authorization_metadata(&self.schema.definitions, &key);
+                    node.generate_connector_plan(&self.subgraph_schemas, &self.subgraph_planners)
+                        .await?;
                 }
                 plan
             }
@@ -749,7 +751,7 @@ impl BridgeQueryPlanner {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct QueryPlanResult {
     formatted_query_plan: Option<String>,
-    query_plan: QueryPlan,
+    pub(crate) query_plan: QueryPlan,
 }
 
 #[derive(Debug, PartialEq, Deserialize)]
@@ -757,7 +759,7 @@ pub(crate) struct QueryPlanResult {
 /// The root query plan container.
 struct QueryPlan {
     /// The hierarchical nodes that make up the query plan
-    node: Option<PlanNode>,
+    pub(crate) node: Option<PlanNode>,
 }
 
 #[cfg(test)]

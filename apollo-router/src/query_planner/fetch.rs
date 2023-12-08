@@ -1,8 +1,10 @@
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
 
 use apollo_compiler::ast::Document;
 use indexmap::IndexSet;
+use router_bridge::planner::Planner;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::ServiceExt;
@@ -13,8 +15,11 @@ use super::execution::ExecutionParameters;
 use super::rewrites;
 use super::selection::execute_selection_set;
 use super::selection::Selection;
+use super::PlanNode;
+use super::QueryPlanResult;
 use crate::error::Error;
 use crate::error::FetchError;
+use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::graphql::Request;
 use crate::http_ext;
@@ -120,6 +125,10 @@ pub(crate) struct FetchNode {
     // authorization metadata for the subgraph query
     #[serde(default)]
     pub(crate) authorization: Arc<CacheKeyMetadata>,
+
+    // query plan for the connector subgraph
+    #[serde(default)]
+    pub(crate) connector_plan: Option<Arc<PlanNode>>,
 }
 
 pub(crate) struct Variables {
@@ -480,5 +489,45 @@ impl FetchNode {
             global_authorisation_cache_key,
             &subgraph_query_cache_key,
         ));
+    }
+
+    pub(crate) async fn generate_connector_plan(
+        &mut self,
+        subgraph_schemas: &HashMap<String, Arc<Schema>>,
+        subgraph_planners: &HashMap<String, Arc<Planner<QueryPlanResult>>>,
+    ) -> Result<(), QueryPlannerError> {
+        if let Some(planner) = subgraph_planners.get(&self.service_name) {
+            match planner
+                .plan(self.operation.clone(), self.operation_name.clone())
+                .await
+                .map_err(QueryPlannerError::RouterBridgeError)?
+                .into_result()
+            {
+                Ok(mut plan) => {
+                    self.connector_plan = plan.data.query_plan.node.map(Arc::new);
+                    /*if let Some(node) = plan.data.query_plan.node.as_mut() {
+                        node.extract_authorization_metadata(&self.schema.definitions, &key);
+                        node.generate_connector_plan(&self.subgraph_schemas, &self.subgraph_planners)
+                            .await;
+                    }
+                    plan*/
+                }
+                Err(err) => {
+                    /*if matches!(
+                        self.configuration.experimental_graphql_validation_mode,
+                        GraphQLValidationMode::Both
+                    ) {
+                        compare_validation_errors(Some(&err), selections.validation_error.as_ref());
+
+                        // If we had a validation error from apollo-rs, return it now.
+                        if let Some(errors) = selections.validation_error {
+                            return Err(QueryPlannerError::from(errors));
+                        }
+                    }*/
+                    return Err(QueryPlannerError::from(err));
+                }
+            }
+        }
+        Ok(())
     }
 }

@@ -275,6 +275,8 @@ impl BridgeQueryPlanner {
         let api_schema = planner.api_schema().await?;
         let api_schema = Schema::parse(&api_schema.schema, &configuration)?;
 
+        let schema = Arc::new(Schema::parse(&schema, &configuration)?.with_api_schema(api_schema));
+
         let connectors = Arc::from(Connector::from_schema(&schema.definitions).unwrap());
         let mut subgraph_planners = HashMap::new();
         if !connectors.is_empty() {
@@ -318,7 +320,6 @@ impl BridgeQueryPlanner {
                 Arc::new(Schema::parse(&schema, &configuration)?),
             );
         }
-        let schema = Arc::new(Schema::parse(&schema, &configuration)?.with_api_schema(api_schema));
 
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(Introspection::new(planner.clone()).await))

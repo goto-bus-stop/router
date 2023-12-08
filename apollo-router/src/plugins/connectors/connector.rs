@@ -28,6 +28,7 @@ use super::join_spec_helpers::selection_set_to_string;
 use super::join_spec_helpers::Key;
 use super::request_response::handle_responses;
 use super::request_response::make_requests;
+use super::request_response::HackEntityResponseKey;
 use super::request_response::ResponseParams;
 use super::selection_parser::Selection as JSONSelection;
 use super::url_path_parser::URLPathTemplate;
@@ -334,12 +335,13 @@ impl Connector {
         make_requests(subgraph_request, self, schema.clone())
     }
 
-    pub(crate) async fn map_http_responses(
+    pub(super) async fn map_http_responses(
         &self,
         responses: Vec<http::Response<hyper::Body>>,
         context: Context,
+        hack_entity_response_key: Option<HackEntityResponseKey>,
     ) -> Result<SubgraphResponse, BoxError> {
-        handle_responses(context, self, responses).await
+        handle_responses(context, self, responses, hack_entity_response_key).await
     }
 }
 

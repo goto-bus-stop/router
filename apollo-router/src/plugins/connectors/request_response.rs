@@ -23,6 +23,7 @@ use crate::Context;
 const REPRESENTATIONS_VAR: &str = "representations";
 const ENTITIES: &str = "_entities";
 
+#[derive(Clone)]
 pub(super) struct HackEntityResponseKey(pub(super) String);
 
 #[derive(Debug)]
@@ -310,14 +311,6 @@ fn entities_with_fields_from_request(
         _ => unreachable!(),
     };
 
-    let entity_response_key = request
-        .context
-        .private_entries
-        .lock()
-        .get::<HackEntityResponseKey>()
-        .map(|k| k.0.clone())
-        .unwrap_or(ENTITIES.to_string());
-
     let query = request
         .subgraph_request
         .body()
@@ -348,7 +341,6 @@ fn entities_with_fields_from_request(
         }
         _ => unreachable!(),
     }?;
-    debug_assert!(entities_field.name.as_str() == entity_response_key);
 
     let types_and_fields = entities_field
         .selection_set
@@ -439,15 +431,13 @@ pub(super) async fn handle_responses(
     context: Context,
     _connector: &Connector,
     responses: Vec<http::Response<hyper::Body>>,
+    hack_entity_response_key: Option<HackEntityResponseKey>,
 ) -> Result<SubgraphResponse, BoxError> {
     let mut data = serde_json_bytes::Map::new();
     let mut errors = Vec::new();
 
-    let entity_response_key = context
-        .private_entries
-        .lock()
-        .get::<HackEntityResponseKey>()
-        .map(|k| k.0.clone())
+    let entity_response_key = hack_entity_response_key
+        .map(|e| e.0.clone())
         .unwrap_or(ENTITIES.to_string());
 
     for response in responses {
@@ -1182,9 +1172,13 @@ mod tests {
             .body(hyper::Body::from(r#"{"data":"world"}"#))
             .expect("response builder");
 
-        let res =
-            super::handle_responses(Context::default(), &connector, vec![response1, response2])
-                .await?;
+        let res = super::handle_responses(
+            Context::default(),
+            &connector,
+            vec![response1, response2],
+            None,
+        )
+        .await?;
 
         assert_debug_snapshot!(res.response.body(), @r###"
         Response {

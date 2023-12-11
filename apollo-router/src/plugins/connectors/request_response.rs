@@ -10,12 +10,10 @@ use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 use tower::BoxError;
 
-use super::selection_parser::ApplyTo;
-use super::selection_parser::Selection as JSONSelection;
-use super::url_path_parser::URLPathTemplate;
+use super::connector::ConnectorKind;
+use super::connector::ConnectorTransport;
 use super::Connector;
 use crate::json_ext::Object;
-use crate::plugins::connectors::connector::ConnectorType;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::Context;
@@ -23,82 +21,12 @@ use crate::Context;
 const REPRESENTATIONS_VAR: &str = "representations";
 const ENTITIES: &str = "_entities";
 
+#[derive(Clone)]
 pub(super) struct HackEntityResponseKey(pub(super) String);
-
-#[derive(Debug)]
-struct RequestParams {
-    base_uri: http::Uri,
-    path_template: URLPathTemplate,
-    method: http::Method,
-    body: Option<JSONSelection>,
-    inputs: RequestInputs,
-}
-
-impl TryFrom<RequestParams> for http::Request<hyper::Body> {
-    type Error = BoxError;
-
-    fn try_from(params: RequestParams) -> Result<Self, Self::Error> {
-        let inputs = params.inputs.merge();
-
-        let uri = params.base_uri.clone();
-        let path = params
-            .path_template
-            .generate_path(&inputs)
-            .map_err(BoxError::from)?;
-        let uri = append_path(&uri, &path)?;
-
-        // TODO construct headers if necessary
-
-        let body = if let Some(sel) = params.body {
-            let (body, _) = sel.apply_to(&inputs);
-            hyper::Body::from(serde_json::to_vec(&body)?)
-        } else {
-            hyper::Body::empty()
-        };
-
-        http::Request::builder()
-            .method(params.method)
-            .uri(uri)
-            .header("content-type", "application/json") // TODO
-            .body(body)
-            .map_err(BoxError::from)
-    }
-}
-
-/// Append a path and query to a URI. Uses the path from base URI (but will discard the query).
-fn append_path(base_uri: &http::Uri, path: &str) -> anyhow::Result<http::Uri> {
-    let parts = base_uri.clone().into_parts();
-    let path_and_query = parts.path_and_query.clone();
-    let new_path = format!(
-        "{}{}",
-        path_and_query
-            .clone()
-            .map(|p| p.path().to_string().clone())
-            .unwrap_or_default(),
-        path
-    );
-    let uri = http::Uri::builder()
-        .authority(
-            parts
-                .authority
-                .ok_or_else(|| anyhow::anyhow!("missing authority"))?
-                .clone(),
-        )
-        .scheme(
-            parts
-                .scheme
-                .ok_or_else(|| anyhow::anyhow!("missing scheme"))?
-                .clone(),
-        )
-        .path_and_query(new_path)
-        .build()?;
-    Ok(uri)
-}
 
 #[derive(Debug)]
 pub(crate) struct ResponseParams {
     key: ResponseKey,
-    selection: JSONSelection,
 }
 
 #[derive(Debug, Default)]
@@ -112,6 +40,7 @@ impl RequestInputs {
         let mut new = Map::new();
         new.extend(self.parent.clone());
         new.extend(self.arguments.clone());
+        // if parent types are shadowed by arguments, we can use `this.` to access them
         new.insert("this", Value::Object(self.parent.clone()));
         Value::Object(new)
     }
@@ -144,16 +73,16 @@ pub(super) fn make_requests(
     connector: &Connector,
     schema: Arc<Valid<Schema>>,
 ) -> Result<Vec<(http::Request<hyper::Body>, ResponseParams)>, BoxError> {
-    match connector.ty.as_ref() {
-        ConnectorType::RootField(..) => {
+    match connector.kind {
+        ConnectorKind::RootField { .. } => {
             let parts = root_fields(&request, schema)?;
             Ok(request_params_to_requests(connector, parts)?)
         }
-        ConnectorType::Entity(..) => {
+        ConnectorKind::Entity { .. } => {
             let parts = entities_from_request(&request, schema)?;
             Ok(request_params_to_requests(connector, parts)?)
         }
-        ConnectorType::EntityField(..) => {
+        ConnectorKind::EntityField { .. } => {
             let parts = entities_with_fields_from_request(&request, schema, connector)?;
             Ok(request_params_to_requests(connector, parts)?)
         }
@@ -167,20 +96,13 @@ fn request_params_to_requests(
     from_request
         .into_iter()
         .map(|(response_key, inputs)| {
-            let request = RequestParams {
-                base_uri: connector.base_uri()?,
-                path_template: connector.path_template().clone(),
-                method: connector.method(),
-                body: connector.body(),
-                inputs,
-            }
-            .try_into()
-            .map_err(|_| BoxError::from("invalid request"))?;
+            let inputs = inputs.merge();
 
-            let response_params = ResponseParams {
-                key: response_key,
-                selection: connector.json_selection(),
+            let request = match connector.transport {
+                ConnectorTransport::HttpJson(ref transport) => transport.make_request(inputs)?,
             };
+
+            let response_params = ResponseParams { key: response_key };
 
             Ok((request, response_params))
         })
@@ -305,18 +227,12 @@ fn entities_with_fields_from_request(
     _schema: Arc<Valid<Schema>>,
     connector: &Connector,
 ) -> Result<Vec<(ResponseKey, RequestInputs)>, BoxError> {
-    let typename = match connector.ty.as_ref() {
-        ConnectorType::EntityField(source_field) => &source_field.parent_type_name,
+    // TODO this is the fallback when using the magic finder field, which means
+    // we won't have a type condition in the query
+    let typename = match connector.kind {
+        ConnectorKind::EntityField { ref type_name, .. } => type_name,
         _ => unreachable!(),
     };
-
-    let entity_response_key = request
-        .context
-        .private_entries
-        .lock()
-        .get::<HackEntityResponseKey>()
-        .map(|k| k.0.clone())
-        .unwrap_or(ENTITIES.to_string());
 
     let query = request
         .subgraph_request
@@ -348,7 +264,6 @@ fn entities_with_fields_from_request(
         }
         _ => unreachable!(),
     }?;
-    debug_assert!(entities_field.name.as_str() == entity_response_key);
 
     let types_and_fields = entities_field
         .selection_set
@@ -361,7 +276,7 @@ fn entities_with_fields_from_request(
                 } else {
                     // if we're using the magic finder field, the query planner doesn't use an inline fragment
                     // (because the output type in not an interface)
-                    Ok(vec![(typename.clone(), f)])
+                    Ok(vec![(typename.to_string(), f)])
                 }
             }
 
@@ -437,17 +352,15 @@ fn entities_with_fields_from_request(
 
 pub(super) async fn handle_responses(
     context: Context,
-    _connector: &Connector,
+    connector: &Connector,
     responses: Vec<http::Response<hyper::Body>>,
+    hack_entity_response_key: Option<HackEntityResponseKey>,
 ) -> Result<SubgraphResponse, BoxError> {
     let mut data = serde_json_bytes::Map::new();
     let mut errors = Vec::new();
 
-    let entity_response_key = context
-        .private_entries
-        .lock()
-        .get::<HackEntityResponseKey>()
-        .map(|k| k.0.clone())
+    let entity_response_key = hack_entity_response_key
+        .map(|e| e.0.clone())
         .unwrap_or(ENTITIES.to_string());
 
     for response in responses {
@@ -467,7 +380,11 @@ pub(super) async fn handle_responses(
                 )
                 .map_err(|_| "couldn't deserialize response body")?;
 
-                let (res_data, _) = response_params.selection.apply_to(&json_data);
+                let mut res_data = match connector.transport {
+                    ConnectorTransport::HttpJson(ref transport) => {
+                        transport.map_response(json_data)?
+                    }
+                };
 
                 // TODO __typename injection
                 // TODO alias handling
@@ -479,19 +396,9 @@ pub(super) async fn handle_responses(
                         ref typename,
                     } => {
                         let ResponseTypeName::Concrete(typename) = typename;
+                        inject_typename(&mut res_data, typename);
 
-                        let res_data = match res_data.unwrap_or_default() {
-                            Value::Object(mut res_data) => {
-                                res_data.insert(
-                                    "__typename".to_string(),
-                                    Value::String(typename.clone().into()),
-                                );
-                                Some(Value::Object(res_data.clone()))
-                            }
-                            d => Some(d),
-                        };
-
-                        data.insert(name.clone(), res_data.unwrap_or_default());
+                        data.insert(name.clone(), res_data);
                     }
 
                     // add the response to the "_entities" array at the right index
@@ -500,17 +407,7 @@ pub(super) async fn handle_responses(
                         ref typename,
                     } => {
                         let ResponseTypeName::Concrete(typename) = typename;
-
-                        let res_data = match res_data.unwrap_or_default() {
-                            Value::Object(mut res_data) => {
-                                res_data.insert(
-                                    "__typename".to_string(),
-                                    Value::String(typename.clone().into()),
-                                );
-                                Some(Value::Object(res_data.clone()))
-                            }
-                            d => Some(d),
-                        };
+                        inject_typename(&mut res_data, typename);
 
                         let entities = data
                             .entry(entity_response_key.clone())
@@ -518,7 +415,7 @@ pub(super) async fn handle_responses(
                         entities
                             .as_array_mut()
                             .ok_or_else(|| BoxError::from("entities is not an array"))?
-                            .insert(index, res_data.unwrap_or_default());
+                            .insert(index, res_data);
                     }
 
                     // make an entity object and assign the response to the appropriate field or aliased field,
@@ -538,12 +435,12 @@ pub(super) async fn handle_responses(
 
                         match entities.get_mut(index) {
                             Some(Value::Object(entity)) => {
-                                entity.insert(field_name.clone(), res_data.unwrap_or_default());
+                                entity.insert(field_name.clone(), res_data);
                             }
                             _ => {
                                 let mut entity = serde_json_bytes::Map::new();
                                 entity.insert("__typename", Value::String(typename.clone().into()));
-                                entity.insert(field_name.clone(), res_data.unwrap_or_default());
+                                entity.insert(field_name.clone(), res_data);
                                 entities.insert(index, Value::Object(entity));
                             }
                         };
@@ -573,37 +470,32 @@ pub(super) async fn handle_responses(
     Ok(response)
 }
 
+fn inject_typename(data: &mut Value, typename: &str) {
+    if let Value::Object(data) = data {
+        data.insert(
+            ByteString::from("__typename"),
+            Value::String(ByteString::from(typename)),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
+    use apollo_compiler::name;
     use apollo_compiler::Schema;
     use insta::assert_debug_snapshot;
     use tower::BoxError;
 
     use crate::plugins::connectors::connector::Connector;
-    use crate::plugins::connectors::connector::ConnectorType;
+    use crate::plugins::connectors::directives::HTTPSource;
+    use crate::plugins::connectors::directives::HTTPSourceAPI;
     use crate::plugins::connectors::directives::SourceAPI;
     use crate::plugins::connectors::directives::SourceField;
     use crate::plugins::connectors::selection_parser::Selection as JSONSelection;
+    use crate::plugins::connectors::url_path_parser::URLPathTemplate;
     use crate::Context;
-
-    #[test]
-    fn append_path_test() -> anyhow::Result<()> {
-        assert_eq!(
-            super::append_path(
-                &http::Uri::builder()
-                    .scheme("https")
-                    .authority("localhost:8080")
-                    .path_and_query("/v1")
-                    .build()?,
-                "/hello/42"
-            )?,
-            "https://localhost:8080/v1/hello/42"
-        );
-
-        Ok(())
-    }
 
     #[test]
     fn root_fields() -> anyhow::Result<()> {
@@ -828,51 +720,12 @@ mod tests {
     #[test]
     fn entities_with_fields_from_request() -> anyhow::Result<()> {
         let partial_sdl = r#"
-        directive @join__graph(name: String) on ENUM_VALUE
-        directive @join__schema(
-          graph: join__Graph!
-          directives: [join__Directive!] = []
-        ) on SCHEMA
-        directive @join__field(
-          graph: join__Graph!
-          directives: [join__Directive!] = []
-        ) on FIELD_DEFINITION
-        scalar join__Directive
-
-        enum join__Graph {
-          CONTACTS @join__graph(name: "contacts")
-        }
-
-        schema
-          @join__schema(
-            graph: CONTACTS
-            directives: [
-              {
-                name: "sourceAPI"
-                args: {
-                  name: "api"
-                  http: { baseURL: "http://localhost:4002/contacts/" }
-                }
-              }
-            ]
-          )
-        { query: Query }
-
         type Query {
           field: String
-            @join__field(
-              graph: CONTACTS
-              directives: [
-                {
-                  name: "sourceField"
-                  args: {
-                    api: "contacts"
-                    http: { GET: "/contacts/{contactId}" }
-                    selection: "id name"
-                  }
-                }
-              ]
-            )
+        }
+
+        type Entity {
+          field: String
         }
         "#;
         let schema = Arc::new(Schema::parse_and_validate(partial_sdl, "test.graphql").unwrap());
@@ -912,14 +765,34 @@ mod tests {
             )
             .build();
 
-        let mut source_apis = SourceAPI::from_schema(&schema).unwrap();
-        let mut source_fields = SourceField::from_schema(&schema).unwrap();
+        let api = SourceAPI {
+            graph: "B".to_string(),
+            name: "API".to_string(),
+            http: Some(HTTPSourceAPI {
+                base_url: "http://localhost/api".to_string(),
+                default: true,
+                headers: vec![],
+            }),
+        };
 
-        let connector = Connector::new(
-            "CONNECTOR_0".to_string(),
-            source_apis.remove("contacts_api").unwrap(),
-            ConnectorType::EntityField(source_fields.remove(0)),
-        );
+        let directive = SourceField {
+            graph: "B".to_string(),
+            parent_type_name: name!("Entity"),
+            field_name: name!("field"),
+            output_type_name: name!("String"),
+            api: "API".to_string(),
+            http: Some(HTTPSource {
+                method: http::Method::GET,
+                path_template: URLPathTemplate::parse("/path").unwrap(),
+                body: None,
+                headers: vec![],
+            }),
+            selection: JSONSelection::parse(".data").unwrap().1,
+        };
+
+        let connector =
+            Connector::new_from_source_field("CONNECTOR_QUERY_FIELDB".to_string(), api, directive)
+                .unwrap();
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(&req, schema.clone(), &connector).unwrap(), @r###"
         [
@@ -1025,42 +898,41 @@ mod tests {
 
         let schema = Schema::parse_and_validate(
             r#"
-              directive @join__graph(name: String) on ENUM_VALUE
-              directive @join__schema(
-                graph: join__Graph!
-                directives: [join__Directive!] = []
-              ) on SCHEMA
-              directive @join__field(
-                graph: join__Graph!
-                directives: [join__Directive!] = []
-              ) on FIELD_DEFINITION
-              scalar join__Directive
-
-              enum join__Graph { SUBGRAPH @join__graph(name: "subgraph") }
-              schema @join__schema(
-                graph: SUBGRAPH
-                directives: [{ name: "sourceAPI" args: { name: "api", http: { baseURL: "https://api/v1" } }}]
-              ) { query: Query }
               type Query {
                 hello: String
-                  @join__field(
-                    graph: SUBGRAPH,
-                    directives: [{ name: "sourceField", args: { api: "api", http: { GET: "/hello" }, selection: ".data" } }]
-                  )
               }
             "#,
             "test.graphql",
-        ).unwrap();
+        )
+        .unwrap();
 
-        let apis = SourceAPI::from_schema(&schema)?;
-        let mut fields = SourceField::from_schema(&schema)?;
-        let ty = ConnectorType::RootField(fields.swap_remove(0));
+        let api = SourceAPI {
+            graph: "B".to_string(),
+            name: "API".to_string(),
+            http: Some(HTTPSourceAPI {
+                base_url: "http://localhost/api".to_string(),
+                default: true,
+                headers: vec![],
+            }),
+        };
 
-        let connector = Connector::new(
-            "CONNECTOR_0".to_string(),
-            apis.get("subgraph_api").expect("api exists").clone(),
-            ty,
-        );
+        let directive = SourceField {
+            graph: "B".to_string(),
+            parent_type_name: name!("Query"),
+            field_name: name!("field"),
+            output_type_name: name!("String"),
+            api: "API".to_string(),
+            http: Some(HTTPSource {
+                method: http::Method::GET,
+                path_template: URLPathTemplate::parse("/path").unwrap(),
+                body: None,
+                headers: vec![],
+            }),
+            selection: JSONSelection::parse(".data").unwrap().1,
+        };
+
+        let connector =
+            Connector::new_from_source_field("CONNECTOR_0".to_string(), api, directive).unwrap();
 
         let requests = super::make_requests(req, &connector, Arc::new(schema)).unwrap();
 
@@ -1069,7 +941,7 @@ mod tests {
             (
                 Request {
                     method: GET,
-                    uri: https://api/v1/hello,
+                    uri: http://localhost/api/path,
                     version: HTTP/1.1,
                     headers: {
                         "content-type": "application/json",
@@ -1085,14 +957,6 @@ mod tests {
                             "String",
                         ),
                     },
-                    selection: Path(
-                        Path(
-                            Field(
-                                "data",
-                            ),
-                            Empty,
-                        ),
-                    ),
                 },
             ),
         ]
@@ -1106,14 +970,6 @@ mod tests {
                     "String",
                 ),
             },
-            selection: Path(
-                Path(
-                    Field(
-                        "data",
-                    ),
-                    Empty,
-                ),
-            ),
         }
         "###);
         Ok(())
@@ -1121,44 +977,34 @@ mod tests {
 
     #[tokio::test]
     async fn handle_requests() -> Result<(), BoxError> {
-        let schema = Schema::parse_and_validate(
-            r#"
-              directive @join__graph(name: String) on ENUM_VALUE
-              directive @join__schema(
-                graph: join__Graph!
-                directives: [join__Directive!] = []
-              ) on SCHEMA
-              directive @join__field(
-                graph: join__Graph!
-                directives: [join__Directive!] = []
-              ) on FIELD_DEFINITION
-              scalar join__Directive
+        let api = SourceAPI {
+            graph: "B".to_string(),
+            name: "API".to_string(),
+            http: Some(HTTPSourceAPI {
+                base_url: "http://localhost/api".to_string(),
+                default: true,
+                headers: vec![],
+            }),
+        };
 
-              enum join__Graph { SUBGRAPH @join__graph(name: "subgraph") }
-              schema @join__schema(
-                graph: SUBGRAPH
-                directives: [{ name: "sourceAPI" args: { name: "api", http: { baseURL: "https://api/v1" } }}]
-              ) { query: Query }
-              type Query {
-                hello: String
-                  @join__field(
-                    graph: SUBGRAPH,
-                    directives: [{ name: "sourceField", args: { api: "api", http: { GET: "/hello" }, selection: ".data" } }]
-                  )
-              }
-            "#,
-            "test.graphql",
-        ).unwrap();
+        let directive = SourceField {
+            graph: "B".to_string(),
+            parent_type_name: name!("Query"),
+            field_name: name!("field"),
+            output_type_name: name!("String"),
+            api: "API".to_string(),
+            http: Some(HTTPSource {
+                method: http::Method::GET,
+                path_template: URLPathTemplate::parse("/path").unwrap(),
+                body: None,
+                headers: vec![],
+            }),
+            selection: JSONSelection::parse(".data").unwrap().1,
+        };
 
-        let apis = SourceAPI::from_schema(&schema)?;
-        let mut fields = SourceField::from_schema(&schema)?;
-        let ty = ConnectorType::RootField(fields.swap_remove(0));
-
-        let connector = Connector::new(
-            "CONNECTOR_0".to_string(),
-            apis.get("subgraph_api").expect("api exists").clone(),
-            ty,
-        );
+        let connector =
+            Connector::new_from_source_field("CONNECTOR_QUERY_FIELDB".to_string(), api, directive)
+                .unwrap();
 
         let response1 = http::Response::builder()
             .extension(super::ResponseParams {
@@ -1166,7 +1012,6 @@ mod tests {
                     name: "hello".to_string(),
                     typename: super::ResponseTypeName::Concrete("String".to_string()),
                 },
-                selection: JSONSelection::parse(".data").unwrap().1,
             })
             .body(hyper::Body::from(r#"{"data":"world"}"#))
             .expect("response builder");
@@ -1177,14 +1022,17 @@ mod tests {
                     name: "hello2".to_string(),
                     typename: super::ResponseTypeName::Concrete("String".to_string()),
                 },
-                selection: JSONSelection::parse(".data").unwrap().1,
             })
             .body(hyper::Body::from(r#"{"data":"world"}"#))
             .expect("response builder");
 
-        let res =
-            super::handle_responses(Context::default(), &connector, vec![response1, response2])
-                .await?;
+        let res = super::handle_responses(
+            Context::default(),
+            &connector,
+            vec![response1, response2],
+            None,
+        )
+        .await?;
 
         assert_debug_snapshot!(res.response.body(), @r###"
         Response {

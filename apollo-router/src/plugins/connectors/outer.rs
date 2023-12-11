@@ -15,7 +15,6 @@ use crate::graphql;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphRequest;
-use crate::Context;
 
 const ENTITIES: &str = "_entities";
 const REPRESENTATIONS: &str = "representations";
@@ -23,34 +22,40 @@ const TYPENAME: &str = "__typename";
 
 pub(super) fn map_request(
     mut outer: SubgraphRequest,
-) -> Result<SupergraphRequest, OuterRequestError> {
-    if let Some((body, context)) =
-        convert_entities_field_to_magic_finder(outer.subgraph_request.body_mut(), &outer.context)?
+) -> Result<(SupergraphRequest, Option<HackEntityResponseKey>), OuterRequestError> {
+    if let Some((body, hack_entity_response_key)) =
+        convert_entities_field_to_magic_finder(outer.subgraph_request.body_mut())?
     {
         let mut supergraph_request = http::Request::builder()
             .method(outer.subgraph_request.method())
             .uri(outer.subgraph_request.uri())
             .version(outer.subgraph_request.version())
+            .extension(hack_entity_response_key.clone()) // 2.
             .body(body)
             .map_err(|_todo| OuterRequestError::NewRequestBodyInvalid)?;
         *supergraph_request.headers_mut() = outer.subgraph_request.headers().clone();
 
-        Ok(SupergraphRequest {
-            supergraph_request,
-            context,
-        })
+        Ok((
+            SupergraphRequest {
+                supergraph_request,
+                context: outer.context,
+            },
+            Some(hack_entity_response_key),
+        ))
     } else {
-        Ok(SupergraphRequest {
-            supergraph_request: outer.subgraph_request,
-            context: outer.context,
-        })
+        Ok((
+            SupergraphRequest {
+                supergraph_request: outer.subgraph_request,
+                context: outer.context,
+            },
+            None,
+        ))
     }
 }
 
 fn convert_entities_field_to_magic_finder(
     req: &mut graphql::Request,
-    context: &Context,
-) -> Result<Option<(graphql::Request, Context)>, OuterRequestError> {
+) -> Result<Option<(graphql::Request, HackEntityResponseKey)>, OuterRequestError> {
     let query = req.query.clone().ok_or(OuterRequestError::QueryMissing)?;
 
     if let Some(entities_field) = find_entities_field(&query)? {
@@ -74,12 +79,10 @@ fn convert_entities_field_to_magic_finder(
 
         req.query = Some(query.clone().replace(ENTITIES, &magic_finder_field));
 
-        context
-            .private_entries
-            .lock()
-            .insert(HackEntityResponseKey(magic_finder_field.to_string()));
-
-        Ok(Some((req.to_owned(), context.clone())))
+        Ok(Some((
+            req.to_owned(),
+            HackEntityResponseKey(magic_finder_field.to_string()),
+        )))
     } else {
         Ok(None)
     }
@@ -148,13 +151,9 @@ fn collect_typenames_from_representations(
 pub(super) async fn map_response(
     inner: crate::services::supergraph::Response,
     context: &crate::Context,
+    hack_entity_response_key: Option<HackEntityResponseKey>,
 ) -> Result<SubgraphResponse, OuterResponseError> {
-    let hack_response_key = context
-        .private_entries
-        .lock()
-        .remove::<HackEntityResponseKey>();
-
-    if let Some(hack_response_key) = hack_response_key {
+    if let Some(hack_entity_response_key) = hack_entity_response_key {
         let (parts, mut body) = inner.response.into_parts();
 
         // TODO multipart responses from connector subgraphs?
@@ -168,7 +167,7 @@ pub(super) async fn map_response(
                 .as_object_mut()
                 .ok_or(OuterResponseError::DataNotObject)?;
 
-            if let Some(value) = data.remove(hack_response_key.0.as_str()) {
+            if let Some(value) = data.remove(hack_entity_response_key.0.as_str()) {
                 data.insert(ENTITIES, value);
             }
         }

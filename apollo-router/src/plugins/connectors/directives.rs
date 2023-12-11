@@ -2,7 +2,6 @@
 
 use std::collections::HashMap;
 
-use apollo_compiler::ast::Selection;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
@@ -166,6 +165,13 @@ pub(super) struct SourceAPI {
 }
 
 impl SourceAPI {
+    pub(super) fn is_default(&self) -> bool {
+        self.http
+            .as_ref()
+            .map(|http| http.default)
+            .unwrap_or_default()
+    }
+
     pub(super) fn from_schema(
         schema: &Schema,
     ) -> Result<HashMap<String, Self>, ConnectorDirectiveError> {
@@ -375,9 +381,9 @@ impl HTTPHeaderMapping {
 #[derive(Debug, Serialize)]
 pub(super) struct SourceType {
     pub(super) graph: String,
-    pub(super) type_name: String,
+    pub(super) type_name: Name,
     pub(super) api: String,
-    pub(super) http: Option<HTTPSourceType>,
+    pub(super) http: Option<HTTPSource>,
     pub(super) selection: JSONSelection,
     pub(super) key_type_map: Option<KeyTypeMap>,
 }
@@ -421,7 +427,7 @@ impl SourceType {
                                         .to_string(),
                                 )
                             })?;
-                            Self::from_directive(graph_name.clone(), name.to_string(), args)
+                            Self::from_directive(graph_name.clone(), name.clone(), args)
                         })
                         .collect::<Result<Vec<_>, _>>()?,
                 );
@@ -433,7 +439,7 @@ impl SourceType {
 
     pub(super) fn from_directive(
         graph: String,
-        type_name: String,
+        type_name: Name,
         directive: &HashMap<Name, Node<apollo_compiler::ast::Value>>,
     ) -> Result<Self, ConnectorDirectiveError> {
         let api = directive
@@ -480,7 +486,7 @@ impl SourceType {
 
         let http = directive
             .get(&name!("http"))
-            .map(HTTPSourceType::from_argument)
+            .map(HTTPSource::from_argument)
             .transpose()?;
 
         let key_type_map = directive
@@ -500,118 +506,6 @@ impl SourceType {
 
     pub(super) fn api_name(&self) -> String {
         format!("{}_{}", self.graph, self.api)
-    }
-
-    pub(super) fn path_template(&self) -> &URLPathTemplate {
-        match &self.http {
-            Some(http) => &http.path_template,
-            None => unreachable!(),
-        }
-    }
-
-    pub(super) fn method(&self) -> &http::Method {
-        match &self.http {
-            Some(http) => &http.method,
-            None => unreachable!(),
-        }
-    }
-
-    pub(super) fn selections(&self) -> Vec<Selection> {
-        self.selection.clone().into()
-    }
-
-    pub(super) fn path_required_parameters(&self) -> Vec<String> {
-        match &self.http {
-            Some(http) => http.path_template.required_parameters(),
-            None => vec![],
-        }
-    }
-
-    pub(super) fn body(&self) -> Option<JSONSelection> {
-        self.http.as_ref().and_then(|http| http.body.clone())
-    }
-}
-
-#[derive(Debug, Serialize)]
-pub(super) struct HTTPSourceType {
-    pub(super) path_template: URLPathTemplate,
-    #[serde(with = "http_serde::method")]
-    pub(super) method: http::Method,
-    pub(super) headers: Vec<HTTPHeaderMapping>,
-    pub(super) body: Option<JSONSelection>,
-}
-
-impl HTTPSourceType {
-    pub(super) fn from_argument(argument: &Node<Value>) -> Result<Self, ConnectorDirectiveError> {
-        let argument = argument
-            .as_object()
-            .ok_or_else(|| {
-                ConnectorDirectiveError::InvalidTypeForAttribute(
-                    "object".to_string(),
-                    "http".to_string(),
-                )
-            })?
-            .iter()
-            .map(|(name, value)| (name, value))
-            .collect::<HashMap<_, _>>();
-
-        fn parse_template(
-            value: &Node<Value>,
-            name: &str,
-        ) -> Result<URLPathTemplate, ConnectorDirectiveError> {
-            URLPathTemplate::parse(value.as_str().ok_or_else(|| {
-                ConnectorDirectiveError::InvalidTypeForAttribute(
-                    name.to_string(),
-                    "String".to_string(),
-                )
-            })?)
-            .map_err(|e| ConnectorDirectiveError::ParseError(name.to_string(), e))
-        }
-
-        let (path_template, method) = if let Some(get) = argument.get(&name!("GET")) {
-            (parse_template(get, "GET")?, http::Method::GET)
-        } else if let Some(post) = argument.get(&name!("POST")) {
-            (parse_template(post, "POST")?, http::Method::POST)
-        } else {
-            return Err(ConnectorDirectiveError::RequiresExactlyOne(
-                "GET, POST".to_string(),
-                "HTTPSourceType".to_string(),
-            ));
-        };
-
-        let headers = argument
-            .get(&name!("headers"))
-            .map(|v| HTTPHeaderMapping::from_header_arguments(v))
-            .transpose()?
-            .unwrap_or_default();
-
-        let body = argument
-            .get(&name!("body"))
-            .map(|v| {
-                let v = v.as_str().ok_or_else(|| {
-                    ConnectorDirectiveError::InvalidTypeForAttribute(
-                        "string".to_string(),
-                        "body".to_string(),
-                    )
-                })?;
-
-                Ok(JSONSelection::parse(v)
-                    .map_err(|_| {
-                        ConnectorDirectiveError::ParseError(
-                            "Failed to parse selection".to_string(),
-                            "body".to_string(),
-                        )
-                    })?
-                    .1)
-            })
-            .transpose()?;
-
-        Ok(Self {
-            path_template,
-            method,
-            headers,
-            body,
-        })
     }
 }
 
@@ -637,11 +531,11 @@ impl KeyTypeMap {
 #[derive(Debug, Serialize)]
 pub(super) struct SourceField {
     pub(super) graph: String,
-    pub(super) parent_type_name: String,
-    pub(super) field_name: String,
-    pub(super) output_type_name: String,
+    pub(super) parent_type_name: Name,
+    pub(super) field_name: Name,
+    pub(super) output_type_name: Name,
     pub(super) api: String,
-    pub(super) http: Option<HTTPSourceField>,
+    pub(super) http: Option<HTTPSource>,
     pub(super) selection: JSONSelection,
 }
 
@@ -653,18 +547,14 @@ impl SourceField {
 
         let mut source_fields = vec![];
         for (parent_type_name, ty) in schema.types.iter() {
-            source_fields.extend(Self::from_type(
-                &graph_names,
-                parent_type_name.to_string(),
-                ty,
-            )?);
+            source_fields.extend(Self::from_type(&graph_names, parent_type_name.clone(), ty)?);
         }
         Ok(source_fields)
     }
 
     fn from_type(
         graph_names: &HashMap<String, String>,
-        parent_type_name: String,
+        parent_type_name: Name,
         ty: &ExtendedType,
     ) -> Result<Vec<Self>, ConnectorDirectiveError> {
         Ok(match ty {
@@ -680,7 +570,7 @@ impl SourceField {
 
     fn from_fields(
         graph_names: &HashMap<String, String>,
-        parent_type_name: String,
+        parent_type_name: Name,
         fields: &IndexMap<Name, Component<FieldDefinition>>,
     ) -> Result<Vec<Self>, ConnectorDirectiveError> {
         let mut result: Vec<Self> = vec![];
@@ -715,8 +605,8 @@ impl SourceField {
                         Self::from_directive(
                             graph_name.clone(),
                             parent_type_name.clone(),
-                            field_name.to_string(),
-                            field_def.ty.inner_named_type().to_string(),
+                            field_name.clone(),
+                            field_def.ty.inner_named_type().clone(),
                             args,
                         )
                     })
@@ -729,9 +619,9 @@ impl SourceField {
 
     pub(super) fn from_directive(
         graph: String,
-        parent_type_name: String,
-        field_name: String,
-        output_type_name: String,
+        parent_type_name: Name,
+        field_name: Name,
+        output_type_name: Name,
         directive: &HashMap<Name, Node<apollo_compiler::ast::Value>>,
     ) -> Result<Self, ConnectorDirectiveError> {
         let api = directive
@@ -778,7 +668,7 @@ impl SourceField {
 
         let http = directive
             .get(&name!("http"))
-            .map(HTTPSourceField::from_argument)
+            .map(HTTPSource::from_argument)
             .transpose()?;
 
         Ok(Self {
@@ -795,46 +685,18 @@ impl SourceField {
     pub(super) fn api_name(&self) -> String {
         format!("{}_{}", self.graph, self.api)
     }
-
-    pub(super) fn path_template(&self) -> &URLPathTemplate {
-        match &self.http {
-            Some(http) => &http.path_template,
-            None => unreachable!(),
-        }
-    }
-
-    pub(super) fn method(&self) -> &http::Method {
-        match &self.http {
-            Some(http) => &http.method,
-            None => unreachable!(),
-        }
-    }
-
-    pub(super) fn selections(&self) -> Vec<Selection> {
-        self.selection.clone().into()
-    }
-
-    pub(super) fn path_required_parameters(&self) -> Vec<String> {
-        match &self.http {
-            Some(http) => http.path_template.required_parameters(),
-            None => vec![],
-        }
-    }
-
-    pub(super) fn body(&self) -> Option<JSONSelection> {
-        self.http.as_ref().and_then(|http| http.body.clone())
-    }
 }
 
 #[derive(Debug, Serialize)]
-pub(super) struct HTTPSourceField {
+pub(super) struct HTTPSource {
     pub(super) path_template: URLPathTemplate,
     #[serde(with = "http_serde::method")]
     pub(super) method: http::Method,
+    pub(super) headers: Vec<HTTPHeaderMapping>,
     pub(super) body: Option<JSONSelection>,
 }
 
-impl HTTPSourceField {
+impl HTTPSource {
     fn from_argument(argument: &Node<Value>) -> Result<Self, ConnectorDirectiveError> {
         let argument = argument
             .as_object()
@@ -878,6 +740,12 @@ impl HTTPSourceField {
             ));
         };
 
+        let headers = argument
+            .get(&name!("headers"))
+            .map(|v| HTTPHeaderMapping::from_header_arguments(v))
+            .transpose()?
+            .unwrap_or_default();
+
         let body = argument
             .get(&name!("body"))
             .map(|v| {
@@ -902,6 +770,7 @@ impl HTTPSourceField {
         Ok(Self {
             path_template,
             method,
+            headers,
             body,
         })
     }
@@ -1162,6 +1031,7 @@ mod tests {
                 "http": {
                   "path_template": "/contacts/{contactId!}",
                   "method": "GET",
+                  "headers": [],
                   "body": null
                 },
                 "selection": {

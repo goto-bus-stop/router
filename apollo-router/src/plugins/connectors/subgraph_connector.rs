@@ -246,7 +246,10 @@ where
             let subgraph_response = connector
                 .map_http_responses(responses, context, hack_entity_response_key) // 4.
                 .await?;
-            // dbg!(&subgraph_response.response.body().data);
+            tracing::debug!(
+                data = serde_json::to_string(&subgraph_response.response.body().data)
+                    .unwrap_or_else(|e| e.to_string())
+            );
 
             Ok(subgraph_response)
 

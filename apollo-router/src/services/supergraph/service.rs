@@ -830,43 +830,6 @@ impl SupergraphCreator {
             )
     }
 
-    // Like make() except without traffic shaping.
-    // TODO: there's a world in which plugins are Clone OR reuseable,
-    // gotta figure that one out before private preview
-    pub(crate) fn make_connector(
-        &self,
-    ) -> impl Service<
-        supergraph::Request,
-        Response = supergraph::Response,
-        Error = BoxError,
-        Future = BoxFuture<'static, supergraph::ServiceResult>,
-    > + Send {
-        let supergraph_service = SupergraphService::builder()
-            .query_planner_service(self.query_planner_service.clone())
-            .execution_service_factory(ExecutionServiceFactory {
-                schema: self.schema.clone(),
-                plugins: self.plugins.clone(),
-                subgraph_service_factory: self.subgraph_service_factory.clone(),
-            })
-            .schema(self.schema.clone())
-            .notify(self.config.notify.clone())
-            .build();
-
-        let supergraph_service =
-            AllowOnlyHttpPostMutationsLayer::default().layer(supergraph_service);
-
-        ServiceBuilder::new()
-            .layer(content_negotiation::SupergraphLayer::default())
-            .service(
-                self.plugins
-                    .iter()
-                    .rev()
-                    .fold(supergraph_service.boxed(), |acc, (_, e)| {
-                        e.supergraph_service(acc)
-                    }),
-            )
-    }
-
     pub(crate) async fn cache_keys(&self, count: Option<usize>) -> Vec<WarmUpCachingQueryKey> {
         self.query_planner_service.cache_keys(count).await
     }

@@ -30,8 +30,6 @@ use tower::ServiceExt;
 
 use super::directives::HTTPSourceAPI;
 use super::directives::SourceAPI;
-use super::outer::map_request;
-use super::outer::map_response;
 use super::request_response::HackEntityResponseKey;
 use super::Connector;
 use crate::error::ConnectorDirectiveError;
@@ -52,19 +50,14 @@ use crate::Configuration;
 
 #[derive(Clone)]
 pub(crate) struct SubgraphConnector {
-    creator: SupergraphCreator,
-    query_analysis_layer: QueryAnalysisLayer,
     http_connectors: HashMap<String, HTTPConnector>,
 }
 
 impl SubgraphConnector {
     pub(crate) fn for_schema(
         schema: Arc<Schema>,
-        configuration: Arc<Configuration>,
-        creator: SupergraphCreator,
         connectors: HashMap<String, &Connector>,
     ) -> Result<Self, ConnectorDirectiveError> {
-        let query_analysis_layer = QueryAnalysisLayer::new(schema.clone(), configuration);
         let http_connectors = connectors
             .into_iter()
             .map(|(name, connector)| {
@@ -74,11 +67,7 @@ impl SubgraphConnector {
                 )
             })
             .collect();
-        Ok(Self {
-            creator,
-            query_analysis_layer,
-            http_connectors,
-        })
+        Ok(Self { http_connectors })
     }
 }
 
@@ -129,8 +118,7 @@ impl tower::Service<SubgraphRequest> for SubgraphConnector {
             .clone();
 
         Box::pin(async move {
-            let res = service.call2(request).await?;
-            println!("HTTPConnector returned {res:?}");
+            let res = service.call(request).await?;
             Ok(res)
         })
     }
@@ -174,24 +162,8 @@ impl HTTPConnector {
     }
 }
 
-impl<S> Layer<S> for HTTPConnector
-where
-    S: Clone,
-{
-    type Service = HTTPConnectorService<S>;
-
-    fn layer(&self, inner: S) -> Self::Service {
-        HTTPConnectorService {
-            inner,
-            schema: self.schema.clone(),
-            connector: self.connector.clone(),
-            client: self.client.clone(),
-        }
-    }
-}
-
 impl HTTPConnector {
-    async fn call2(&self, request: SubgraphRequest) -> Result<SubgraphResponse, BoxError> {
+    async fn call(&self, request: SubgraphRequest) -> Result<SubgraphResponse, BoxError> {
         let schema = self.schema.clone();
         let connector = self.connector.clone();
         let context = request.context.clone();
@@ -205,12 +177,6 @@ impl HTTPConnector {
             .get::<HackEntityResponseKey>()
             .cloned();
 
-        println!(
-            "calling create_requests with connector {} and service_name {:?} on {:?}",
-            connector.name,
-            request.subgraph_name,
-            request.subgraph_request.body()
-        );
         let requests = connector.create_requests(request, Arc::from(schema.definitions.clone()))?;
 
         let tasks = requests.into_iter().map(|(req, res_params)| async {
@@ -233,77 +199,6 @@ impl HTTPConnector {
         dbg!(&subgraph_response.response.body().data);
 
         Ok(subgraph_response)
-    }
-}
-#[derive(Clone)]
-pub(crate) struct HTTPConnectorService<S> {
-    inner: S,
-    schema: Arc<Schema>,
-    connector: Connector,
-    client: hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>>,
-}
-
-impl<S> tower::Service<SubgraphRequest> for HTTPConnectorService<S>
-where
-    S: Service<SubgraphRequest>,
-    S::Future: Future<Output = Result<SubgraphResponse, BoxError>> + Send + 'static,
-{
-    type Response = SubgraphResponse;
-    type Error = BoxError;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner
-            .poll_ready(cx)
-            .map_err(|_| BoxError::from("http service is not ready"))
-    }
-
-    fn call(&mut self, request: SubgraphRequest) -> Self::Future {
-        // dbg!(&request.subgraph_request, &request.subgraph_name);
-        let schema = self.schema.clone();
-        let connector = self.connector.clone();
-        let context = request.context.clone();
-        // dbg!(&connector);
-
-        let client = self.client.clone();
-
-        Box::pin(async move {
-            let hack_entity_response_key = request // 3.
-                .supergraph_request
-                .extensions()
-                .get::<HackEntityResponseKey>()
-                .cloned();
-
-            let requests =
-                connector.create_requests(request, Arc::from(schema.definitions.clone()))?;
-
-            let tasks = requests.into_iter().map(|(req, res_params)| async {
-                println!("HTTP {} {}", &req.method(), &req.uri());
-                let mut res = client.request(req).await?;
-                res.extensions_mut().insert(res_params);
-                Ok::<_, BoxError>(res)
-            });
-
-            let results = futures::future::try_join_all(tasks).await;
-
-            let responses = match results {
-                Ok(responses) => responses,
-                Err(e) => return Err(BoxError::from(e)),
-            };
-
-            let subgraph_response = connector
-                .map_http_responses(responses, context, hack_entity_response_key) // 4.
-                .await?;
-            dbg!(&subgraph_response.response.body().data);
-
-            Ok(subgraph_response)
-
-            // TODO: consider removing inner,
-            // unless we have a nice subgraph HTTP service sometimes
-            //
-            // let fut = self.inner.call(request);
-            // fut.await.map_err(BoxError::from)
-        })
     }
 }
 

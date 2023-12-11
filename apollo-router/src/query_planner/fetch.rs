@@ -7,6 +7,7 @@ use indexmap::IndexSet;
 use router_bridge::planner::Planner;
 use serde::Deserialize;
 use serde::Serialize;
+use tokio::sync::mpsc;
 use tower::ServiceExt;
 use tracing::instrument;
 use tracing::Instrument;
@@ -245,7 +246,14 @@ impl FetchNode {
         parameters: &'a ExecutionParameters<'a>,
         data: &'a Value,
         current_dir: &'a Path,
+        sender: mpsc::Sender<graphql::Response>,
     ) -> Result<(Value, Vec<Error>), FetchError> {
+        if let Some(connector_node) = self.connector_node.clone() {
+            return self
+                .connector_execution(parameters, current_dir, data, sender, &connector_node)
+                .await;
+        }
+
         let FetchNode {
             operation,
             operation_kind,
@@ -479,6 +487,26 @@ impl FetchNode {
             rewrites::apply_rewrites(schema, &mut data, &self.output_rewrites);
             (Value::from_path(current_dir, data), errors)
         }
+    }
+
+    async fn connector_execution<'a>(
+        &'a self,
+        parameters: &'a ExecutionParameters<'a>,
+        current_dir: &'a Path,
+        data: &'a Value,
+        sender: mpsc::Sender<graphql::Response>,
+        connector_node: &'a PlanNode,
+    ) -> Result<(Value, Vec<Error>), FetchError> {
+        connector_node
+            .execute_recursively(parameters, &current_dir, data, sender)
+            .instrument(tracing::info_span!(
+                "connector",
+                "graphql.path" = %current_dir,
+                "apollo.subgraph.name" = self.service_name.as_str(),
+                "otel.kind" = "INTERNAL"
+            ))
+            .await;
+        todo!()
     }
 
     #[cfg(test)]

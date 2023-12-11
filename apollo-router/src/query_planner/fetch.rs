@@ -129,7 +129,24 @@ pub(crate) struct FetchNode {
 
     // query plan for the connector subgraph
     #[serde(default)]
-    pub(crate) connector_plan: Option<Arc<PlanNode>>,
+    pub(crate) connector_node: Option<Arc<PlanNode>>,
+
+    #[serde(default)]
+    pub(crate) protocol_kind: Arc<ProtocolKind>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum ProtocolKind {
+    #[default]
+    GraphQL,
+    Rest(RestProtocol),
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RestProtocol {
+    magic_finder_field: Option<String>,
 }
 
 pub(crate) struct Variables {
@@ -502,24 +519,29 @@ impl FetchNode {
                 "planning for subgraph '{}' and query '{}'",
                 self.service_name, self.operation
             );
-            if let Some((operation, magic_finder_field)) =
-                convert_entities_field_to_magic_finder(self.operation.clone())?
+
+            let (operation, magic_finder_field) =
+                match convert_entities_field_to_magic_finder(&self.operation)? {
+                    Some((op, magic)) => (op, Some(magic)),
+                    None => (self.operation.clone(), None),
+                };
+
+            println!(
+                "replaced with operation(magic finder field={magic_finder_field:?}): {operation}"
+            );
+            match planner
+                .plan(operation, self.operation_name.clone())
+                .await
+                .map_err(QueryPlannerError::RouterBridgeError)?
+                .into_result()
             {
-                println!(
-                    "replaced with operation(magic finder field={magic_finder_field}): {operation}"
-                );
-                match planner
-                    .plan(operation, self.operation_name.clone())
-                    .await
-                    .map_err(QueryPlannerError::RouterBridgeError)?
-                    .into_result()
-                {
-                    Ok(plan) => {
-                        self.connector_node = plan.data.query_plan.node.map(Arc::new);
-                    }
-                    Err(err) => {
-                        return Err(QueryPlannerError::from(err));
-                    }
+                Ok(plan) => {
+                    self.connector_node = plan.data.query_plan.node.map(Arc::new);
+                    self.protocol_kind =
+                        Arc::new(ProtocolKind::Rest(RestProtocol { magic_finder_field }));
+                }
+                Err(err) => {
+                    return Err(QueryPlannerError::from(err));
                 }
             }
         }
@@ -528,9 +550,9 @@ impl FetchNode {
 }
 
 fn convert_entities_field_to_magic_finder(
-    operation: String,
+    operation: &str,
 ) -> Result<Option<(String, String)>, QueryPlannerError> {
-    if let Some(entities_field) = find_entities_field(&operation)? {
+    if let Some(entities_field) = find_entities_field(operation)? {
         let type_conditions = collect_type_conditions(&entities_field.selection_set);
 
         let magic_finder_field = apollo_compiler::ast::Name::new(format!(

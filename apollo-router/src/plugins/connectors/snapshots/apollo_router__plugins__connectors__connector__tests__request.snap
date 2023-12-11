@@ -22,6 +22,7 @@ expression: requests_and_params
                     "String",
                 ),
             },
+<<<<<<< HEAD
             selection: Path(
                 Path(
                     Field(
@@ -30,6 +31,8 @@ expression: requests_and_params
                     Empty,
                 ),
             ),
+=======
+>>>>>>> rest_connectors
         },
     ),
 ]

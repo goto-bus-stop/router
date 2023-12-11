@@ -504,7 +504,7 @@ impl FetchNode {
                 .into_result()
             {
                 Ok(plan) => {
-                    self.connector_plan = plan.data.query_plan.node.map(Arc::new);
+                    self.connector_node = plan.data.query_plan.node.map(Arc::new);
                 }
                 Err(err) => {
                     return Err(QueryPlannerError::from(err));

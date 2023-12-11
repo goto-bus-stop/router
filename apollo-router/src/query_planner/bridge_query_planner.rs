@@ -482,6 +482,15 @@ impl BridgeQueryPlanner {
                     node.generate_connector_plan(&self.subgraph_schemas, &self.subgraph_planners)
                         .await?;
                 }
+                tracing::debug!(
+                    query = original_query,
+                    plan = serde_json::to_string(&plan.data.query_plan.node).unwrap()
+                );
+
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&plan.data.query_plan.node).unwrap()
+                );
                 plan
             }
             Err(err) => {

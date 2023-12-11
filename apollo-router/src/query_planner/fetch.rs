@@ -515,9 +515,10 @@ impl FetchNode {
         subgraph_planners: &HashMap<String, Arc<Planner<QueryPlanResult>>>,
     ) -> Result<(), QueryPlannerError> {
         if let Some(planner) = subgraph_planners.get(&self.service_name) {
-            println!(
+            tracing::debug!(
                 "planning for subgraph '{}' and query '{}'",
-                self.service_name, self.operation
+                self.service_name,
+                self.operation
             );
 
             let (operation, magic_finder_field) =
@@ -526,7 +527,7 @@ impl FetchNode {
                     None => (self.operation.clone(), None),
                 };
 
-            println!(
+            tracing::debug!(
                 "replaced with operation(magic finder field={magic_finder_field:?}): {operation}"
             );
             match planner

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::ast::Selection as GraphQLSelection;
@@ -55,6 +56,15 @@ pub(super) enum ConnectorKind {
 #[derive(Clone, Debug)]
 pub(super) enum ConnectorTransport {
     HttpJson(HttpJsonTransport),
+}
+
+/// The list of the subgraph names that should use the inner query planner
+/// instead of making a normal subgraph request.
+pub(crate) fn connector_subgraph_names(connectors: &HashMap<String, Connector>) -> HashSet<String> {
+    connectors
+        .values()
+        .map(|c| c.origin_subgraph.clone())
+        .collect()
 }
 
 impl Connector {

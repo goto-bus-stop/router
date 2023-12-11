@@ -26,7 +26,6 @@ use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
-use crate::plugins::connectors::connector_subgraph_names;
 use crate::plugins::connectors::generate_connector_supergraph;
 use crate::plugins::connectors::subgraph_connector::SubgraphConnector;
 use crate::plugins::connectors::Connector;

@@ -137,7 +137,7 @@ pub(crate) struct FetchNode {
 
 #[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum ProtocolKind {
+pub(crate) enum ProtocolKind {
     #[default]
     GraphQL,
     Rest(RestProtocol),
@@ -145,7 +145,7 @@ enum ProtocolKind {
 
 #[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct RestProtocol {
+pub(crate) struct RestProtocol {
     magic_finder_field: Option<String>,
 }
 

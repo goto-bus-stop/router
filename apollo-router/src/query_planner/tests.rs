@@ -263,6 +263,7 @@ async fn defer() {
                         output_rewrites: None,
                         authorization: Default::default(),
                         connector_node: Default::default(),
+                        protocol_kind: Default::default(),
                     }))),
                 },
                 deferred: vec![DeferredNode {
@@ -307,6 +308,7 @@ async fn defer() {
                             output_rewrites: None,
                             authorization: Default::default(),
                             connector_node: Default::default(),
+                            protocol_kind: Default::default(),
                         })),
                     }))),
                 }],

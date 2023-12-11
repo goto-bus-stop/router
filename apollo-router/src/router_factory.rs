@@ -174,7 +174,6 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
 
         let connectors = Arc::from(Connector::from_schema(&spec_schema)?);
         let connector_subgraphs = if !connectors.is_empty() {
-            let connector_subgraph_names = connector_subgraph_names(&connectors);
             let connector_schema = generate_connector_supergraph(&spec_schema, &connectors)?;
 
             // todo: that's a lot of reparsing isnt it? :D
@@ -183,14 +182,9 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                 &configuration,
             )?);
 
-            println!("connector subgraph names: {connector_subgraph_names:?}");
             let mut aggregated_connectors: HashMap<String, HashMap<String, &Connector>> =
                 HashMap::new();
             for (name, connector) in connectors.iter() {
-                println!(
-                    "CONNECTOR: name={name}, origin={}",
-                    connector.origin_subgraph
-                );
                 let subgraph_name = connector.origin_subgraph.clone();
 
                 aggregated_connectors
@@ -202,9 +196,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             for (name, connectors_map) in aggregated_connectors.into_iter() {
                 subgraph_connectors.insert(
                     name,
-                    SubgraphConnector::for_schema(connector_schema.clone(), connectors_map)
-                        // TODON'T
-                        .unwrap(),
+                    SubgraphConnector::for_schema(connector_schema.clone(), connectors_map)?,
                 );
             }
 

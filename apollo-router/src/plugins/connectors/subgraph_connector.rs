@@ -57,16 +57,14 @@ impl SubgraphConnector {
     pub(crate) fn for_schema(
         schema: Arc<Schema>,
         connectors: HashMap<String, &Connector>,
-    ) -> Result<Self, ConnectorDirectiveError> {
+    ) -> Result<Self, BoxError> {
         let http_connectors = connectors
             .into_iter()
             .map(|(name, connector)| {
-                (
-                    name,
-                    HTTPConnector::new(schema.clone(), connector.clone()).unwrap(),
-                )
+                HTTPConnector::new(schema.clone(), connector.clone())
+                    .map(|connector| (name, connector))
             })
-            .collect();
+            .collect::<Result<HashMap<_, _>, _>>()?;
         Ok(Self { http_connectors })
     }
 }
@@ -111,15 +109,20 @@ impl tower::Service<SubgraphRequest> for SubgraphConnector {
     }
 
     fn call(&mut self, request: SubgraphRequest) -> Self::Future {
-        let service = self
-            .http_connectors
-            .get(request.subgraph_name.as_ref().unwrap())
-            .unwrap()
-            .clone();
+        let http_connector = request
+            .subgraph_name
+            .as_ref()
+            .and_then(|name| self.http_connectors.get(name))
+            .cloned();
 
         Box::pin(async move {
-            let res = service.call(request).await?;
-            Ok(res)
+            match http_connector {
+                Some(service) => {
+                    let res = service.call(request).await?;
+                    Ok(res)
+                }
+                None => Err(BoxError::from("HTTP connector not found")),
+            }
         })
     }
 }
@@ -180,7 +183,6 @@ impl HTTPConnector {
         let requests = connector.create_requests(request, Arc::from(schema.definitions.clone()))?;
 
         let tasks = requests.into_iter().map(|(req, res_params)| async {
-            println!("HTTP {} {}", &req.method(), &req.uri());
             let mut res = client.request(req).await?;
             res.extensions_mut().insert(res_params);
             Ok::<_, BoxError>(res)

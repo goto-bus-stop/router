@@ -290,7 +290,7 @@ impl FetchNode {
         let parent_service_name = match &*self.protocol_kind {
             ProtocolKind::RestFetch(RestFetchNode {
                 parent_service_name,
-            }) => &parent_service_name,
+            }) => parent_service_name,
             _ => service_name,
         };
 
@@ -562,11 +562,6 @@ impl FetchNode {
                 "otel.kind" = "INTERNAL"
             ))
             .await;
-        println!(
-            "connector returned (self protocol is:{:?}):\n{}",
-            self.protocol_kind,
-            serde_json::to_string(&value).unwrap()
-        );
 
         let response = graphql::Response::builder()
             .data(value)
@@ -574,7 +569,7 @@ impl FetchNode {
             .build();
 
         let (value, errors) =
-            self.response_at_path(parameters.schema, &current_dir, paths, response);
+            self.response_at_path(parameters.schema, current_dir, paths, response);
         if let Some(id) = &self.id {
             if let Some(sender) = parameters.deferred_fetches.get(id.as_str()) {
                 tracing::info!(monotonic_counter.apollo.router.operations.defer.fetch = 1u64);
@@ -583,10 +578,7 @@ impl FetchNode {
                 }
             }
         }
-        println!(
-            "returning at path value: {}",
-            serde_json::to_string(&value).unwrap()
-        );
+
         Ok((value, errors))
     }
 

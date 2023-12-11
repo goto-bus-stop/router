@@ -22,17 +22,6 @@ expression: requests_and_params
                     "String",
                 ),
             },
-<<<<<<< HEAD
-            selection: Path(
-                Path(
-                    Field(
-                        "data",
-                    ),
-                    Empty,
-                ),
-            ),
-=======
->>>>>>> rest_connectors
         },
     ),
 ]

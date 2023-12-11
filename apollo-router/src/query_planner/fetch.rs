@@ -508,15 +508,86 @@ impl FetchNode {
         sender: mpsc::Sender<graphql::Response>,
         connector_node: &'a PlanNode,
     ) -> Result<(Value, Vec<Error>), FetchError> {
-        Ok(connector_node
-            .execute_recursively(parameters, &current_dir, data, sender)
+        let Variables {
+            variables,
+            inverted_paths: paths,
+        } = match Variables::new(
+            &self.requires,
+            self.variable_usages.as_ref(),
+            data,
+            current_dir,
+            // Needs the original request here
+            parameters.supergraph_request,
+            parameters.schema,
+            &self.input_rewrites,
+        ) {
+            Some(variables) => variables,
+            None => {
+                return Ok((Value::Object(Object::default()), Vec::new()));
+            }
+        };
+
+        let mut request = parameters.supergraph_request.body().clone();
+        request.variables = variables;
+        let mut supergraph_request = http::Request::builder()
+            .method(parameters.supergraph_request.method())
+            .uri(parameters.supergraph_request.uri())
+            .body(request)
+            .unwrap();
+        for (name, value) in parameters.supergraph_request.headers() {
+            supergraph_request
+                .headers_mut()
+                .insert(name.clone(), value.clone());
+        }
+
+        let subparameters = ExecutionParameters {
+            context: parameters.context,
+            service_factory: parameters.service_factory,
+            schema: parameters.schema,
+            deferred_fetches: parameters.deferred_fetches,
+            query: parameters.query,
+            root_node: parameters.root_node,
+            subscription_handle: parameters.subscription_handle,
+            subscription_config: parameters.subscription_config,
+            supergraph_request: &Arc::new(supergraph_request),
+        };
+
+        let path = Path::default();
+        let (value, errors) = connector_node
+            .execute_recursively(&subparameters, &path, data, sender)
             .instrument(tracing::info_span!(
                 "connector",
                 "graphql.path" = %current_dir,
                 "apollo.subgraph.name" = self.service_name.as_str(),
                 "otel.kind" = "INTERNAL"
             ))
-            .await)
+            .await;
+        println!(
+            "connector returned (self protocol is:{:?}):\n{}",
+            self.protocol_kind,
+            serde_json::to_string(&value).unwrap()
+        );
+
+        let response = graphql::Response::builder()
+            .data(value)
+            .errors(errors)
+            .build();
+
+        let (value, errors) =
+            self.response_at_path(parameters.schema, &current_dir, paths, response);
+        if let Some(id) = &self.id {
+            if let Some(sender) = parameters.deferred_fetches.get(id.as_str()) {
+                tracing::info!(monotonic_counter.apollo.router.operations.defer.fetch = 1u64);
+                if let Err(e) = sender.clone().send((value.clone(), errors.clone())) {
+                    tracing::error!("error sending fetch result at path {} and id {:?} for deferred response building: {}", current_dir, self.id, e);
+                }
+            }
+        }
+        println!(
+            "returning at path value: {}",
+            serde_json::to_string(&value).unwrap()
+        );
+        Ok((value, errors))
     }
 
     #[cfg(test)]

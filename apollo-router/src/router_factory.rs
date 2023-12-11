@@ -222,21 +222,54 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
             let connector_supergraph_creator: SupergraphCreator = connector_builder.build().await?;
 
-            connector_subgraph_names
-                .into_iter()
-                .map(|subgraph_name| {
-                    (
-                        subgraph_name,
-                        SubgraphConnector::for_schema(
-                            connector_schema.clone(),
-                            configuration.clone(),
-                            connector_supergraph_creator.clone(),
-                        )
-                        // TODON'T
-                        .unwrap(),
+            println!("connector subgraph names: {connector_subgraph_names:?}");
+            let mut aggregated_connectors: HashMap<String, HashMap<String, &Connector>> =
+                HashMap::new();
+            for (name, connector) in connectors.iter() {
+                println!(
+                    "CONNECTOR: name={name}, origin={}",
+                    connector.origin_subgraph
+                );
+                let subgraph_name = connector.origin_subgraph.clone();
+
+                aggregated_connectors
+                    .entry(subgraph_name)
+                    .or_default()
+                    .insert(name.clone(), connector);
+            }
+            let mut subgraph_connectors = HashMap::new();
+            for (name, connectors_map) in aggregated_connectors.into_iter() {
+                subgraph_connectors.insert(
+                    name,
+                    SubgraphConnector::for_schema(
+                        connector_schema.clone(),
+                        configuration.clone(),
+                        connector_supergraph_creator.clone(),
+                        connectors_map,
                     )
-                })
-                .collect::<HashMap<_, _>>()
+                    // TODON'T
+                    .unwrap(),
+                );
+            }
+
+            /*connector_subgraph_names
+            .into_iter()
+            .map(|subgraph_name| {
+                let connector = connectors.get(&subgraph_name).unwrap();
+                (
+                    subgraph_name,
+                    SubgraphConnector::for_schema(
+                        connector_schema.clone(),
+                        configuration.clone(),
+                        connector_supergraph_creator.clone(),
+                        connector,
+                    )
+                    // TODON'T
+                    .unwrap(),
+                )
+            })
+            .collect::<HashMap<_, _>>()*/
+            subgraph_connectors
         } else {
             Default::default()
         };

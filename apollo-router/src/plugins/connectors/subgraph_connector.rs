@@ -54,6 +54,7 @@ use crate::Configuration;
 pub(crate) struct SubgraphConnector {
     creator: SupergraphCreator,
     query_analysis_layer: QueryAnalysisLayer,
+    http_connectors: HashMap<String, HTTPConnector>,
 }
 
 impl SubgraphConnector {
@@ -61,11 +62,22 @@ impl SubgraphConnector {
         schema: Arc<Schema>,
         configuration: Arc<Configuration>,
         creator: SupergraphCreator,
+        connectors: HashMap<String, &Connector>,
     ) -> Result<Self, ConnectorDirectiveError> {
         let query_analysis_layer = QueryAnalysisLayer::new(schema.clone(), configuration);
+        let http_connectors = connectors
+            .into_iter()
+            .map(|(name, connector)| {
+                (
+                    name,
+                    HTTPConnector::new(schema.clone(), connector.clone()).unwrap(),
+                )
+            })
+            .collect();
         Ok(Self {
             creator,
             query_analysis_layer,
+            http_connectors,
         })
     }
 }
@@ -110,25 +122,16 @@ impl tower::Service<SubgraphRequest> for SubgraphConnector {
     }
 
     fn call(&mut self, request: SubgraphRequest) -> Self::Future {
-        let context = request.context.clone();
-        let (inner, hack_entity_response_key) = match map_request(request) {
-            // 1.
-            Ok(inner) => inner,
-            Err(e) => return Box::pin(async move { Err(BoxError::from(e)) }),
-        };
-
-        let query_analysis_layer = self.query_analysis_layer.clone();
-        let service = self.creator.make_connector();
+        let service = self
+            .http_connectors
+            .get(request.subgraph_name.as_ref().unwrap())
+            .unwrap()
+            .clone();
 
         Box::pin(async move {
-            let res = match query_analysis_layer.supergraph_request(inner).await {
-                Ok(req) => service.oneshot(req).await?,
-                Err(res) => res,
-            };
-
-            map_response(res, &context, hack_entity_response_key) // 5.
-                .await
-                .map_err(BoxError::from)
+            let res = service.call2(request).await?;
+            println!("HTTPConnector returned {res:?}");
+            Ok(res)
         })
     }
 }
@@ -187,6 +190,51 @@ where
     }
 }
 
+impl HTTPConnector {
+    async fn call2(&self, request: SubgraphRequest) -> Result<SubgraphResponse, BoxError> {
+        let schema = self.schema.clone();
+        let connector = self.connector.clone();
+        let context = request.context.clone();
+        // dbg!(&connector);
+
+        let client = self.client.clone();
+
+        let hack_entity_response_key = request // 3.
+            .supergraph_request
+            .extensions()
+            .get::<HackEntityResponseKey>()
+            .cloned();
+
+        println!(
+            "calling create_requests with connector {} and service_name {:?} on {:?}",
+            connector.name,
+            request.subgraph_name,
+            request.subgraph_request.body()
+        );
+        let requests = connector.create_requests(request, Arc::from(schema.definitions.clone()))?;
+
+        let tasks = requests.into_iter().map(|(req, res_params)| async {
+            println!("HTTP {} {}", &req.method(), &req.uri());
+            let mut res = client.request(req).await?;
+            res.extensions_mut().insert(res_params);
+            Ok::<_, BoxError>(res)
+        });
+
+        let results = futures::future::try_join_all(tasks).await;
+
+        let responses = match results {
+            Ok(responses) => responses,
+            Err(e) => return Err(BoxError::from(e)),
+        };
+
+        let subgraph_response = connector
+            .map_http_responses(responses, context, hack_entity_response_key) // 4.
+            .await?;
+        dbg!(&subgraph_response.response.body().data);
+
+        Ok(subgraph_response)
+    }
+}
 #[derive(Clone)]
 pub(crate) struct HTTPConnectorService<S> {
     inner: S,

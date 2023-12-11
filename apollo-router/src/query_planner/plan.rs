@@ -329,7 +329,7 @@ impl PlanNode {
         }
     }
 
-    // generates a query plan for each connectore fetch node in the main query plan
+    // generates a query plan for each connector fetch node in the main query plan
     pub(crate) fn generate_connector_plan<'a>(
         &'a mut self,
         subgraph_schemas: &'a HashMap<String, Arc<Schema>>,

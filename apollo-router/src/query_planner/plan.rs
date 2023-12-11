@@ -329,6 +329,7 @@ impl PlanNode {
         }
     }
 
+    // generates a query plan for each connectore fetch node in the main query plan
     pub(crate) fn generate_connector_plan<'a>(
         &'a mut self,
         subgraph_schemas: &'a HashMap<String, Arc<Schema>>,
@@ -401,6 +402,53 @@ impl PlanNode {
                 }
             }
         })
+    }
+
+    // updates each connector node's query plan so its fetch nodes communicate the right info to the connctor plugin
+    pub(crate) fn update_connector_plan<'a>(&'a mut self, service: &'a String) {
+        match self {
+            PlanNode::Fetch(fetch_node) => fetch_node.update_connector_plan(service),
+            PlanNode::Sequence { nodes } => {
+                for node in nodes.iter_mut() {
+                    node.update_connector_plan(service);
+                }
+            }
+            PlanNode::Parallel { nodes } => {
+                for node in nodes.iter_mut() {
+                    node.update_connector_plan(service);
+                }
+            }
+            PlanNode::Flatten(flatten) => flatten.node.update_connector_plan(service),
+            PlanNode::Defer { primary, deferred } => {
+                if let Some(node) = primary.node.as_mut() {
+                    node.update_connector_plan(service);
+                }
+                for deferred_node in deferred {
+                    if let Some(node) = deferred_node.node.take() {
+                        let mut new_node = (*node).clone();
+                        new_node.update_connector_plan(service);
+                        deferred_node.node = Some(Arc::new(new_node));
+                    }
+                }
+            }
+            PlanNode::Subscription { primary: _, rest } => {
+                if let Some(node) = rest.as_mut() {
+                    node.update_connector_plan(service);
+                }
+            }
+            PlanNode::Condition {
+                condition: _,
+                if_clause,
+                else_clause,
+            } => {
+                if let Some(node) = if_clause.as_mut() {
+                    node.update_connector_plan(service);
+                }
+                if let Some(node) = else_clause.as_mut() {
+                    node.update_connector_plan(service);
+                }
+            }
+        }
     }
 }
 

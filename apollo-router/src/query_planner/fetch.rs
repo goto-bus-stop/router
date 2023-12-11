@@ -141,13 +141,19 @@ pub(crate) struct FetchNode {
 pub(crate) enum ProtocolKind {
     #[default]
     GraphQL,
-    Rest(RestProtocol),
+    RestWrapper(RestProtocolWrapper),
+    RestFetch(RestFetchNode),
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct RestProtocol {
+pub(crate) struct RestProtocolWrapper {
     magic_finder_field: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct RestFetchNode {
+    parent_service_name: String,
 }
 
 pub(crate) struct Variables {
@@ -281,22 +287,27 @@ impl FetchNode {
             }
         };
 
+        let parent_service_name = match &*self.protocol_kind {
+            ProtocolKind::RestFetch(RestFetchNode {
+                parent_service_name,
+            }) => &parent_service_name,
+            _ => service_name,
+        };
+
+        let uri = parameters
+            .schema
+            .subgraph_url(parent_service_name)
+            .unwrap_or_else(|| {
+                panic!("schema uri for subgraph '{service_name}' should already have been checked")
+            })
+            .clone();
+
         let mut subgraph_request = SubgraphRequest::builder()
             .supergraph_request(parameters.supergraph_request.clone())
             .subgraph_request(
                 http_ext::Request::builder()
                     .method(http::Method::POST)
-                    .uri(
-                        parameters
-                            .schema
-                            .subgraph_url(service_name)
-                            .unwrap_or_else(|| {
-                                panic!(
-                                    "schema uri for subgraph '{service_name}' should already have been checked"
-                                )
-                            })
-                            .clone(),
-                    )
+                    .uri(uri)
                     .body(
                         Request::builder()
                             .query(operation)
@@ -315,7 +326,7 @@ impl FetchNode {
 
         let service = parameters
             .service_factory
-            .create(service_name)
+            .create(parent_service_name)
             .expect("we already checked that the service exists during planning; qed");
 
         // TODO not sure if we need a RouterReponse here as we don't do anything with it
@@ -497,7 +508,7 @@ impl FetchNode {
         sender: mpsc::Sender<graphql::Response>,
         connector_node: &'a PlanNode,
     ) -> Result<(Value, Vec<Error>), FetchError> {
-        connector_node
+        Ok(connector_node
             .execute_recursively(parameters, &current_dir, data, sender)
             .instrument(tracing::info_span!(
                 "connector",
@@ -505,8 +516,7 @@ impl FetchNode {
                 "apollo.subgraph.name" = self.service_name.as_str(),
                 "otel.kind" = "INTERNAL"
             ))
-            .await;
-        todo!()
+            .await)
     }
 
     #[cfg(test)]
@@ -563,10 +573,15 @@ impl FetchNode {
                 .map_err(QueryPlannerError::RouterBridgeError)?
                 .into_result()
             {
-                Ok(plan) => {
+                Ok(mut plan) => {
+                    if let Some(node) = plan.data.query_plan.node.as_mut() {
+                        node.update_connector_plan(&self.service_name);
+                    }
+
                     self.connector_node = plan.data.query_plan.node.map(Arc::new);
-                    self.protocol_kind =
-                        Arc::new(ProtocolKind::Rest(RestProtocol { magic_finder_field }));
+                    self.protocol_kind = Arc::new(ProtocolKind::RestWrapper(RestProtocolWrapper {
+                        magic_finder_field,
+                    }));
                 }
                 Err(err) => {
                     return Err(QueryPlannerError::from(err));
@@ -574,6 +589,12 @@ impl FetchNode {
             }
         }
         Ok(())
+    }
+
+    pub(crate) fn update_connector_plan(&mut self, parent_service_name: &String) {
+        self.protocol_kind = Arc::new(ProtocolKind::RestFetch(RestFetchNode {
+            parent_service_name: parent_service_name.to_string(),
+        }))
     }
 }
 

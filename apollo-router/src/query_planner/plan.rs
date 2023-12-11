@@ -1,5 +1,8 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use futures::future;
+use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde::Serialize;
@@ -7,11 +10,14 @@ use serde::Serialize;
 pub(crate) use self::fetch::OperationKind;
 use super::fetch;
 use super::subscription::SubscriptionNode;
+use super::QueryPlanResult;
+use crate::error::QueryPlannerError;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::spec::Query;
+use crate::spec::Schema;
 
 /// A planner key.
 ///
@@ -321,6 +327,80 @@ impl PlanNode {
                 }
             }
         }
+    }
+
+    pub(crate) fn generate_connector_plan<'a>(
+        &'a mut self,
+        subgraph_schemas: &'a HashMap<String, Arc<Schema>>,
+        subgraph_planners: &'a HashMap<String, Arc<Planner<QueryPlanResult>>>,
+    ) -> future::BoxFuture<Result<(), QueryPlannerError>> {
+        Box::pin(async move {
+            match self {
+                PlanNode::Fetch(fetch_node) => {
+                    fetch_node
+                        .generate_connector_plan(subgraph_schemas, subgraph_planners)
+                        .await
+                }
+                PlanNode::Sequence { nodes } => {
+                    for node in nodes.iter_mut() {
+                        node.generate_connector_plan(subgraph_schemas, subgraph_planners)
+                            .await?;
+                    }
+                    Ok(())
+                }
+                PlanNode::Parallel { nodes } => {
+                    for node in nodes.iter_mut() {
+                        node.generate_connector_plan(subgraph_schemas, subgraph_planners)
+                            .await?;
+                    }
+                    Ok(())
+                }
+                PlanNode::Flatten(flatten) => {
+                    flatten
+                        .node
+                        .generate_connector_plan(subgraph_schemas, subgraph_planners)
+                        .await
+                }
+                PlanNode::Defer { primary, deferred } => {
+                    if let Some(node) = primary.node.as_mut() {
+                        node.generate_connector_plan(subgraph_schemas, subgraph_planners)
+                            .await?;
+                    }
+                    for deferred_node in deferred {
+                        if let Some(node) = deferred_node.node.take() {
+                            let mut new_node = (*node).clone();
+                            new_node
+                                .generate_connector_plan(subgraph_schemas, subgraph_planners)
+                                .await?;
+                            deferred_node.node = Some(Arc::new(new_node));
+                        }
+                    }
+                    Ok(())
+                }
+                PlanNode::Subscription { primary: _, rest } => {
+                    if let Some(node) = rest.as_mut() {
+                        node.generate_connector_plan(subgraph_schemas, subgraph_planners)
+                            .await?;
+                    }
+                    Ok(())
+                }
+                PlanNode::Condition {
+                    condition: _,
+                    if_clause,
+                    else_clause,
+                } => {
+                    if let Some(node) = if_clause.as_mut() {
+                        node.generate_connector_plan(subgraph_schemas, subgraph_planners)
+                            .await?;
+                    }
+                    if let Some(node) = else_clause.as_mut() {
+                        node.generate_connector_plan(subgraph_schemas, subgraph_planners)
+                            .await?;
+                    }
+                    Ok(())
+                }
+            }
+        })
     }
 }
 

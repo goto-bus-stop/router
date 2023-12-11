@@ -1,8 +1,10 @@
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
 
 use apollo_compiler::ast::Document;
 use indexmap::IndexSet;
+use router_bridge::planner::Planner;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::ServiceExt;
@@ -13,8 +15,11 @@ use super::execution::ExecutionParameters;
 use super::rewrites;
 use super::selection::execute_selection_set;
 use super::selection::Selection;
+use super::PlanNode;
+use super::QueryPlanResult;
 use crate::error::Error;
 use crate::error::FetchError;
+use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::graphql::Request;
 use crate::http_ext;
@@ -27,6 +32,7 @@ use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::SubgraphRequest;
 use crate::spec::Schema;
+use crate::spec::SpecError;
 
 /// GraphQL operation type.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -120,6 +126,27 @@ pub(crate) struct FetchNode {
     // authorization metadata for the subgraph query
     #[serde(default)]
     pub(crate) authorization: Arc<CacheKeyMetadata>,
+
+    // query plan for the connector subgraph
+    #[serde(default)]
+    pub(crate) connector_node: Option<Arc<PlanNode>>,
+
+    #[serde(default)]
+    pub(crate) protocol_kind: Arc<ProtocolKind>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ProtocolKind {
+    #[default]
+    GraphQL,
+    Rest(RestProtocol),
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RestProtocol {
+    magic_finder_field: Option<String>,
 }
 
 pub(crate) struct Variables {
@@ -481,4 +508,110 @@ impl FetchNode {
             &subgraph_query_cache_key,
         ));
     }
+
+    pub(crate) async fn generate_connector_plan(
+        &mut self,
+        _subgraph_schemas: &HashMap<String, Arc<Schema>>,
+        subgraph_planners: &HashMap<String, Arc<Planner<QueryPlanResult>>>,
+    ) -> Result<(), QueryPlannerError> {
+        if let Some(planner) = subgraph_planners.get(&self.service_name) {
+            println!(
+                "planning for subgraph '{}' and query '{}'",
+                self.service_name, self.operation
+            );
+
+            let (operation, magic_finder_field) =
+                match convert_entities_field_to_magic_finder(&self.operation)? {
+                    Some((op, magic)) => (op, Some(magic)),
+                    None => (self.operation.clone(), None),
+                };
+
+            println!(
+                "replaced with operation(magic finder field={magic_finder_field:?}): {operation}"
+            );
+            match planner
+                .plan(operation, self.operation_name.clone())
+                .await
+                .map_err(QueryPlannerError::RouterBridgeError)?
+                .into_result()
+            {
+                Ok(plan) => {
+                    self.connector_node = plan.data.query_plan.node.map(Arc::new);
+                    self.protocol_kind =
+                        Arc::new(ProtocolKind::Rest(RestProtocol { magic_finder_field }));
+                }
+                Err(err) => {
+                    return Err(QueryPlannerError::from(err));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn convert_entities_field_to_magic_finder(
+    operation: &str,
+) -> Result<Option<(String, String)>, QueryPlannerError> {
+    if let Some(entities_field) = find_entities_field(operation)? {
+        let type_conditions = collect_type_conditions(&entities_field.selection_set);
+
+        let magic_finder_field = apollo_compiler::ast::Name::new(format!(
+            "_{}_finder",
+            type_conditions
+                .first()
+                .map(|s| (*s).to_string())
+                .unwrap_or_default()
+        ))
+        .map_err(|e| SpecError::ParsingError(e.to_string()))?;
+
+        let operation = operation.replace("_entities", &magic_finder_field);
+
+        Ok(Some((operation, magic_finder_field.to_string())))
+    } else {
+        Ok(None)
+    }
+}
+
+fn find_entities_field(
+    query: &str,
+) -> Result<Option<apollo_compiler::Node<apollo_compiler::ast::Field>>, QueryPlannerError> {
+    let doc = apollo_compiler::ast::Document::parse(query.to_owned(), "op.graphql")
+        .map_err(|e| SpecError::ParsingError(e.to_string()))?;
+
+    // Because this operation comes from the query planner, we can assume a single operation
+    let op = doc
+        .definitions
+        .iter()
+        .find_map(|def| match def {
+            apollo_compiler::ast::Definition::OperationDefinition(op) => Some(op),
+            _ => None,
+        })
+        .ok_or_else(|| SpecError::ParsingError("cannot find root operation".to_string()))?;
+
+    Ok(op
+        .selection_set
+        .first()
+        .and_then(|s| match s {
+            apollo_compiler::ast::Selection::Field(f) => {
+                if f.name == "_entities" {
+                    Some(f)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+        .cloned())
+}
+
+fn collect_type_conditions(
+    selection_set: &[apollo_compiler::ast::Selection],
+) -> Vec<&apollo_compiler::ast::Name> {
+    selection_set
+        .iter()
+        .filter_map(|s| match s {
+            apollo_compiler::ast::Selection::InlineFragment(f) => f.type_condition.as_ref(),
+            _ => None,
+        })
+        .collect()
 }

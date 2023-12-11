@@ -2,7 +2,10 @@
 
 #![allow(missing_docs)] // FIXME
 
-pub(crate) use bridge_query_planner::*;
+//pub(crate) use bridge_query_planner::*;
+pub(crate) use bridge_query_planner::BridgeQueryPlanner;
+pub(crate) use bridge_query_planner::FilteredQuery;
+pub(crate) use bridge_query_planner::QueryPlanResult;
 pub(crate) use caching_query_planner::*;
 
 pub(crate) use self::fetch::OperationKind;

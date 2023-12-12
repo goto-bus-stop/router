@@ -27,6 +27,8 @@ use regex::Regex;
 use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tracing::Instrument;
+use tracing::Span;
 
 use super::directives::HTTPSourceAPI;
 use super::directives::SourceAPI;
@@ -35,6 +37,7 @@ use super::Connector;
 use crate::error::ConnectorDirectiveError;
 use crate::error::FetchError;
 use crate::layers::ServiceBuilderExt;
+use crate::plugins::telemetry::OTEL_STATUS_CODE;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::subgraph;
@@ -47,6 +50,8 @@ use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::Selection;
 use crate::Configuration;
+
+static CONNECTOR_HTTP_REQUEST: &str = "connector http request";
 
 #[derive(Clone)]
 pub(crate) struct SubgraphConnector {
@@ -170,7 +175,6 @@ impl HTTPConnector {
         let schema = self.schema.clone();
         let connector = self.connector.clone();
         let context = request.context.clone();
-        // dbg!(&connector);
 
         let client = self.client.clone();
 
@@ -180,15 +184,42 @@ impl HTTPConnector {
             .get::<HackEntityResponseKey>()
             .cloned();
 
+        let subgraph_name = request.subgraph_name.clone();
         let requests = connector.create_requests(request, Arc::from(schema.definitions.clone()))?;
 
+        let http_request_span = tracing::info_span!(
+            CONNECTOR_HTTP_REQUEST,
+            "connector.name" = %subgraph_name.unwrap_or_else(|| "UNKNOWN".to_string()),
+            "url.full" = ::tracing::field::Empty,
+            "http.request.method" = ::tracing::field::Empty,
+            "otel.kind" = "CLIENT",
+            "otel.status_code" = ::tracing::field::Empty,
+            "http.response.status_code" = ::tracing::field::Empty,
+        );
         let tasks = requests.into_iter().map(|(req, res_params)| async {
-            let mut res = client.request(req).await?;
+            let span = Span::current();
+            span.record("url.full", req.uri().to_string());
+            span.record("http.request.method", req.method().to_string());
+
+            let mut res = match client.request(req).await {
+                Ok(res) => {
+                    span.record(OTEL_STATUS_CODE, "Ok");
+                    span.record("http.response.status_code", res.status().as_u16());
+                    Ok(res)
+                }
+                e => {
+                    span.record(OTEL_STATUS_CODE, "Error");
+                    e
+                }
+            }?;
+
             res.extensions_mut().insert(res_params);
             Ok::<_, BoxError>(res)
         });
 
-        let results = futures::future::try_join_all(tasks).await;
+        let results = futures::future::try_join_all(tasks)
+            .instrument(http_request_span)
+            .await;
 
         let responses = match results {
             Ok(responses) => responses,
@@ -198,7 +229,6 @@ impl HTTPConnector {
         let subgraph_response = connector
             .map_http_responses(responses, context, hack_entity_response_key) // 4.
             .await?;
-        dbg!(&subgraph_response.response.body().data);
 
         Ok(subgraph_response)
     }

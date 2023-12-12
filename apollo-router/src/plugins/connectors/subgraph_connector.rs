@@ -230,7 +230,7 @@ where
                 connector.create_requests(request, Arc::from(schema.definitions.clone()))?;
 
             let tasks = requests.into_iter().map(|(req, res_params)| async {
-                println!("HTTP {} {}", &req.method(), &req.uri());
+                tracing::debug!(method = &req.method().as_str(), uri = req.uri().to_string());
                 let mut res = client.request(req).await?;
                 res.extensions_mut().insert(res_params);
                 Ok::<_, BoxError>(res)
@@ -246,7 +246,10 @@ where
             let subgraph_response = connector
                 .map_http_responses(responses, context, hack_entity_response_key) // 4.
                 .await?;
-            dbg!(&subgraph_response.response.body().data);
+            tracing::debug!(
+                data = serde_json::to_string(&subgraph_response.response.body().data)
+                    .unwrap_or_else(|e| e.to_string())
+            );
 
             Ok(subgraph_response)
 
@@ -335,7 +338,7 @@ mod tests {
                     .body(String::new())
                     .unwrap())
             };
-            println!("generated service response: {res:?}");
+            tracing::debug!("generated service response: {res:?}");
             res
         }
 
@@ -351,7 +354,7 @@ mod tests {
         let _spawned_task = tokio::task::spawn(emulate_rest_connector(listener));
 
         let schema = SCHEMA.replace(
-            "https://ipinfo.io/",
+            "https://ipinfo.io",
             &format!("http://127.0.0.1:{}/", address.port()),
         );
 

@@ -175,7 +175,6 @@ impl HTTPConnector {
         let schema = self.schema.clone();
         let connector = self.connector.clone();
         let context = request.context.clone();
-        // dbg!(&connector);
 
         let client = self.client.clone();
 
@@ -190,19 +189,17 @@ impl HTTPConnector {
 
         let http_request_span = tracing::info_span!(
             CONNECTOR_HTTP_REQUEST,
-            "connector name" = %subgraph_name.unwrap_or_else(|| "UNKNOWN".to_string()),
-            "url" = ::tracing::field::Empty,
-            "method" = ::tracing::field::Empty,
+            "connector.name" = %subgraph_name.unwrap_or_else(|| "UNKNOWN".to_string()),
+            "url.full" = ::tracing::field::Empty,
+            "http.request.method" = ::tracing::field::Empty,
             "otel.kind" = "CLIENT",
             "otel.status_code" = ::tracing::field::Empty,
-            "http.request_headers" = ::tracing::field::Empty,
-            "http.response_headers" = ::tracing::field::Empty,
             "http.response.status_code" = ::tracing::field::Empty,
         );
         let tasks = requests.into_iter().map(|(req, res_params)| async {
             let span = Span::current();
-            span.record("url", req.uri().to_string());
-            span.record("method", req.method().to_string());
+            span.record("url.full", req.uri().to_string());
+            span.record("http.request.method", req.method().to_string());
 
             let mut res = match client.request(req).await {
                 Ok(res) => {

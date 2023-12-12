@@ -195,8 +195,6 @@ impl BridgeQueryPlanner {
             let connector_schema_s = connector_schema.serialize().to_string();
 
             for name in connector_subgraph_names {
-                println!("creating subgraph planner '{name}' for schema:\n{connector_schema_s}");
-
                 let subgraph_planner = Arc::new(
                     planner
                         .update(

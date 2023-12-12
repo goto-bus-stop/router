@@ -7,6 +7,7 @@ use indexmap::IndexSet;
 use router_bridge::planner::Planner;
 use serde::Deserialize;
 use serde::Serialize;
+use tokio::sync::mpsc;
 use tower::ServiceExt;
 use tracing::instrument;
 use tracing::Instrument;
@@ -140,13 +141,19 @@ pub(crate) struct FetchNode {
 pub(crate) enum ProtocolKind {
     #[default]
     GraphQL,
-    Rest(RestProtocol),
+    RestWrapper(RestProtocolWrapper),
+    RestFetch(RestFetchNode),
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct RestProtocol {
+pub(crate) struct RestProtocolWrapper {
     magic_finder_field: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct RestFetchNode {
+    parent_service_name: String,
 }
 
 pub(crate) struct Variables {
@@ -245,7 +252,14 @@ impl FetchNode {
         parameters: &'a ExecutionParameters<'a>,
         data: &'a Value,
         current_dir: &'a Path,
+        sender: mpsc::Sender<graphql::Response>,
     ) -> Result<(Value, Vec<Error>), FetchError> {
+        if let Some(connector_node) = self.connector_node.clone() {
+            return self
+                .connector_execution(parameters, current_dir, data, sender, &connector_node)
+                .await;
+        }
+
         let FetchNode {
             operation,
             operation_kind,
@@ -273,22 +287,27 @@ impl FetchNode {
             }
         };
 
+        let parent_service_name = match &*self.protocol_kind {
+            ProtocolKind::RestFetch(RestFetchNode {
+                parent_service_name,
+            }) => parent_service_name,
+            _ => service_name,
+        };
+
+        let uri = parameters
+            .schema
+            .subgraph_url(parent_service_name)
+            .unwrap_or_else(|| {
+                panic!("schema uri for subgraph '{service_name}' should already have been checked")
+            })
+            .clone();
+
         let mut subgraph_request = SubgraphRequest::builder()
             .supergraph_request(parameters.supergraph_request.clone())
             .subgraph_request(
                 http_ext::Request::builder()
                     .method(http::Method::POST)
-                    .uri(
-                        parameters
-                            .schema
-                            .subgraph_url(service_name)
-                            .unwrap_or_else(|| {
-                                panic!(
-                                    "schema uri for subgraph '{service_name}' should already have been checked"
-                                )
-                            })
-                            .clone(),
-                    )
+                    .uri(uri)
                     .body(
                         Request::builder()
                             .query(operation)
@@ -307,7 +326,7 @@ impl FetchNode {
 
         let service = parameters
             .service_factory
-            .create(service_name)
+            .create(parent_service_name)
             .expect("we already checked that the service exists during planning; qed");
 
         // TODO not sure if we need a RouterReponse here as we don't do anything with it
@@ -481,6 +500,88 @@ impl FetchNode {
         }
     }
 
+    async fn connector_execution<'a>(
+        &'a self,
+        parameters: &'a ExecutionParameters<'a>,
+        current_dir: &'a Path,
+        data: &'a Value,
+        sender: mpsc::Sender<graphql::Response>,
+        connector_node: &'a PlanNode,
+    ) -> Result<(Value, Vec<Error>), FetchError> {
+        let Variables {
+            variables,
+            inverted_paths: paths,
+        } = match Variables::new(
+            &self.requires,
+            self.variable_usages.as_ref(),
+            data,
+            current_dir,
+            // Needs the original request here
+            parameters.supergraph_request,
+            parameters.schema,
+            &self.input_rewrites,
+        ) {
+            Some(variables) => variables,
+            None => {
+                return Ok((Value::Object(Object::default()), Vec::new()));
+            }
+        };
+
+        let mut request = parameters.supergraph_request.body().clone();
+        request.variables = variables;
+        let mut supergraph_request = http::Request::builder()
+            .method(parameters.supergraph_request.method())
+            .uri(parameters.supergraph_request.uri())
+            .body(request)
+            .unwrap();
+        for (name, value) in parameters.supergraph_request.headers() {
+            supergraph_request
+                .headers_mut()
+                .insert(name.clone(), value.clone());
+        }
+
+        let subparameters = ExecutionParameters {
+            context: parameters.context,
+            service_factory: parameters.service_factory,
+            schema: parameters.schema,
+            deferred_fetches: parameters.deferred_fetches,
+            query: parameters.query,
+            root_node: parameters.root_node,
+            subscription_handle: parameters.subscription_handle,
+            subscription_config: parameters.subscription_config,
+            supergraph_request: &Arc::new(supergraph_request),
+        };
+
+        let path = Path::default();
+        let (value, errors) = connector_node
+            .execute_recursively(&subparameters, &path, data, sender)
+            .instrument(tracing::info_span!(
+                "connector",
+                "graphql.path" = %current_dir,
+                "apollo.subgraph.name" = self.service_name.as_str(),
+                "otel.kind" = "INTERNAL"
+            ))
+            .await;
+
+        let response = graphql::Response::builder()
+            .data(value)
+            .errors(errors)
+            .build();
+
+        let (value, errors) =
+            self.response_at_path(parameters.schema, current_dir, paths, response);
+        if let Some(id) = &self.id {
+            if let Some(sender) = parameters.deferred_fetches.get(id.as_str()) {
+                tracing::info!(monotonic_counter.apollo.router.operations.defer.fetch = 1u64);
+                if let Err(e) = sender.clone().send((value.clone(), errors.clone())) {
+                    tracing::error!("error sending fetch result at path {} and id {:?} for deferred response building: {}", current_dir, self.id, e);
+                }
+            }
+        }
+
+        Ok((value, errors))
+    }
+
     #[cfg(test)]
     pub(crate) fn service_name(&self) -> &str {
         &self.service_name
@@ -536,10 +637,15 @@ impl FetchNode {
                 .map_err(QueryPlannerError::RouterBridgeError)?
                 .into_result()
             {
-                Ok(plan) => {
+                Ok(mut plan) => {
+                    if let Some(node) = plan.data.query_plan.node.as_mut() {
+                        node.update_connector_plan(&self.service_name);
+                    }
+
                     self.connector_node = plan.data.query_plan.node.map(Arc::new);
-                    self.protocol_kind =
-                        Arc::new(ProtocolKind::Rest(RestProtocol { magic_finder_field }));
+                    self.protocol_kind = Arc::new(ProtocolKind::RestWrapper(RestProtocolWrapper {
+                        magic_finder_field,
+                    }));
                 }
                 Err(err) => {
                     return Err(QueryPlannerError::from(err));
@@ -547,6 +653,12 @@ impl FetchNode {
             }
         }
         Ok(())
+    }
+
+    pub(crate) fn update_connector_plan(&mut self, parent_service_name: &String) {
+        self.protocol_kind = Arc::new(ProtocolKind::RestFetch(RestFetchNode {
+            parent_service_name: parent_service_name.to_string(),
+        }))
     }
 }
 

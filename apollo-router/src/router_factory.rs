@@ -15,7 +15,6 @@ use tower::service_fn;
 use tower::util::Either;
 use tower::util::Oneshot;
 use tower::BoxError;
-use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
@@ -27,16 +26,13 @@ use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
-use crate::plugins::connectors::connector_subgraph_names;
 use crate::plugins::connectors::generate_connector_supergraph;
-use crate::plugins::connectors::subgraph_connector::HTTPConnector;
 use crate::plugins::connectors::subgraph_connector::SubgraphConnector;
 use crate::plugins::connectors::Connector;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::traffic_shaping::rate;
 use crate::plugins::traffic_shaping::timeout;
-use crate::plugins::traffic_shaping::Http2Config;
 use crate::plugins::traffic_shaping::RetryPolicy;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
@@ -177,29 +173,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
 
         let connectors = Arc::from(Connector::from_schema(&spec_schema)?);
         let connector_subgraphs = if !connectors.is_empty() {
-            let connector_subgraph_names = connector_subgraph_names(&connectors);
             let connector_schema = generate_connector_supergraph(&spec_schema, &connectors)?;
-
-            // TODO: we can use a single bridge for both the regular planner and the extras.
-            // wohoo we have a connector planner \o/
-            let extra_planner = match previous_router.as_ref().map(|router| router.planner()) {
-                None => {
-                    BridgeQueryPlanner::new(connector_schema.to_string(), configuration.clone())
-                        .await?
-                }
-                Some(planner) => {
-                    BridgeQueryPlanner::new_from_planner(
-                        planner,
-                        connector_schema.to_string(),
-                        configuration.clone(),
-                    )
-                    .await?
-                }
-            };
-
-            // TODO: no plugins for connectors? ^^'
-            let plugins: Vec<_> = Default::default();
-            let mut connector_builder = PluggableSupergraphServiceBuilder::new(extra_planner);
 
             // todo: that's a lot of reparsing isnt it? :D
             let connector_schema = Arc::new(Schema::parse(
@@ -207,36 +181,25 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                 &configuration,
             )?);
 
-            connector_builder = connector_builder.with_configuration(configuration.clone());
-            let subgraph_services = create_connector_services(
-                &plugins,
-                Arc::clone(&connector_schema),
-                &configuration,
-                &connectors,
-            )?;
-            for (name, subgraph_service) in subgraph_services {
-                connector_builder =
-                    connector_builder.with_subgraph_service(&name, subgraph_service);
+            let mut aggregated_connectors: HashMap<String, HashMap<String, &Connector>> =
+                HashMap::new();
+            for (name, connector) in connectors.iter() {
+                let subgraph_name = connector.origin_subgraph.clone();
+
+                aggregated_connectors
+                    .entry(subgraph_name)
+                    .or_default()
+                    .insert(name.clone(), connector);
+            }
+            let mut subgraph_connectors = HashMap::new();
+            for (name, connectors_map) in aggregated_connectors.into_iter() {
+                subgraph_connectors.insert(
+                    name,
+                    SubgraphConnector::for_schema(connector_schema.clone(), connectors_map)?,
+                );
             }
 
-            // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
-            let connector_supergraph_creator: SupergraphCreator = connector_builder.build().await?;
-
-            connector_subgraph_names
-                .into_iter()
-                .map(|subgraph_name| {
-                    (
-                        subgraph_name,
-                        SubgraphConnector::for_schema(
-                            connector_schema.clone(),
-                            configuration.clone(),
-                            connector_supergraph_creator.clone(),
-                        )
-                        // TODON'T
-                        .unwrap(),
-                    )
-                })
-                .collect::<HashMap<_, _>>()
+            subgraph_connectors
         } else {
             Default::default()
         };
@@ -387,58 +350,6 @@ pub(crate) fn create_subgraph_services(
             )?,
         );
         subgraph_services.insert(name.clone(), subgraph_service);
-    }
-
-    Ok(subgraph_services)
-}
-
-pub(crate) fn create_connector_services(
-    _plugins: &[(String, Box<dyn DynPlugin>)],
-    schema: Arc<Schema>,
-    configuration: &Configuration,
-    connectors: &HashMap<String, Connector>,
-) -> Result<
-    IndexMap<
-        String,
-        impl Service<
-                subgraph::Request,
-                Response = subgraph::Response,
-                Error = BoxError,
-                Future = BoxFuture<'static, Result<subgraph::Response, BoxError>>,
-            > + Clone
-            + Send
-            + Sync
-            + 'static,
-    >,
-    BoxError,
-> {
-    let tls_root_store: Option<RootCertStore> = configuration
-        .tls
-        .subgraph
-        .all
-        .create_certificate_store()
-        .transpose()?;
-
-    let mut subgraph_services = IndexMap::new();
-    for (name, _) in schema.subgraphs() {
-        let subgraph_service = SubgraphService::from_config(
-            name,
-            configuration,
-            &tls_root_store,
-            Http2Config::Enable,
-            None,
-        )?;
-
-        let connector = connectors
-            .get(name)
-            .ok_or(BoxError::from(format!(
-                "missing connector for subgraph {}",
-                name
-            )))?
-            .clone();
-
-        let connector = HTTPConnector::new(schema.clone(), connector)?.layer(subgraph_service);
-        subgraph_services.insert(name.clone(), connector);
     }
 
     Ok(subgraph_services)

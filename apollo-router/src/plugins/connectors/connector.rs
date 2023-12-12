@@ -27,7 +27,7 @@ use crate::Context;
 pub(crate) struct Connector {
     /// Internal name used to construct "subgraphs" in the inner supergraph
     pub(super) name: String,
-    pub(super) origin_subgraph: String,
+    pub(crate) origin_subgraph: String,
     pub(super) kind: ConnectorKind,
     pub(super) transport: ConnectorTransport,
     pub(super) output_selection: Vec<GraphQLSelection>,

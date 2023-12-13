@@ -32,7 +32,6 @@ use tracing::Span;
 
 use super::directives::HTTPSourceAPI;
 use super::directives::SourceAPI;
-use super::request_response::HackEntityResponseKey;
 use super::Connector;
 use crate::error::ConnectorDirectiveError;
 use crate::error::FetchError;
@@ -83,27 +82,6 @@ use tower::Service;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 
-/// "OUTER" SUBGRAPH -> "INNER" SUPERGRAPH SERVICE
-///
-/// How the "magic finder field" works:
-/// 1. When we convert the outer subgraph request into the inner supergraph
-///    request, we look for the `_entities` field in the query and convert it to
-///    a magic finder field.
-///
-/// 2. We store the finder field name on the supergraph_request HTTP extensions
-///    so that it's available to the inner subgraph service.
-///    (see outer.rs map_request)
-///
-/// 3. Before we create any HTTP requests, we grab the finder field name from
-///    the HTTP extensions.
-///
-/// 4. When we construct the inner HTTP responses, we pass in the finder field
-///    name because the query planner's response merging expects data to be
-///    { "_Entity_finder": [] } instead of { "_entities": [] }.
-///
-/// 5. Finally, when we convert the inner supergraph response into the outer
-///    subgraph response, we switch the field name back to `_entities` so that
-///    the outer query planner's response merging works correctly.
 impl tower::Service<SubgraphRequest> for SubgraphConnector {
     type Response = SubgraphResponse;
     type Error = BoxError;
@@ -178,12 +156,6 @@ impl HTTPConnector {
 
         let client = self.client.clone();
 
-        let hack_entity_response_key = request // 3.
-            .supergraph_request
-            .extensions()
-            .get::<HackEntityResponseKey>()
-            .cloned();
-
         let subgraph_name = request.subgraph_name.clone();
         let requests = connector.create_requests(request, Arc::from(schema.definitions.clone()))?;
 
@@ -226,9 +198,7 @@ impl HTTPConnector {
             Err(e) => return Err(BoxError::from(e)),
         };
 
-        let subgraph_response = connector
-            .map_http_responses(responses, context, hack_entity_response_key) // 4.
-            .await?;
+        let subgraph_response = connector.map_http_responses(responses, context).await?;
 
         Ok(subgraph_response)
     }

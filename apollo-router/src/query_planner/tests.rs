@@ -1527,7 +1527,21 @@ async fn typename_propagation2() {
 
     let mut stream = service.clone().oneshot(request).await.unwrap();
     let response = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(serde_json::to_value(&response).unwrap());
+
+    assert_eq!(
+        json! {{
+          "data": {
+            "book": {
+              "__typename": "Book",
+              "id": "1",
+              "author": {
+                "__typename": "Author"
+              }
+            }
+          }
+        }},
+        serde_json_bytes::to_value(response).unwrap()
+    );
 }
 
 #[tokio::test]

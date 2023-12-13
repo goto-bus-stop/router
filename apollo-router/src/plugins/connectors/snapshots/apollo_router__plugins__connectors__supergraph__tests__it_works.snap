@@ -38,7 +38,7 @@ enum link__Purpose {
   EXECUTION
 }
 
-type EntityAcrossBoth @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0, key: "a b") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0, key: "a b") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) {
+type EntityAcrossBoth @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0, key: "a b") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0, key: "a b") {
   d: String @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_0)
   a: ID @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_E_0)
   b: ID @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_E_0)
@@ -54,7 +54,7 @@ type Query @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: C
   withArguments(value: String, done: Boolean): String @join__field(graph: CONNECTOR_QUERY_WITHARGUMENTS_4)
 }
 
-type Hello @join__type(graph: CONNECTOR_HELLO_1, key: "id") @join__type(graph: CONNECTOR_HELLO_1) @join__type(graph: CONNECTOR_HELLO_1) @join__type(graph: CONNECTOR_HELLO_WORLD_1, key: "id") @join__type(graph: CONNECTOR_HELLO_WORLD_1) @join__type(graph: CONNECTOR_QUERY_HELLO_3) {
+type Hello @join__type(graph: CONNECTOR_HELLO_1, key: "id") @join__type(graph: CONNECTOR_HELLO_WORLD_1, key: "id") @join__type(graph: CONNECTOR_QUERY_HELLO_3) {
   id: ID! @join__field(graph: CONNECTOR_HELLO_1) @join__field(graph: CONNECTOR_HELLO_WORLD_1) @join__field(graph: CONNECTOR_QUERY_HELLO_3)
   field: String @join__field(graph: CONNECTOR_HELLO_1)
   world: World @join__field(graph: CONNECTOR_HELLO_WORLD_1)

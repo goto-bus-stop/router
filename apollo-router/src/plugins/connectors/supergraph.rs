@@ -23,7 +23,6 @@ use super::join_spec_helpers::add_join_type_directive;
 use super::join_spec_helpers::copy_definitions;
 use super::join_spec_helpers::join_graph_enum;
 use super::join_spec_helpers::make_any_scalar;
-use super::join_spec_helpers::Key;
 
 /// Generates a new supergraph schema with one subgraph per connector. Copies
 /// types and fields from the original schema and adds directives to associate
@@ -74,7 +73,7 @@ pub(super) fn make_changes(connector: &Connector, schema: &Schema) -> anyhow::Re
                 Change::Type {
                     name: parent_type_name.clone(),
                     graph: graph.clone(),
-                    key: Key::None,
+                    key: None,
                 },
                 Change::Field {
                     type_name: parent_type_name.clone(),
@@ -111,7 +110,7 @@ pub(super) fn make_changes(connector: &Connector, schema: &Schema) -> anyhow::Re
                 Change::Type {
                     name: type_name.clone(),
                     graph: graph.clone(),
-                    key: key.clone(),
+                    key: Some(key.clone()),
                 },
                 Change::MagicFinder {
                     type_name: type_name.clone(),
@@ -152,7 +151,7 @@ pub(super) fn make_changes(connector: &Connector, schema: &Schema) -> anyhow::Re
                 Change::Type {
                     name: type_name.clone(),
                     graph: graph.clone(),
-                    key: key.clone(),
+                    key: Some(key.clone()),
                 },
                 Change::Field {
                     type_name: type_name.clone(),
@@ -209,7 +208,11 @@ pub(super) fn make_changes(connector: &Connector, schema: &Schema) -> anyhow::Re
 #[derive(Debug)]
 pub(super) enum Change {
     /// Include a type in the schema and add the `@join__type` directive
-    Type { name: Name, graph: String, key: Key },
+    Type {
+        name: Name,
+        graph: String,
+        key: Option<String>,
+    },
     /// Include a field on a type in the schema and add the `@join__field` directive
     /// TODO: currently assumes that the type already exists (order matters!)
     Field {
@@ -236,8 +239,9 @@ impl Change {
         match self {
             Change::Type { name, graph, key } => {
                 let ty = upsert_type(original_schema, schema, name)?;
-                add_join_type_directive(ty, graph, key);
+                add_join_type_directive(ty, graph, key.clone(), None);
             }
+
             Change::Field {
                 type_name,
                 field_name,
@@ -246,6 +250,7 @@ impl Change {
                 let field = upsert_field(original_schema, schema, type_name, field_name)?;
                 add_join_field_directive(field, graph)?;
             }
+
             Change::InputField {
                 type_name,
                 field_name,
@@ -254,14 +259,15 @@ impl Change {
                 let field = upsert_input_field(original_schema, schema, type_name, field_name)?;
                 add_input_join_field_directive(field, graph)?;
             }
+
             Change::MagicFinder { type_name, graph } => {
                 {
                     let arg_ty = add_type(schema, "_Any", make_any_scalar())?;
-                    add_join_type_directive(arg_ty, graph, &Key::None);
+                    add_join_type_directive(arg_ty, graph, None, None);
                 }
 
                 let ty = upsert_type(original_schema, schema, "Query")?;
-                add_join_type_directive(ty, graph, &Key::None);
+                add_join_type_directive(ty, graph, None, None);
 
                 add_entities_field(
                     ty,
@@ -450,7 +456,7 @@ fn recurse_selection(
     mutations.push(Change::Type {
         name: type_name.clone(),
         graph: graph.clone(),
-        key: Key::None,
+        key: None,
     });
 
     match ty {
@@ -518,7 +524,7 @@ fn recurse_inputs(
         changes.push(Change::Type {
             name: output_type_name.clone(),
             graph: graph.clone(),
-            key: Key::None,
+            key: None,
         });
     }
 

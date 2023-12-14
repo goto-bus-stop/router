@@ -354,15 +354,12 @@ impl PlanNode {
                                     connector: None,
                                 }),
                             ) {
-                                match self {
-                                    PlanNode::Flatten(flatten) => {
-                                        fetch_node.protocol_kind =
-                                            Arc::new(ProtocolKind::RestWrapper(
-                                                RestProtocolWrapper { magic_finder_field },
-                                            ));
-                                        flatten.connector = Some(fetch_node)
-                                    }
-                                    _ => {}
+                                if let PlanNode::Flatten(flatten) = self {
+                                    fetch_node.protocol_kind =
+                                        Arc::new(ProtocolKind::RestWrapper(RestProtocolWrapper {
+                                            magic_finder_field,
+                                        }));
+                                    flatten.connector = Some(fetch_node)
                                 }
                             }
                         }

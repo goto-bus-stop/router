@@ -205,7 +205,7 @@ impl PlanNode {
                                     &current_dir,
                                     parent_value,
                                     sender,
-                                    &node,
+                                    node,
                                 )
                                 .instrument(tracing::info_span!(
                                     FLATTEN_SPAN_NAME,

@@ -4,6 +4,7 @@ use std::mem;
 use std::sync::Arc;
 
 use apollo_compiler::ast::Document;
+use aws_config::connector;
 use indexmap::IndexSet;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
@@ -152,6 +153,7 @@ pub(crate) struct RestProtocolWrapper {
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub(crate) struct RestFetchNode {
     connector_service_name: String,
+    parent_service_name: String,
 }
 
 pub(crate) struct Variables {
@@ -279,11 +281,12 @@ impl FetchNode {
             }
         };
 
-        let subgraph_service_name = match &*self.protocol_kind {
+        let (service_name, subgraph_service_name) = match &*self.protocol_kind {
             ProtocolKind::RestFetch(RestFetchNode {
                 connector_service_name,
-            }) => connector_service_name,
-            _ => service_name,
+                parent_service_name,
+            }) => (parent_service_name, connector_service_name),
+            _ => (service_name, service_name),
         };
 
         let uri = parameters
@@ -605,6 +608,7 @@ impl FetchNode {
     pub(crate) async fn generate_connector_plan(
         &mut self,
         subgraph_planners: &HashMap<String, Arc<Planner<QueryPlanResult>>>,
+        connector_urls: &HashMap<String, String>,
     ) -> Result<Option<(PlanSuccess<QueryPlanResult>, Option<String>)>, QueryPlannerError> {
         if let Some(planner) = subgraph_planners.get(&self.service_name) {
             tracing::debug!(
@@ -630,7 +634,7 @@ impl FetchNode {
             {
                 Ok(mut plan) => {
                     if let Some(node) = plan.data.query_plan.node.as_mut() {
-                        node.update_connector_plan(&self.service_name);
+                        node.update_connector_plan(&self.service_name, connector_urls);
                     }
 
                     return Ok(Some((plan, magic_finder_field)));
@@ -643,10 +647,23 @@ impl FetchNode {
         Ok(None)
     }
 
-    pub(crate) fn update_connector_plan(&mut self, parent_service_name: &String) {
-        let service_name = mem::replace(&mut self.service_name, parent_service_name.to_string());
+    pub(crate) fn update_connector_plan(
+        &mut self,
+        parent_service_name: &String,
+        connector_urls: &HashMap<String, String>,
+    ) {
+        let parent_service_name = parent_service_name.to_string();
+        let url = connector_urls
+            .get(&self.service_name)
+            .map(|s| s.as_str())
+            .unwrap_or("");
+        let service_name = mem::replace(
+            &mut self.service_name,
+            format!("{parent_service_name}: {}", url),
+        );
         self.protocol_kind = Arc::new(ProtocolKind::RestFetch(RestFetchNode {
             connector_service_name: service_name,
+            parent_service_name,
         }))
     }
 }

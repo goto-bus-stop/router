@@ -12,7 +12,6 @@ use super::directives::SourceAPI;
 use super::directives::SourceField;
 use super::directives::SourceType;
 use super::http_json_transport::HttpJsonTransport;
-use super::join_spec_helpers::Key;
 use super::request_response::handle_responses;
 use super::request_response::make_requests;
 use super::request_response::ResponseParams;
@@ -42,13 +41,15 @@ pub(super) enum ConnectorKind {
     },
     Entity {
         type_name: Name,
-        key: Key,
+        key: String,
+        is_interface_object: bool,
     },
     EntityField {
         type_name: Name,
         field_name: Name,
         output_type_name: Name,
-        key: Key,
+        key: String,
+        on_interface_object: bool,
     },
 }
 
@@ -72,7 +73,7 @@ impl Connector {
         api: SourceAPI,
         directive: SourceType,
     ) -> Result<Self, BoxError> {
-        let (input_selection, key_string, transport) = if let Some(ref http) = directive.http {
+        let (input_selection, key, transport) = if let Some(ref http) = directive.http {
             let (input_selection, key_string) =
                 HttpJsonTransport::input_selection_from_http_source(http);
 
@@ -89,7 +90,8 @@ impl Connector {
 
         let kind = ConnectorKind::Entity {
             type_name: directive.type_name.clone(),
-            key: Key::Resolvable(key_string),
+            key,
+            is_interface_object: directive.is_interface_object,
         };
 
         Ok(Connector {
@@ -107,7 +109,7 @@ impl Connector {
         api: SourceAPI,
         directive: SourceField,
     ) -> Result<Self, BoxError> {
-        let (input_selection, key_string, transport) = if let Some(ref http) = directive.http {
+        let (input_selection, key, transport) = if let Some(ref http) = directive.http {
             let (input_selection, key_string) =
                 HttpJsonTransport::input_selection_from_http_source(http);
 
@@ -134,7 +136,8 @@ impl Connector {
                     type_name: directive.parent_type_name.clone(),
                     field_name: directive.field_name.clone(),
                     output_type_name: directive.output_type_name.clone(),
-                    key: Key::Resolvable(key_string),
+                    key,
+                    on_interface_object: directive.on_interface_object,
                 }
             };
 
@@ -254,6 +257,7 @@ mod tests {
                 headers: vec![],
             }),
             selection: JSONSelection::parse(".data").unwrap().1,
+            on_interface_object: false,
         };
 
         let connector =

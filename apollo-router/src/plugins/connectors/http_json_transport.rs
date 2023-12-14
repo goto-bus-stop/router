@@ -32,14 +32,19 @@ impl HttpJsonTransport {
         api: &SourceAPI,
         directive: &SourceType,
     ) -> Result<Self, HttpJsonTransportError> {
+        let api_http = api
+            .http
+            .as_ref()
+            .ok_or(HttpJsonTransportError::MissingHttp)?;
         let http = directive
             .http
             .as_ref()
             .ok_or(HttpJsonTransportError::MissingHttp)?;
 
         Ok(Self {
-            base_uri: api
-                .base_uri()
+            base_uri: api_http
+                .base_url
+                .parse()
                 .map_err(HttpJsonTransportError::InvalidBaseUri)?,
             method: http.method.clone(),
             headers: HttpHeader::from_directive(&http.headers)?,
@@ -53,14 +58,19 @@ impl HttpJsonTransport {
         api: &SourceAPI,
         directive: &SourceField,
     ) -> Result<Self, HttpJsonTransportError> {
+        let api_http = api
+            .http
+            .as_ref()
+            .ok_or(HttpJsonTransportError::MissingHttp)?;
         let http = directive
             .http
             .as_ref()
             .ok_or(HttpJsonTransportError::MissingHttp)?;
 
         Ok(Self {
-            base_uri: api
-                .base_uri()
+            base_uri: api_http
+                .base_url
+                .parse()
                 .map_err(HttpJsonTransportError::InvalidBaseUri)?,
             method: http.method.clone(),
             headers: vec![], // TODO HttpHeader::from_directive(&http.headers)?,
@@ -100,7 +110,6 @@ impl HttpJsonTransport {
             .path_template
             .generate_path(inputs)
             .map_err(HttpJsonTransportError::PathGenerationError)?;
-
         append_path(self.base_uri.clone(), &path)
     }
 
@@ -127,13 +136,14 @@ fn append_path(base_uri: Url, path: &str) -> Result<Url, HttpJsonTransportError>
     let path_uri: Url = Url::options()
         .base_url(Some(&base_uri))
         .parse(path)
-        .map_err(|e| HttpJsonTransportError::InvalidPath(e))?;
-    let mut res = base_uri.clone();
+        .map_err(HttpJsonTransportError::InvalidPath)?;
     // get query parameters from both base_uri and path
     let base_uri_query_pairs =
         (!base_uri.query().unwrap_or_default().is_empty()).then(|| base_uri.query_pairs());
     let path_uri_query_pairs =
         (!path_uri.query().unwrap_or_default().is_empty()).then(|| path_uri.query_pairs());
+
+    let mut res = base_uri.clone();
 
     // append segments
     {
@@ -147,15 +157,22 @@ fn append_path(base_uri: Url, path: &str) -> Result<Url, HttpJsonTransportError>
 
         // Ok this one is a bit tricky.
         // Here we're trying to only append segments that are not empty, to avoid `//`
-        let mut res_segments = res.path_segments_mut().unwrap();
+        let mut res_segments = res.path_segments_mut().map_err(|_| {
+            HttpJsonTransportError::InvalidBaseUri(
+                url::ParseError::RelativeUrlWithCannotBeABaseBase,
+            )
+        })?;
         res_segments
             .clear()
-            .extend(segments.into_iter().filter(|segment| !segment.is_empty()))
+            .extend(segments.filter(|segment| !segment.is_empty()))
             .extend(
                 path_uri
                     .path_segments()
-                    .unwrap()
-                    .into_iter()
+                    .ok_or_else(|| {
+                        HttpJsonTransportError::InvalidPath(
+                            url::ParseError::RelativeUrlWithCannotBeABaseBase,
+                        )
+                    })?
                     .filter(|segment| !segment.is_empty()),
             );
     }
@@ -223,7 +240,7 @@ pub(super) enum HttpJsonTransportError {
     /// Invalid HTTP header mapping
     InvalidHeaderMapping,
     /// Error building URI
-    NewUriError(#[from] Option<http::Error>),
+    NewUriError(#[from] Option<http::uri::InvalidUri>),
     /// Could not generate path from inputs
     PathGenerationError(String),
     /// Could not generate HTTP request

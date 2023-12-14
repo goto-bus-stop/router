@@ -1,13 +1,12 @@
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
-  @link(url: "https://specs.apollo.dev/source/v0.1")
   @join__schema(
-    graph: SIMPLE
+    graph: KITCHEN_SINK
     directives: [
       {
         name: "sourceAPI"
-        args: { name: "a", http: { baseURL: "http://localhost:8080/v1" } }
+        args: { name: "a", http: { baseURL: "http://localhost:8080/v1/" } }
       }
     ]
   ) {
@@ -15,12 +14,10 @@ schema
   mutation: Mutation
 }
 
-directive @join__schema(
-  graph: join__Graph
-  directives: join__FieldSet
-) repeatable on SCHEMA
-
-directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+directive @join__enumValue(
+  graph: join__Graph!
+  directives: [link__Import!]
+) repeatable on ENUM_VALUE
 
 directive @join__field(
   graph: join__Graph
@@ -30,14 +27,19 @@ directive @join__field(
   external: Boolean
   override: String
   usedOverridden: Boolean
-  directives: join__FieldSet
+  directives: [link__Import!]
 ) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
-directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__graph(
+  name: String!
+  url: String!
+  directives: [link__Import!]
+) on ENUM_VALUE
 
 directive @join__implements(
   graph: join__Graph!
   interface: String!
+  directives: [link__Import!]
 ) repeatable on OBJECT | INTERFACE
 
 directive @join__type(
@@ -46,12 +48,13 @@ directive @join__type(
   extension: Boolean! = false
   resolvable: Boolean! = true
   isInterfaceObject: Boolean! = false
-  directives: join__FieldSet
+  directives: [link__Import!]
 ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
 
 directive @join__unionMember(
   graph: join__Graph!
   member: String!
+  directives: [link__Import!]
 ) repeatable on UNION
 
 directive @link(
@@ -64,7 +67,7 @@ directive @link(
 type EntityAcrossBoth
   @join__type(graph: NORMAL, key: "a b")
   @join__type(
-    graph: SIMPLE
+    graph: KITCHEN_SINK
     key: "a b"
     directives: [
       {
@@ -77,13 +80,16 @@ type EntityAcrossBoth
       }
     ]
   ) {
-  a: ID @join__field(graph: NORMAL) @join__field(graph: SIMPLE, external: true)
-  b: ID @join__field(graph: NORMAL) @join__field(graph: SIMPLE, external: true)
-  c: String @join__field(graph: NORMAL)
-  d: String @join__field(graph: SIMPLE)
+  a: ID
+    @join__field(graph: KITCHEN_SINK, external: true)
+    @join__field(graph: NORMAL)
+  b: ID
+    @join__field(graph: KITCHEN_SINK, external: true)
+    @join__field(graph: NORMAL)
+  d: String @join__field(graph: KITCHEN_SINK)
   e: String
     @join__field(
-      graph: SIMPLE
+      graph: KITCHEN_SINK
       directives: [
         {
           name: "sourceField"
@@ -95,11 +101,12 @@ type EntityAcrossBoth
         }
       ]
     )
+  c: String @join__field(graph: NORMAL)
 }
 
 type Hello
   @join__type(
-    graph: SIMPLE
+    graph: KITCHEN_SINK
     key: "id"
     directives: [
       {
@@ -116,7 +123,7 @@ type Hello
   field: String
   world: World
     @join__field(
-      graph: SIMPLE
+      graph: KITCHEN_SINK
       directives: [
         {
           name: "sourceField"
@@ -130,33 +137,50 @@ type Hello
     )
 }
 
+type IOa implements TestingInterfaceObject
+  @join__implements(graph: NORMAL, interface: "TestingInterfaceObject")
+  @join__type(graph: NORMAL, key: "id") {
+  id: ID!
+  a: String
+  c: String @join__field
+  d: String @join__field
+}
+
+type IOb implements TestingInterfaceObject
+  @join__implements(graph: NORMAL, interface: "TestingInterfaceObject")
+  @join__type(graph: NORMAL, key: "id") {
+  id: ID!
+  b: String
+  c: String @join__field
+  d: String @join__field
+}
+
 scalar join__FieldSet
-  @specifiedBy(url: "http://just-to-avoid-valiadation-warnings")
+  @specifiedBy(url: "https://just-avoiding-validation-warnings")
 
 enum join__Graph {
+  KITCHEN_SINK @join__graph(name: "kitchen-sink", url: "http://localhost:8080/")
   NORMAL @join__graph(name: "normal", url: "http://localhost:8081/")
-  SIMPLE @join__graph(name: "simple", url: "http://connector-subgraph")
 }
 
 scalar link__Import
-  @specifiedBy(url: "http://just-to-avoid-valiadation-warnings")
+  @specifiedBy(url: "https://just-avoiding-validation-warnings")
 
 enum link__Purpose {
   """
   `SECURITY` features provide metadata necessary to securely resolve fields.
   """
   SECURITY
-
   """
   `EXECUTION` features provide metadata necessary for operation execution.
   """
   EXECUTION
 }
 
-type Mutation @join__type(graph: SIMPLE) {
+type Mutation @join__type(graph: KITCHEN_SINK) {
   mutation(input: MutationInput): MutationOutput
     @join__field(
-      graph: SIMPLE
+      graph: KITCHEN_SINK
       directives: [
         {
           name: "sourceField"
@@ -164,12 +188,7 @@ type Mutation @join__type(graph: SIMPLE) {
             api: "a"
             http: {
               POST: "/mutation"
-              body: """
-              nums: .input.nums
-              values: .input.values {
-                num
-              }
-              """
+              body: "nums: .input.nums\nvalues: .input.values {\n  num\n}"
             }
             selection: ".data { success }"
           }
@@ -178,31 +197,27 @@ type Mutation @join__type(graph: SIMPLE) {
     )
 }
 
-input MutationInput @join__type(graph: SIMPLE) {
+input MutationInput @join__type(graph: KITCHEN_SINK) {
   nums: [Int!]
   values: [MutationNestedInput!]
 }
 
-input MutationNestedInput @join__type(graph: SIMPLE) {
+input MutationNestedInput @join__type(graph: KITCHEN_SINK) {
   num: Int
 }
 
-type MutationOutput @join__type(graph: SIMPLE) {
+type MutationOutput @join__type(graph: KITCHEN_SINK) {
   success: Boolean
 }
 
-type Nested @join__type(graph: SIMPLE) {
+type Nested @join__type(graph: KITCHEN_SINK) {
   field: String
 }
 
-type Query @join__type(graph: NORMAL) @join__type(graph: SIMPLE) {
-  fieldBackedByRealResolver: TypeWithResolver @join__field(graph: NORMAL)
-
-  startJoin: EntityAcrossBoth @join__field(graph: NORMAL)
-
+type Query @join__type(graph: NORMAL) @join__type(graph: KITCHEN_SINK) {
   hello: Hello
     @join__field(
-      graph: SIMPLE
+      graph: KITCHEN_SINK
       directives: [
         {
           name: "sourceField"
@@ -210,10 +225,9 @@ type Query @join__type(graph: NORMAL) @join__type(graph: SIMPLE) {
         }
       ]
     )
-
   withArguments(value: String, done: Boolean): String
     @join__field(
-      graph: SIMPLE
+      graph: KITCHEN_SINK
       directives: [
         {
           name: "sourceField"
@@ -225,13 +239,58 @@ type Query @join__type(graph: NORMAL) @join__type(graph: SIMPLE) {
         }
       ]
     )
+  fieldBackedByRealResolver: TypeWithResolver @join__field(graph: NORMAL)
+  startJoin: EntityAcrossBoth @join__field(graph: NORMAL)
+  interface: [TestingInterfaceObject] @join__field(graph: NORMAL)
+}
+
+interface TestingInterfaceObject
+  @join__type(graph: NORMAL, key: "id")
+  @join__type(
+    graph: KITCHEN_SINK
+    key: "id"
+    isInterfaceObject: true
+    directives: [
+      {
+        name: "sourceType"
+        args: {
+          api: "a"
+          http: { GET: "/interface-object/{id}" }
+          selection: ".data { c }"
+        }
+      }
+    ]
+  ) {
+  id: ID!
+    @join__field(graph: KITCHEN_SINK, external: true)
+    @join__field(graph: NORMAL)
+  c: String @join__field(graph: KITCHEN_SINK)
+  d: String
+    @join__field(
+      graph: KITCHEN_SINK
+      directives: [
+        {
+          name: "sourceField"
+          args: {
+            api: "a"
+            http: { GET: "/interface-object/{id}/d" }
+            selection: ".data"
+          }
+        }
+      ]
+    )
 }
 
 type TypeWithResolver @join__type(graph: NORMAL, key: "id") {
   id: ID!
 }
 
-type World @join__type(graph: SIMPLE) {
+type World @join__type(graph: KITCHEN_SINK) {
   field: String
   nested: Nested
 }
+
+directive @join__schema(
+  graph: join__Graph!
+  directives: [link__Import!]
+) repeatable on SCHEMA

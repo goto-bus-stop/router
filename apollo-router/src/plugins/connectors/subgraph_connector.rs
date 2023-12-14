@@ -296,7 +296,7 @@ mod tests {
         let _spawned_task = tokio::task::spawn(emulate_rest_connector(listener));
 
         let schema = SCHEMA.replace(
-            "https://ipinfo.io",
+            "https://ipinfo.io/",
             &format!("http://127.0.0.1:{}/", address.port()),
         );
 

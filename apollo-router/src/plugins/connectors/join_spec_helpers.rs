@@ -9,6 +9,7 @@ use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
 use apollo_compiler::schema::InputValueDefinition;
+use apollo_compiler::schema::Name;
 use apollo_compiler::schema::ScalarType;
 use apollo_compiler::schema::Type;
 use apollo_compiler::schema::Value;
@@ -338,15 +339,60 @@ pub(super) fn add_input_join_field_directive(
     Ok(())
 }
 
-/*
-TODO:
+// @join__implements -----------------------------------------------------------
 
-directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+/*
 
 directive @join__implements(
   graph: join__Graph!
   interface: String!
 ) repeatable on OBJECT | INTERFACE
+
+*/
+
+fn join_implements_directive(graph: &str, interface: &str) -> Directive {
+    Directive {
+        name: name!("join__implements"),
+        arguments: vec![
+            Argument {
+                name: name!("graph"),
+                value: Value::Enum(ast::Name::new_unchecked(graph.into())).into(),
+            }
+            .into(),
+            Argument {
+                name: name!("interface"),
+                value: Value::String(NodeStr::new(interface)).into(),
+            }
+            .into(),
+        ],
+    }
+}
+
+pub(super) fn add_join_implements(
+    ty: &mut ExtendedType,
+    graph: &str,
+    interface: &Name,
+) -> anyhow::Result<()> {
+    match ty {
+        ExtendedType::Object(ref mut ty) => {
+            let ty = ty.make_mut();
+            ty.directives
+                .push(join_implements_directive(graph, interface).into());
+        }
+        ExtendedType::Interface(ty) => {
+            let ty = ty.make_mut();
+            ty.directives
+                .push(join_implements_directive(graph, interface).into());
+        }
+        _ => bail!("Cannot add join__implements directive to non-object type"),
+    }
+    Ok(())
+}
+
+/*
+TODO:
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
 directive @join__unionMember(
   graph: join__Graph!

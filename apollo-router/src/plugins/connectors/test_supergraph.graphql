@@ -137,6 +137,22 @@ type Hello
     )
 }
 
+type Ia implements TestingInterface
+  @join__implements(graph: KITCHEN_SINK, interface: "TestingInterface")
+  @join__type(graph: KITCHEN_SINK) {
+  id: ID!
+  a: String
+  nested: NestedInterface
+}
+
+type Ib implements TestingInterface
+  @join__implements(graph: KITCHEN_SINK, interface: "TestingInterface")
+  @join__type(graph: KITCHEN_SINK) {
+  id: ID!
+  b: String
+  nested: NestedInterface
+}
+
 type IOa implements TestingInterfaceObject
   @join__implements(graph: NORMAL, interface: "TestingInterfaceObject")
   @join__type(graph: NORMAL, key: "id") {
@@ -214,6 +230,24 @@ type Nested @join__type(graph: KITCHEN_SINK) {
   field: String
 }
 
+interface NestedInterface @join__type(graph: KITCHEN_SINK) {
+  id: ID!
+}
+
+type NIa implements NestedInterface
+  @join__implements(graph: KITCHEN_SINK, interface: "NestedInterface")
+  @join__type(graph: KITCHEN_SINK) {
+  id: ID!
+  a: String
+}
+
+type NIb implements NestedInterface
+  @join__implements(graph: KITCHEN_SINK, interface: "NestedInterface")
+  @join__type(graph: KITCHEN_SINK) {
+  id: ID!
+  b: String
+}
+
 type Query @join__type(graph: NORMAL) @join__type(graph: KITCHEN_SINK) {
   hello: Hello
     @join__field(
@@ -239,9 +273,29 @@ type Query @join__type(graph: NORMAL) @join__type(graph: KITCHEN_SINK) {
         }
       ]
     )
+  interfaces: [TestingInterface]
+    @join__field(
+      graph: KITCHEN_SINK
+      directives: [
+        {
+          name: "sourceField"
+          args: {
+            api: "a"
+            http: { GET: "/interfaces" }
+            selection: ".data { id a b nested { id a b } }"
+            # selection: ".data { id nested { id } }"
+          }
+        }
+      ]
+    )
   fieldBackedByRealResolver: TypeWithResolver @join__field(graph: NORMAL)
   startJoin: EntityAcrossBoth @join__field(graph: NORMAL)
-  interface: [TestingInterfaceObject] @join__field(graph: NORMAL)
+  interfaceObject: [TestingInterfaceObject] @join__field(graph: NORMAL)
+}
+
+interface TestingInterface @join__type(graph: KITCHEN_SINK) {
+  id: ID!
+  nested: NestedInterface
 }
 
 interface TestingInterfaceObject

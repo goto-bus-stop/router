@@ -604,7 +604,6 @@ impl FetchNode {
 
     pub(crate) async fn generate_connector_plan(
         &mut self,
-        _subgraph_schemas: &HashMap<String, Arc<Schema>>,
         subgraph_planners: &HashMap<String, Arc<Planner<QueryPlanResult>>>,
     ) -> Result<Option<(PlanSuccess<QueryPlanResult>, Option<String>)>, QueryPlannerError> {
         if let Some(planner) = subgraph_planners.get(&self.service_name) {

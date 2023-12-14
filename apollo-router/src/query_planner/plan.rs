@@ -336,14 +336,13 @@ impl PlanNode {
     // generates a query plan for each connector fetch node in the main query plan
     pub(crate) fn generate_connector_plan<'a>(
         &'a mut self,
-        subgraph_schemas: &'a HashMap<String, Arc<Schema>>,
         subgraph_planners: &'a HashMap<String, Arc<Planner<QueryPlanResult>>>,
     ) -> future::BoxFuture<Result<(), QueryPlannerError>> {
         Box::pin(async move {
             match self {
                 PlanNode::Fetch(fetch_node) => {
                     if let Some((plan, magic_finder_field)) = fetch_node
-                        .generate_connector_plan(subgraph_schemas, subgraph_planners)
+                        .generate_connector_plan(subgraph_planners)
                         .await?
                     {
                         if let Some(connector_node) = plan.data.query_plan.node {
@@ -372,35 +371,30 @@ impl PlanNode {
                 }
                 PlanNode::Sequence { nodes } => {
                     for node in nodes.iter_mut() {
-                        node.generate_connector_plan(subgraph_schemas, subgraph_planners)
-                            .await?;
+                        node.generate_connector_plan(subgraph_planners).await?;
                     }
                     Ok(())
                 }
                 PlanNode::Parallel { nodes } => {
                     for node in nodes.iter_mut() {
-                        node.generate_connector_plan(subgraph_schemas, subgraph_planners)
-                            .await?;
+                        node.generate_connector_plan(subgraph_planners).await?;
                     }
                     Ok(())
                 }
                 PlanNode::Flatten(flatten) => {
                     flatten
                         .node
-                        .generate_connector_plan(subgraph_schemas, subgraph_planners)
+                        .generate_connector_plan(subgraph_planners)
                         .await
                 }
                 PlanNode::Defer { primary, deferred } => {
                     if let Some(node) = primary.node.as_mut() {
-                        node.generate_connector_plan(subgraph_schemas, subgraph_planners)
-                            .await?;
+                        node.generate_connector_plan(subgraph_planners).await?;
                     }
                     for deferred_node in deferred {
                         if let Some(node) = deferred_node.node.take() {
                             let mut new_node = (*node).clone();
-                            new_node
-                                .generate_connector_plan(subgraph_schemas, subgraph_planners)
-                                .await?;
+                            new_node.generate_connector_plan(subgraph_planners).await?;
                             deferred_node.node = Some(Arc::new(new_node));
                         }
                     }
@@ -408,8 +402,7 @@ impl PlanNode {
                 }
                 PlanNode::Subscription { primary: _, rest } => {
                     if let Some(node) = rest.as_mut() {
-                        node.generate_connector_plan(subgraph_schemas, subgraph_planners)
-                            .await?;
+                        node.generate_connector_plan(subgraph_planners).await?;
                     }
                     Ok(())
                 }
@@ -419,12 +412,10 @@ impl PlanNode {
                     else_clause,
                 } => {
                     if let Some(node) = if_clause.as_mut() {
-                        node.generate_connector_plan(subgraph_schemas, subgraph_planners)
-                            .await?;
+                        node.generate_connector_plan(subgraph_planners).await?;
                     }
                     if let Some(node) = else_clause.as_mut() {
-                        node.generate_connector_plan(subgraph_schemas, subgraph_planners)
-                            .await?;
+                        node.generate_connector_plan(subgraph_planners).await?;
                     }
                     Ok(())
                 }

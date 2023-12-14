@@ -477,7 +477,7 @@ impl BridgeQueryPlanner {
             Ok(mut plan) => {
                 if let Some(node) = plan.data.query_plan.node.as_mut() {
                     node.extract_authorization_metadata(&self.schema.definitions, &key);
-                    node.generate_connector_plan(&self.subgraph_schemas, &self.subgraph_planners)
+                    node.generate_connector_plan(&self.subgraph_planners)
                         .await?;
                 }
                 tracing::debug!(

@@ -122,7 +122,56 @@ impl HttpJsonTransport {
 
 /// Append a path and query to a URI. Uses the path from base URI (but will discard the query).
 fn append_path(base_uri: Url, path: &str) -> Result<Url, HttpJsonTransportError> {
-    base_uri.join(path).map_err(std::convert::Into::into)
+    // we will need to work on path segments, and on query parameters.
+    // the first thing we need to do is parse the path so we have APIs to reason with both:
+    let path_uri: Url = Url::options()
+        .base_url(Some(&base_uri))
+        .parse(path)
+        .map_err(|e| HttpJsonTransportError::InvalidPath(e))?;
+    let mut res = base_uri.clone();
+    // get query parameters from both base_uri and path
+    let base_uri_query_pairs =
+        (!base_uri.query().unwrap_or_default().is_empty()).then(|| base_uri.query_pairs());
+    let path_uri_query_pairs =
+        (!path_uri.query().unwrap_or_default().is_empty()).then(|| path_uri.query_pairs());
+
+    // append segments
+    {
+        // Path segments being none indicates the base_uri cannot be a base URL.
+        // This means the schema is invalid.
+        let segments = base_uri.path_segments().ok_or_else(|| {
+            HttpJsonTransportError::InvalidBaseUri(
+                url::ParseError::RelativeUrlWithCannotBeABaseBase,
+            )
+        })?;
+
+        // Ok this one is a bit tricky.
+        // Here we're trying to only append segments that are not empty, to avoid `//`
+        let mut res_segments = res.path_segments_mut().unwrap();
+        res_segments
+            .clear()
+            .extend(segments.into_iter().filter(|segment| !segment.is_empty()))
+            .extend(
+                path_uri
+                    .path_segments()
+                    .unwrap()
+                    .into_iter()
+                    .filter(|segment| !segment.is_empty()),
+            );
+    }
+    // Calling clear on query_pairs will cause a `?` to be appended.
+    // We only want to do it if necessary
+    if base_uri_query_pairs.is_some() || path_uri_query_pairs.is_some() {
+        res.query_pairs_mut().clear();
+    }
+    if let Some(pairs) = base_uri_query_pairs {
+        res.query_pairs_mut().extend_pairs(pairs);
+    }
+    if let Some(pairs) = path_uri_query_pairs {
+        res.query_pairs_mut().extend_pairs(pairs);
+    }
+
+    Ok(res)
 }
 
 #[allow(dead_code)]
@@ -169,6 +218,8 @@ pub(super) enum HttpJsonTransportError {
     MissingHttp,
     /// Invalid Base URI on API
     InvalidBaseUri(#[from] url::ParseError),
+    /// Invalid Path for directive
+    InvalidPath(url::ParseError),
     /// Invalid HTTP header mapping
     InvalidHeaderMapping,
     /// Error building URI
@@ -184,20 +235,56 @@ pub(super) enum HttpJsonTransportError {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn append_path_test() -> anyhow::Result<()> {
+    fn append_path_test() {
         assert_eq!(
-            super::append_path("https://localhost:8080/v1".parse().unwrap(), "/hello/42")?.as_str(),
+            super::append_path("https://localhost:8080/v1".parse().unwrap(), "/hello/42")
+                .unwrap()
+                .as_str(),
             "https://localhost:8080/v1/hello/42"
         );
-        Ok(())
     }
 
     #[test]
-    fn append_path_test_with_trailing_slash() -> anyhow::Result<()> {
+    fn append_path_test_with_trailing_slash() {
         assert_eq!(
-            super::append_path("https://localhost:8080/".parse().unwrap(), "/hello/42")?.as_str(),
+            super::append_path("https://localhost:8080/".parse().unwrap(), "/hello/42")
+                .unwrap()
+                .as_str(),
             "https://localhost:8080/hello/42"
         );
-        Ok(())
+    }
+
+    #[test]
+    fn append_path_test_with_trailing_slash_and_base_path() {
+        assert_eq!(
+            super::append_path("https://localhost:8080/v1/".parse().unwrap(), "/hello/42")
+                .unwrap()
+                .as_str(),
+            "https://localhost:8080/v1/hello/42"
+        );
+    }
+    #[test]
+    fn append_path_test_with_and_base_path_and_params() {
+        assert_eq!(
+            super::append_path(
+                "https://localhost:8080/v1?foo=bar".parse().unwrap(),
+                "/hello/42"
+            )
+            .unwrap()
+            .as_str(),
+            "https://localhost:8080/v1/hello/42?foo=bar"
+        );
+    }
+    #[test]
+    fn append_path_test_with_and_base_path_and_trailing_slash_and_params() {
+        assert_eq!(
+            super::append_path(
+                "https://localhost:8080/v1/?foo=bar".parse().unwrap(),
+                "/hello/42"
+            )
+            .unwrap()
+            .as_str(),
+            "https://localhost:8080/v1/hello/42?foo=bar"
+        );
     }
 }

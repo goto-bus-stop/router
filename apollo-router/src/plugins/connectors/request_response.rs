@@ -777,6 +777,7 @@ mod tests {
                 headers: vec![],
             }),
             selection: JSONSelection::parse(".data").unwrap().1,
+            on_interface_object: false,
         };
 
         let connector =
@@ -918,6 +919,7 @@ mod tests {
                 headers: vec![],
             }),
             selection: JSONSelection::parse(".data").unwrap().1,
+            on_interface_object: false,
         };
 
         let connector =
@@ -989,6 +991,7 @@ mod tests {
                 headers: vec![],
             }),
             selection: JSONSelection::parse(".data").unwrap().1,
+            on_interface_object: false,
         };
 
         let connector =

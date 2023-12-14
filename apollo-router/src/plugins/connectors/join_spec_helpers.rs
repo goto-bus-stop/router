@@ -188,7 +188,6 @@ fn upgrade_join_type_directive(
         .argument_by_name("isInterfaceObject")
         .and_then(|val| val.to_bool());
 
-    // add or overwrite key
     let key = match (existing_key, key) {
         (Some(k), None) => Some(k.clone()),
         (None, Some(k)) => Some(k.clone()),
@@ -196,11 +195,8 @@ fn upgrade_join_type_directive(
         _ => None,
     };
 
-    // isInterfaceObject can go only None -> true
     let is_interface_object = match (existing_interface_object, is_interface_object) {
-        (Some(true), Some(true)) => Some(true),
-        (None, Some(true)) => Some(true),
-        (Some(true), None) => Some(true),
+        (Some(true), _) | (_, Some(true)) => Some(true),
         _ => None,
     };
 

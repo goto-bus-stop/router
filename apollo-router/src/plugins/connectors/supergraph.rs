@@ -74,6 +74,7 @@ pub(super) fn make_changes(connector: &Connector, schema: &Schema) -> anyhow::Re
                     name: parent_type_name.clone(),
                     graph: graph.clone(),
                     key: None,
+                    is_interface_object: false,
                 },
                 Change::Field {
                     type_name: parent_type_name.clone(),
@@ -105,12 +106,17 @@ pub(super) fn make_changes(connector: &Connector, schema: &Schema) -> anyhow::Re
         }
         // Entity: add the type with appropriate keys, add a finder field,
         // recursively add the selections, and recursively add the key fields if necessary
-        ConnectorKind::Entity { type_name, key } => {
+        ConnectorKind::Entity {
+            type_name,
+            key,
+            is_interface_object,
+        } => {
             let mut changes = vec![
                 Change::Type {
                     name: type_name.clone(),
                     graph: graph.clone(),
                     key: Some(key.clone()),
+                    is_interface_object: *is_interface_object,
                 },
                 Change::MagicFinder {
                     type_name: type_name.clone(),
@@ -146,12 +152,14 @@ pub(super) fn make_changes(connector: &Connector, schema: &Schema) -> anyhow::Re
             type_name,
             output_type_name,
             key,
+            on_interface_object,
         } => {
             let mut changes = vec![
                 Change::Type {
                     name: type_name.clone(),
                     graph: graph.clone(),
                     key: Some(key.clone()),
+                    is_interface_object: *on_interface_object,
                 },
                 Change::Field {
                     type_name: type_name.clone(),
@@ -212,6 +220,7 @@ pub(super) enum Change {
         name: Name,
         graph: String,
         key: Option<String>,
+        is_interface_object: bool,
     },
     /// Include a field on a type in the schema and add the `@join__field` directive
     /// TODO: currently assumes that the type already exists (order matters!)
@@ -237,9 +246,14 @@ impl Change {
         schema: &mut Schema,
     ) -> anyhow::Result<()> {
         match self {
-            Change::Type { name, graph, key } => {
+            Change::Type {
+                name,
+                graph,
+                key,
+                is_interface_object,
+            } => {
                 let ty = upsert_type(original_schema, schema, name)?;
-                add_join_type_directive(ty, graph, key.clone(), None);
+                add_join_type_directive(ty, graph, key.clone(), Some(*is_interface_object));
             }
 
             Change::Field {
@@ -457,6 +471,7 @@ fn recurse_selection(
         name: type_name.clone(),
         graph: graph.clone(),
         key: None,
+        is_interface_object: false,
     });
 
     match ty {
@@ -498,7 +513,44 @@ fn recurse_selection(
                 }
             }
         }
-        ExtendedType::Interface(_) => todo!(),
+        ExtendedType::Interface(obj) => {
+            for selection in selections {
+                match selection {
+                    Selection::Field(selection) => {
+                        let field = obj.fields.get(&selection.name).ok_or(anyhow!(
+                            "missing field {} for type {}",
+                            selection.name.to_string().as_str(),
+                            type_name
+                        ))?;
+
+                        let field_type_name = field.ty.inner_named_type();
+
+                        mutations.push(Change::Field {
+                            type_name: type_name.clone(),
+                            field_name: selection.name.clone(),
+                            graph: graph.clone(),
+                        });
+
+                        if !selection.selection_set.is_empty() {
+                            let field_type = schema
+                                .types
+                                .get(field_type_name)
+                                .ok_or(anyhow!("missing type {}", field_type_name))?;
+
+                            mutations.extend(recurse_selection(
+                                graph.clone(),
+                                schema,
+                                field_type_name,
+                                field_type,
+                                &selection.selection_set,
+                            )?);
+                        }
+                    }
+                    Selection::FragmentSpread(_) => todo!(),
+                    Selection::InlineFragment(_) => todo!(),
+                }
+            }
+        }
         ExtendedType::InputObject(_) => todo!(),
         _ => {} // hit a scalar and we're done
     }
@@ -525,6 +577,7 @@ fn recurse_inputs(
             name: output_type_name.clone(),
             graph: graph.clone(),
             key: None,
+            is_interface_object: false,
         });
     }
 
@@ -584,7 +637,9 @@ mod tests {
                 "CONNECTOR_HELLO_WORLD_1".to_string(),
                 "CONNECTOR_MUTATION_MUTATION_2".to_string(),
                 "CONNECTOR_QUERY_HELLO_3".to_string(),
-                "CONNECTOR_QUERY_WITHARGUMENTS_4".to_string()
+                "CONNECTOR_QUERY_WITHARGUMENTS_4".to_string(),
+                "CONNECTOR_TESTINGINTERFACEOBJECT_2".to_string(),
+                "CONNECTOR_TESTINGINTERFACEOBJECT_D_5".to_string()
             ]
         );
 

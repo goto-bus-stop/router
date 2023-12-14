@@ -42,12 +42,14 @@ pub(super) enum ConnectorKind {
     Entity {
         type_name: Name,
         key: String,
+        is_interface_object: bool,
     },
     EntityField {
         type_name: Name,
         field_name: Name,
         output_type_name: Name,
         key: String,
+        on_interface_object: bool,
     },
 }
 
@@ -89,6 +91,7 @@ impl Connector {
         let kind = ConnectorKind::Entity {
             type_name: directive.type_name.clone(),
             key,
+            is_interface_object: directive.is_interface_object,
         };
 
         Ok(Connector {
@@ -134,6 +137,7 @@ impl Connector {
                     field_name: directive.field_name.clone(),
                     output_type_name: directive.output_type_name.clone(),
                     key,
+                    on_interface_object: directive.on_interface_object,
                 }
             };
 
@@ -253,6 +257,7 @@ mod tests {
                 headers: vec![],
             }),
             selection: JSONSelection::parse(".data").unwrap().1,
+            on_interface_object: false,
         };
 
         let connector =

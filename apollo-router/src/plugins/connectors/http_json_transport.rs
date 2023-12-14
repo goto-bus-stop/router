@@ -105,17 +105,26 @@ impl HttpJsonTransport {
     }
 
     fn make_uri(&self, inputs: &Value) -> Result<http::Uri, HttpJsonTransportError> {
-        let path = self
+        let path: http::Uri = self
             .path_template
             .generate_path(inputs)
-            .map_err(HttpJsonTransportError::PathGenerationError)?;
-
-        let path = path.trim_start_matches('/');
-
-        let url = self
-            .base_uri
-            .join(path)
+            .map_err(HttpJsonTransportError::PathGenerationError)?
+            .parse()
             .map_err(|_| HttpJsonTransportError::NewUriError(None))?;
+
+        let path_and_query = path
+            .into_parts()
+            .path_and_query
+            .ok_or(HttpJsonTransportError::NewUriError(None))?;
+
+        let mut url = self.base_uri.clone();
+
+        let base_path = self.base_uri.path().trim_end_matches('/');
+        let path = path_and_query.path().trim_start_matches('/');
+        url.set_path([base_path, path].join("/").as_str());
+
+        let query = path_and_query.query();
+        url.set_query(query);
 
         url.to_string()
             .parse()

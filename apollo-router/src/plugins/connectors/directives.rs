@@ -244,7 +244,7 @@ impl SourceAPI {
         Ok(Self { graph, name, http })
     }
 
-    pub(super) fn base_uri(&self) -> Result<http::Uri, http::uri::InvalidUri> {
+    pub(super) fn base_uri(&self) -> Result<url::Url, url::ParseError> {
         self.http
             .as_ref()
             .map(|http| http.base_url.as_str())

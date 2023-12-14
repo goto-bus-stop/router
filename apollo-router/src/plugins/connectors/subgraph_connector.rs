@@ -225,7 +225,7 @@ mod tests {
     use crate::services::supergraph;
     use crate::TestHarness;
 
-    const SCHEMA: &str = include_str!("../../../../examples/connectors/starstuff.graphql");
+    const SCHEMA: &str = include_str!("../../../../examples/connectors/supergraph.graphql");
 
     async fn emulate_rest_connector(listener: TcpListener) {
         async fn handle(

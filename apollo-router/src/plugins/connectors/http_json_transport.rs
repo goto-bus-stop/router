@@ -2,6 +2,7 @@ use apollo_compiler::ast::Selection as GraphQLSelection;
 use displaydoc::Display;
 use serde_json_bytes::Value;
 use thiserror::Error;
+use url::Url;
 
 use super::directives::HTTPHeaderMapping;
 use super::directives::HTTPSource;
@@ -16,7 +17,7 @@ use super::url_path_parser::URLPathTemplate;
 
 #[derive(Clone, Debug)]
 pub(super) struct HttpJsonTransport {
-    pub(super) base_uri: http::Uri,
+    pub(super) base_uri: url::Url,
     pub(super) method: http::Method,
     #[allow(dead_code)]
     pub(super) headers: Vec<HttpHeader>,
@@ -84,7 +85,7 @@ impl HttpJsonTransport {
 
         let request = http::Request::builder()
             .method(self.method.clone())
-            .uri(self.make_uri(&inputs)?)
+            .uri(self.make_uri(&inputs)?.as_str())
             .header("content-type", "application/json")
             .body(body)
             .map_err(HttpJsonTransportError::InvalidNewRequest)?;
@@ -94,7 +95,7 @@ impl HttpJsonTransport {
         Ok(request)
     }
 
-    fn make_uri(&self, inputs: &Value) -> Result<http::Uri, HttpJsonTransportError> {
+    fn make_uri(&self, inputs: &Value) -> Result<url::Url, HttpJsonTransportError> {
         let path = self
             .path_template
             .generate_path(inputs)
@@ -120,36 +121,8 @@ impl HttpJsonTransport {
 }
 
 /// Append a path and query to a URI. Uses the path from base URI (but will discard the query).
-fn append_path(base_uri: http::Uri, path: &str) -> Result<http::Uri, HttpJsonTransportError> {
-    let parts = base_uri.into_parts();
-    let path_and_query = parts.path_and_query.clone();
-
-    let new_path = format!(
-        "{}{}",
-        path_and_query
-            .clone()
-            .map(|p| p.path().to_string().clone())
-            .unwrap_or_default(),
-        path
-    );
-
-    let uri = http::Uri::builder()
-        .authority(
-            parts
-                .authority
-                .ok_or(HttpJsonTransportError::NewUriError(None))?
-                .clone(),
-        )
-        .scheme(
-            parts
-                .scheme
-                .ok_or(HttpJsonTransportError::NewUriError(None))?
-                .clone(),
-        )
-        .path_and_query(new_path)
-        .build()
-        .map_err(|e| HttpJsonTransportError::NewUriError(Some(e)))?;
-    Ok(uri)
+fn append_path(base_uri: Url, path: &str) -> Result<Url, HttpJsonTransportError> {
+    base_uri.join(path).map_err(std::convert::Into::into)
 }
 
 #[allow(dead_code)]
@@ -195,7 +168,7 @@ pub(super) enum HttpJsonTransportError {
     /// HTTP parameters missing
     MissingHttp,
     /// Invalid Base URI on API
-    InvalidBaseUri(#[from] http::uri::InvalidUri),
+    InvalidBaseUri(#[from] url::ParseError),
     /// Invalid HTTP header mapping
     InvalidHeaderMapping,
     /// Error building URI
@@ -213,17 +186,18 @@ mod tests {
     #[test]
     fn append_path_test() -> anyhow::Result<()> {
         assert_eq!(
-            super::append_path(
-                http::Uri::builder()
-                    .scheme("https")
-                    .authority("localhost:8080")
-                    .path_and_query("/v1")
-                    .build()?,
-                "/hello/42"
-            )?,
+            super::append_path("https://localhost:8080/v1".parse().unwrap(), "/hello/42")?.as_str(),
             "https://localhost:8080/v1/hello/42"
         );
+        Ok(())
+    }
 
+    #[test]
+    fn append_path_test_with_trailing_slash() -> anyhow::Result<()> {
+        assert_eq!(
+            super::append_path("https://localhost:8080/".parse().unwrap(), "/hello/42")?.as_str(),
+            "https://localhost:8080/hello/42"
+        );
         Ok(())
     }
 }

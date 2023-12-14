@@ -18,6 +18,7 @@ use apollo_compiler::Schema;
 use indexmap::IndexMap;
 use itertools::Itertools;
 
+/// Copy directive and enum/scalar definitions necessary for a supergraph.
 pub(super) fn copy_definitions(schema: &Schema, new_schema: &mut Schema) {
     // @link
     let schema_definition = new_schema.schema_definition.make_mut();
@@ -65,6 +66,8 @@ pub(super) fn copy_definitions(schema: &Schema, new_schema: &mut Schema) {
             new_schema.types.insert(name.clone(), d.clone());
         });
 }
+
+// enum join__Graph and @join__graph -------------------------------------------
 
 pub(super) fn join_graph_enum(names: &[&str]) -> ExtendedType {
     let values: IndexMap<_, _> = names
@@ -115,58 +118,49 @@ fn join_graph_directive(name: &str, url: &str) -> Directive {
     }
 }
 
+// @join__type -----------------------------------------------------------------
+
 /*
 directive @join__type(
   graph: join__Graph!
   key: join__FieldSet
-  extension: Boolean! = false         # TODO
-  resolvable: Boolean! = true
-  isInterfaceObject: Boolean! = false # TODO
+  extension: Boolean! = false         # probably not necessary, i think this is a fed 1 concept
+  resolvable: Boolean! = true         # probably not necessary
+  isInterfaceObject: Boolean! = false
 ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
 */
 
-#[derive(Clone, Debug)]
-pub(super) enum Key {
-    None,
-    Resolvable(String),
-    NonResolvable(String),
-}
-
-fn join_type_directive(graph: &str, key: &Key) -> Directive {
+fn join_type_directive(
+    graph: &str,
+    key: Option<String>,
+    is_interface_object: Option<bool>,
+) -> Directive {
     let mut arguments = vec![Argument {
         name: name!("graph"),
         value: Value::Enum(ast::Name::new_unchecked(graph.into())).into(),
     }
     .into()];
 
-    match key {
-        Key::Resolvable(fields) => {
-            arguments.push(
-                Argument {
-                    name: name!("key"),
-                    value: Value::String(NodeStr::new(fields.as_str())).into(),
-                }
-                .into(),
-            );
-        }
-        Key::NonResolvable(fields) => {
-            arguments.push(
-                Argument {
-                    name: name!("key"),
-                    value: Value::String(NodeStr::new(fields.as_str())).into(),
-                }
-                .into(),
-            );
+    if let Some(fields) = key {
+        arguments.push(
+            Argument {
+                name: name!("key"),
+                value: Value::String(NodeStr::new(fields.as_str())).into(),
+            }
+            .into(),
+        );
+    }
 
+    if let Some(is_interface_object) = is_interface_object {
+        if is_interface_object {
             arguments.push(
                 Argument {
-                    name: name!("resolveable"),
-                    value: Value::Boolean(false).into(),
+                    name: name!("isInterfaceObject"),
+                    value: Value::Boolean(true).into(),
                 }
                 .into(),
             );
         }
-        _ => {}
     }
 
     Directive {
@@ -175,64 +169,109 @@ fn join_type_directive(graph: &str, key: &Key) -> Directive {
     }
 }
 
-pub(super) fn add_join_type_directive(ty: &mut ExtendedType, graph: &str, key: &Key) {
-    // TODO instead of adding the directive more than once, we should "upgrade" existing
-    // directives. (e.g. without key -> add key, or resolvable: false -> resolvable: true)
-    let exists = ty.directives().iter().any(|d| {
+fn upgrade_join_type_directive(
+    directive: &Directive,
+    key: Option<String>,
+    is_interface_object: Option<bool>,
+) -> Directive {
+    let graph = directive
+        .argument_by_name("graph")
+        .and_then(|val| val.as_enum())
+        .map(|val| val.as_str())
+        .unwrap_or_default();
+
+    let existing_key = directive
+        .argument_by_name("key")
+        .and_then(|val| val.as_str())
+        .map(|val| val.to_string());
+    let existing_interface_object = directive
+        .argument_by_name("isInterfaceObject")
+        .and_then(|val| val.to_bool());
+
+    let key = match (existing_key, key) {
+        (Some(k), None) => Some(k.clone()),
+        (None, Some(k)) => Some(k.clone()),
+        (Some(_), Some(k)) => Some(k.clone()),
+        _ => None,
+    };
+
+    let is_interface_object = match (existing_interface_object, is_interface_object) {
+        (Some(true), _) | (_, Some(true)) => Some(true),
+        _ => None,
+    };
+
+    join_type_directive(graph, key, is_interface_object)
+}
+
+pub(super) fn add_join_type_directive(
+    ty: &mut ExtendedType,
+    graph: &str,
+    key: Option<String>,
+    is_interface_object: Option<bool>,
+) {
+    let existing = ty.directives().iter().find_position(|d| {
         d.name == "join__type"
             && d.argument_by_name("graph")
                 .and_then(|val| val.as_enum())
                 .map(|val| val.as_str() == graph)
                 .unwrap_or(false)
-            && d.argument_by_name("key")
-                .and_then(|val| val.as_str())
-                .map(|val| match key {
-                    Key::None => false,
-                    Key::Resolvable(f) => val == f,
-                    Key::NonResolvable(f) => val == f,
-                })
-                .unwrap_or(false)
-            && d.argument_by_name("resolvable")
-                .and_then(|val| val.to_bool())
-                .map(|val| match key {
-                    Key::None => false,
-                    Key::Resolvable(_) => !val,
-                    Key::NonResolvable(_) => val,
-                })
-                .unwrap_or(false)
     });
 
-    if exists {
-        return;
-    }
+    let (index_to_remove, to_insert) = match existing {
+        Some((index, existing)) => (
+            Some(index),
+            upgrade_join_type_directive(existing, key, is_interface_object),
+        ),
+        _ => (None, join_type_directive(graph, key, is_interface_object)),
+    };
 
     match ty {
         ExtendedType::Object(ref mut ty) => {
             let ty = ty.make_mut();
-            ty.directives.push(join_type_directive(graph, key).into());
+            if let Some(index) = index_to_remove {
+                ty.directives.remove(index);
+            }
+            ty.directives.push(to_insert.into());
         }
         ExtendedType::Interface(ty) => {
             let ty = ty.make_mut();
-            ty.directives.push(join_type_directive(graph, key).into());
+            if let Some(index) = index_to_remove {
+                ty.directives.remove(index);
+            }
+            ty.directives.push(to_insert.into());
         }
         ExtendedType::Union(ty) => {
             let ty = ty.make_mut();
-            ty.directives.push(join_type_directive(graph, key).into());
+            if let Some(index) = index_to_remove {
+                ty.directives.remove(index);
+            }
+            ty.directives.push(to_insert.into());
         }
         ExtendedType::Enum(ty) => {
             let ty = ty.make_mut();
-            ty.directives.push(join_type_directive(graph, key).into());
+            if let Some(index) = index_to_remove {
+                ty.directives.remove(index);
+            }
+            ty.directives.push(to_insert.into());
         }
         ExtendedType::InputObject(ty) => {
             let ty = ty.make_mut();
-            ty.directives.push(join_type_directive(graph, key).into());
+            if let Some(index) = index_to_remove {
+                ty.directives.remove(index);
+            }
+            ty.directives.push(to_insert.into());
         }
         ExtendedType::Scalar(ty) => {
             let ty = ty.make_mut();
-            ty.directives.push(join_type_directive(graph, key).into());
+            if let Some(index) = index_to_remove {
+                ty.directives.remove(index);
+            }
+            ty.directives.push(to_insert.into());
         }
     }
 }
+
+// @join__field ----------------------------------------------------------------
 
 /*
 directive @join__field(
@@ -315,6 +354,8 @@ directive @join__unionMember(
 ) repeatable on UNION
 
 */
+
+// Support for magic finder fields ---------------------------------------------
 
 pub(super) fn add_entities_field(
     ty: &mut ExtendedType,
@@ -453,6 +494,11 @@ pub(super) fn parameters_to_selection_set(paths: &Vec<String>) -> Vec<GraphQLSel
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::name;
+    use apollo_compiler::schema::ExtendedType;
+    use apollo_compiler::schema::ObjectType;
+
+    use super::add_join_type_directive;
     use super::parameters_to_selection_set;
     use super::selection_set_to_string;
 
@@ -469,5 +515,114 @@ mod tests {
             ])),
             "id b { c d { e f } } g h { i }"
         )
+    }
+
+    #[test]
+    fn test_add_join_type_directive() {
+        let mut ty = ExtendedType::Object(
+            ObjectType {
+                name: name!("Foo"),
+                description: None,
+                directives: Default::default(),
+                fields: Default::default(),
+                implements_interfaces: Default::default(),
+            }
+            .into(),
+        );
+
+        add_join_type_directive(&mut ty, "MY_GRAPH", None, None);
+
+        let directive = &ty.directives().first().unwrap().node;
+        insta::assert_debug_snapshot!(directive, @r###"
+        Directive {
+            name: "join__type",
+            arguments: [
+                Argument {
+                    name: "graph",
+                    value: Enum(
+                        "MY_GRAPH",
+                    ),
+                },
+            ],
+        }
+        "###);
+
+        add_join_type_directive(&mut ty, "MY_GRAPH", Some("id".to_string()), None);
+
+        assert_eq!(ty.directives().len(), 1);
+        let directive = &ty.directives().first().unwrap().node;
+        insta::assert_debug_snapshot!(directive, @r###"
+        Directive {
+            name: "join__type",
+            arguments: [
+                Argument {
+                    name: "graph",
+                    value: Enum(
+                        "MY_GRAPH",
+                    ),
+                },
+                Argument {
+                    name: "key",
+                    value: String(
+                        "id",
+                    ),
+                },
+            ],
+        }
+        "###);
+
+        add_join_type_directive(&mut ty, "MY_GRAPH", None, None);
+
+        assert_eq!(ty.directives().len(), 1);
+        let directive = &ty.directives().first().unwrap().node;
+        insta::assert_debug_snapshot!(directive, @r###"
+        Directive {
+            name: "join__type",
+            arguments: [
+                Argument {
+                    name: "graph",
+                    value: Enum(
+                        "MY_GRAPH",
+                    ),
+                },
+                Argument {
+                    name: "key",
+                    value: String(
+                        "id",
+                    ),
+                },
+            ],
+        }
+        "###);
+
+        add_join_type_directive(&mut ty, "MY_GRAPH", None, Some(true));
+
+        assert_eq!(ty.directives().len(), 1);
+        let directive = &ty.directives().first().unwrap().node;
+        insta::assert_debug_snapshot!(directive, @r###"
+        Directive {
+            name: "join__type",
+            arguments: [
+                Argument {
+                    name: "graph",
+                    value: Enum(
+                        "MY_GRAPH",
+                    ),
+                },
+                Argument {
+                    name: "key",
+                    value: String(
+                        "id",
+                    ),
+                },
+                Argument {
+                    name: "isInterfaceObject",
+                    value: Boolean(
+                        true,
+                    ),
+                },
+            ],
+        }
+        "###);
     }
 }

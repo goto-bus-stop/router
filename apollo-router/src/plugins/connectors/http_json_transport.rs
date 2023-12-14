@@ -16,7 +16,7 @@ use super::url_path_parser::URLPathTemplate;
 
 #[derive(Clone, Debug)]
 pub(super) struct HttpJsonTransport {
-    pub(super) base_uri: http::Uri,
+    pub(super) base_uri: url::Url,
     pub(super) method: http::Method,
     #[allow(dead_code)]
     pub(super) headers: Vec<HttpHeader>,
@@ -31,14 +31,19 @@ impl HttpJsonTransport {
         api: &SourceAPI,
         directive: &SourceType,
     ) -> Result<Self, HttpJsonTransportError> {
+        let api_http = api
+            .http
+            .as_ref()
+            .ok_or(HttpJsonTransportError::MissingHttp)?;
         let http = directive
             .http
             .as_ref()
             .ok_or(HttpJsonTransportError::MissingHttp)?;
 
         Ok(Self {
-            base_uri: api
-                .base_uri()
+            base_uri: api_http
+                .base_url
+                .parse()
                 .map_err(HttpJsonTransportError::InvalidBaseUri)?,
             method: http.method.clone(),
             headers: HttpHeader::from_directive(&http.headers)?,
@@ -52,14 +57,19 @@ impl HttpJsonTransport {
         api: &SourceAPI,
         directive: &SourceField,
     ) -> Result<Self, HttpJsonTransportError> {
+        let api_http = api
+            .http
+            .as_ref()
+            .ok_or(HttpJsonTransportError::MissingHttp)?;
         let http = directive
             .http
             .as_ref()
             .ok_or(HttpJsonTransportError::MissingHttp)?;
 
         Ok(Self {
-            base_uri: api
-                .base_uri()
+            base_uri: api_http
+                .base_url
+                .parse()
                 .map_err(HttpJsonTransportError::InvalidBaseUri)?,
             method: http.method.clone(),
             headers: vec![], // TODO HttpHeader::from_directive(&http.headers)?,
@@ -95,12 +105,30 @@ impl HttpJsonTransport {
     }
 
     fn make_uri(&self, inputs: &Value) -> Result<http::Uri, HttpJsonTransportError> {
-        let path = self
+        let path: http::Uri = self
             .path_template
             .generate_path(inputs)
-            .map_err(HttpJsonTransportError::PathGenerationError)?;
+            .map_err(HttpJsonTransportError::PathGenerationError)?
+            .parse()
+            .map_err(|_| HttpJsonTransportError::NewUriError(None))?;
 
-        append_path(self.base_uri.clone(), &path)
+        let path_and_query = path
+            .into_parts()
+            .path_and_query
+            .ok_or(HttpJsonTransportError::NewUriError(None))?;
+
+        let mut url = self.base_uri.clone();
+
+        let base_path = self.base_uri.path().trim_end_matches('/');
+        let path = path_and_query.path().trim_start_matches('/');
+        url.set_path([base_path, path].join("/").as_str());
+
+        let query = path_and_query.query();
+        url.set_query(query);
+
+        url.to_string()
+            .parse()
+            .map_err(|e| HttpJsonTransportError::NewUriError(Some(e)))
     }
 
     pub(super) fn map_response(&self, response: Value) -> Result<Value, HttpJsonTransportError> {
@@ -117,39 +145,6 @@ impl HttpJsonTransport {
         let selection_set_string = selection_set_to_string(&selection_set);
         (selection_set, selection_set_string)
     }
-}
-
-/// Append a path and query to a URI. Uses the path from base URI (but will discard the query).
-fn append_path(base_uri: http::Uri, path: &str) -> Result<http::Uri, HttpJsonTransportError> {
-    let parts = base_uri.into_parts();
-    let path_and_query = parts.path_and_query.clone();
-
-    let new_path = format!(
-        "{}{}",
-        path_and_query
-            .clone()
-            .map(|p| p.path().to_string().clone())
-            .unwrap_or_default(),
-        path
-    );
-
-    let uri = http::Uri::builder()
-        .authority(
-            parts
-                .authority
-                .ok_or(HttpJsonTransportError::NewUriError(None))?
-                .clone(),
-        )
-        .scheme(
-            parts
-                .scheme
-                .ok_or(HttpJsonTransportError::NewUriError(None))?
-                .clone(),
-        )
-        .path_and_query(new_path)
-        .build()
-        .map_err(|e| HttpJsonTransportError::NewUriError(Some(e)))?;
-    Ok(uri)
 }
 
 #[allow(dead_code)]
@@ -195,35 +190,15 @@ pub(super) enum HttpJsonTransportError {
     /// HTTP parameters missing
     MissingHttp,
     /// Invalid Base URI on API
-    InvalidBaseUri(#[from] http::uri::InvalidUri),
+    InvalidBaseUri(#[from] url::ParseError),
     /// Invalid HTTP header mapping
     InvalidHeaderMapping,
     /// Error building URI
-    NewUriError(#[from] Option<http::Error>),
+    NewUriError(#[from] Option<http::uri::InvalidUri>),
     /// Could not generate path from inputs
     PathGenerationError(String),
     /// Could not generate HTTP request
     InvalidNewRequest(#[source] http::Error),
     /// Could not serialize body
     BodySerialization(#[source] serde_json::Error),
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn append_path_test() -> anyhow::Result<()> {
-        assert_eq!(
-            super::append_path(
-                http::Uri::builder()
-                    .scheme("https")
-                    .authority("localhost:8080")
-                    .path_and_query("/v1")
-                    .build()?,
-                "/hello/42"
-            )?,
-            "https://localhost:8080/v1/hello/42"
-        );
-
-        Ok(())
-    }
 }

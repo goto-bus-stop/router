@@ -27,7 +27,8 @@ expression: source_types
         "star": null
       }
     },
-    "key_type_map": null
+    "key_type_map": null,
+    "is_interface_object": false
   },
   {
     "graph": "contacts",
@@ -53,6 +54,7 @@ expression: source_types
         "star": null
       }
     },
-    "key_type_map": null
+    "key_type_map": null,
+    "is_interface_object": false
   }
 ]

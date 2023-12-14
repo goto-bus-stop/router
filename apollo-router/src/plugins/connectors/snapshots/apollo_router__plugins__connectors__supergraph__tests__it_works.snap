@@ -2,30 +2,30 @@
 source: apollo-router/src/plugins/connectors/supergraph.rs
 expression: inner.serialize().to_string()
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) @link(url: "https://specs.apollo.dev/source/v0.1") {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
   query: Query
   mutation: Mutation
 }
 
-directive @join__schema(graph: join__Graph, directives: join__FieldSet) repeatable on SCHEMA
+directive @join__enumValue(graph: join__Graph!, directives: [link__Import!]) repeatable on ENUM_VALUE
 
-directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, directives: [link__Import!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, directives: join__FieldSet) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__graph(name: String!, url: String!, directives: [link__Import!]) on ENUM_VALUE
 
-directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__implements(graph: join__Graph!, interface: String!, directives: [link__Import!]) repeatable on OBJECT | INTERFACE
 
-directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false, directives: [link__Import!]) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
 
-directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false, directives: join__FieldSet) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-
-directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+directive @join__unionMember(graph: join__Graph!, member: String!, directives: [link__Import!]) repeatable on UNION
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-scalar join__FieldSet @specifiedBy(url: "http://just-to-avoid-valiadation-warnings")
+directive @join__schema(graph: join__Graph!, directives: [link__Import!]) repeatable on SCHEMA
 
-scalar link__Import @specifiedBy(url: "http://just-to-avoid-valiadation-warnings")
+scalar join__FieldSet @specifiedBy(url: "https://just-avoiding-validation-warnings")
+
+scalar link__Import @specifiedBy(url: "https://just-avoiding-validation-warnings")
 
 enum link__Purpose {
   """
@@ -38,23 +38,24 @@ enum link__Purpose {
   EXECUTION
 }
 
-type EntityAcrossBoth @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0, key: "a b") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0, key: "a b") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) {
+type EntityAcrossBoth @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0, key: "a b") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0, key: "a b") {
   d: String @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_0)
   a: ID @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_E_0)
   b: ID @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_E_0)
   e: String @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_E_0)
 }
 
-scalar _Any @specifiedBy(url: "https://whatever") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) @join__type(graph: CONNECTOR_HELLO_1) @join__type(graph: CONNECTOR_HELLO_WORLD_1)
+scalar _Any @specifiedBy(url: "https://whatever") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) @join__type(graph: CONNECTOR_HELLO_1) @join__type(graph: CONNECTOR_HELLO_WORLD_1) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_5)
 
-type Query @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) @join__type(graph: CONNECTOR_HELLO_1) @join__type(graph: CONNECTOR_HELLO_WORLD_1) @join__type(graph: CONNECTOR_QUERY_HELLO_3) @join__type(graph: CONNECTOR_QUERY_WITHARGUMENTS_4) {
+type Query @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) @join__type(graph: CONNECTOR_HELLO_1) @join__type(graph: CONNECTOR_HELLO_WORLD_1) @join__type(graph: CONNECTOR_QUERY_HELLO_3) @join__type(graph: CONNECTOR_QUERY_WITHARGUMENTS_4) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_5) {
   _EntityAcrossBoth_finder(representations: [_Any!]!): [EntityAcrossBoth!]! @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_E_0)
   _Hello_finder(representations: [_Any!]!): [Hello!]! @join__field(graph: CONNECTOR_HELLO_1) @join__field(graph: CONNECTOR_HELLO_WORLD_1)
   hello: Hello @join__field(graph: CONNECTOR_QUERY_HELLO_3)
   withArguments(value: String, done: Boolean): String @join__field(graph: CONNECTOR_QUERY_WITHARGUMENTS_4)
+  _TestingInterfaceObject_finder(representations: [_Any!]!): [TestingInterfaceObject!]! @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_5)
 }
 
-type Hello @join__type(graph: CONNECTOR_HELLO_1, key: "id") @join__type(graph: CONNECTOR_HELLO_1) @join__type(graph: CONNECTOR_HELLO_1) @join__type(graph: CONNECTOR_HELLO_WORLD_1, key: "id") @join__type(graph: CONNECTOR_HELLO_WORLD_1) @join__type(graph: CONNECTOR_QUERY_HELLO_3) {
+type Hello @join__type(graph: CONNECTOR_HELLO_1, key: "id") @join__type(graph: CONNECTOR_HELLO_WORLD_1, key: "id") @join__type(graph: CONNECTOR_QUERY_HELLO_3) {
   id: ID! @join__field(graph: CONNECTOR_HELLO_1) @join__field(graph: CONNECTOR_HELLO_WORLD_1) @join__field(graph: CONNECTOR_QUERY_HELLO_3)
   field: String @join__field(graph: CONNECTOR_HELLO_1)
   world: World @join__field(graph: CONNECTOR_HELLO_WORLD_1)
@@ -86,6 +87,12 @@ input MutationNestedInput @join__type(graph: CONNECTOR_MUTATION_MUTATION_2) {
   num: Int @join__field(graph: CONNECTOR_MUTATION_MUTATION_2)
 }
 
+interface TestingInterfaceObject @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2, key: "id", isInterfaceObject: true) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_5, key: "id", isInterfaceObject: true) {
+  c: String @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2)
+  id: ID! @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_5)
+  d: String @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_5)
+}
+
 enum join__Graph {
   CONNECTOR_ENTITYACROSSBOTH_0 @join__graph(name: "CONNECTOR_ENTITYACROSSBOTH_0", url: "http://unused")
   CONNECTOR_ENTITYACROSSBOTH_E_0 @join__graph(name: "CONNECTOR_ENTITYACROSSBOTH_E_0", url: "http://unused")
@@ -94,5 +101,7 @@ enum join__Graph {
   CONNECTOR_MUTATION_MUTATION_2 @join__graph(name: "CONNECTOR_MUTATION_MUTATION_2", url: "http://unused")
   CONNECTOR_QUERY_HELLO_3 @join__graph(name: "CONNECTOR_QUERY_HELLO_3", url: "http://unused")
   CONNECTOR_QUERY_WITHARGUMENTS_4 @join__graph(name: "CONNECTOR_QUERY_WITHARGUMENTS_4", url: "http://unused")
+  CONNECTOR_TESTINGINTERFACEOBJECT_2 @join__graph(name: "CONNECTOR_TESTINGINTERFACEOBJECT_2", url: "http://unused")
+  CONNECTOR_TESTINGINTERFACEOBJECT_D_5 @join__graph(name: "CONNECTOR_TESTINGINTERFACEOBJECT_D_5", url: "http://unused")
 }
 

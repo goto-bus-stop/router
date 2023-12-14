@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use apollo_compiler::ast::Definition;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
@@ -63,6 +62,9 @@ enum ResponseKey {
 #[derive(Clone, Debug)]
 enum ResponseTypeName {
     Concrete(String), // TODO Abstract(Vec<String>) with discriminator?
+    /// For interfaceObject support. We don't want to include __typename in the
+    /// response because this subgraph doesn't know the concrete type
+    Omitted,
 }
 
 pub(super) fn make_requests(
@@ -174,6 +176,15 @@ fn entities_from_request(
     request: &SubgraphRequest,
     _schema: Arc<Valid<Schema>>,
 ) -> Result<Vec<(ResponseKey, RequestInputs)>, BoxError> {
+    let (_, typename_requested) = graphql_utils::get_entity_fields(
+        request
+            .subgraph_request
+            .body()
+            .query
+            .as_ref()
+            .ok_or_else(|| BoxError::from("missing query"))?,
+    )?;
+
     request
         .subgraph_request
         .body()
@@ -194,11 +205,15 @@ fn entities_from_request(
                 .as_str()
                 .ok_or_else(|| BoxError::from("__typename is not a string"))?
                 .to_string();
+
+            let typename = if typename_requested {
+                ResponseTypeName::Concrete(typename)
+            } else {
+                ResponseTypeName::Omitted
+            };
+
             Ok((
-                ResponseKey::Entity {
-                    index: i,
-                    typename: ResponseTypeName::Concrete(typename),
-                },
+                ResponseKey::Entity { index: i, typename },
                 RequestInputs {
                     arguments: Default::default(),
                     parent: rep
@@ -231,36 +246,14 @@ fn entities_with_fields_from_request(
         _ => unreachable!(),
     };
 
-    let query = request
-        .subgraph_request
-        .body()
-        .query
-        .clone()
-        .ok_or_else(|| BoxError::from("missing query"))?;
-
-    // Use the AST because the `_entities` field is not actually present in the supergraph
-    let doc = apollo_compiler::ast::Document::parse(query, "op.graphql")
-        .map_err(|_| "cannot parse operation document")?;
-
-    // Assume a single operation (because this is from a query plan)
-    let op = doc
-        .definitions
-        .iter()
-        .find(|d| matches!(d, Definition::OperationDefinition(_)))
-        .ok_or_else(|| BoxError::from("missing operation"))?;
-    let entities_field = match op {
-        apollo_compiler::ast::Definition::OperationDefinition(op) => {
-            let selection = op
-                .selection_set
-                .first()
-                .ok_or_else(|| BoxError::from("missing entities field"))?;
-            match selection {
-                apollo_compiler::ast::Selection::Field(f) => Ok(f),
-                _ => Err(BoxError::from("must be a field")),
-            }
-        }
-        _ => unreachable!(),
-    }?;
+    let (entities_field, typename_requested) = graphql_utils::get_entity_fields(
+        request
+            .subgraph_request
+            .body()
+            .query
+            .as_ref()
+            .ok_or_else(|| BoxError::from("missing query"))?,
+    )?;
 
     let types_and_fields = entities_field
         .selection_set
@@ -326,11 +319,17 @@ fn entities_with_fields_from_request(
                     &request.subgraph_request.body().variables,
                 )?;
 
+                let typename = if typename_requested {
+                    ResponseTypeName::Concrete(typename.to_string())
+                } else {
+                    ResponseTypeName::Omitted
+                };
+
                 Ok::<_, BoxError>((
                     ResponseKey::EntityField {
                         index: *i,
                         field_name: field.response_name().to_string(),
-                        typename: ResponseTypeName::Concrete(typename.to_string()),
+                        typename,
                     },
                     RequestInputs {
                         arguments,
@@ -386,8 +385,9 @@ pub(super) async fn handle_responses(
                         ref name,
                         ref typename,
                     } => {
-                        let ResponseTypeName::Concrete(typename) = typename;
-                        inject_typename(&mut res_data, typename);
+                        if let ResponseTypeName::Concrete(typename) = typename {
+                            inject_typename(&mut res_data, typename);
+                        }
 
                         data.insert(name.clone(), res_data);
                     }
@@ -397,8 +397,9 @@ pub(super) async fn handle_responses(
                         index,
                         ref typename,
                     } => {
-                        let ResponseTypeName::Concrete(typename) = typename;
-                        inject_typename(&mut res_data, typename);
+                        if let ResponseTypeName::Concrete(typename) = typename {
+                            inject_typename(&mut res_data, typename);
+                        }
 
                         let entities = data.entry(ENTITIES).or_insert(Value::Array(vec![]));
                         entities
@@ -414,8 +415,6 @@ pub(super) async fn handle_responses(
                         ref field_name,
                         ref typename,
                     } => {
-                        let ResponseTypeName::Concrete(typename) = typename;
-
                         let entities = data
                             .entry(ENTITIES)
                             .or_insert(Value::Array(vec![]))
@@ -428,7 +427,12 @@ pub(super) async fn handle_responses(
                             }
                             _ => {
                                 let mut entity = serde_json_bytes::Map::new();
-                                entity.insert("__typename", Value::String(typename.clone().into()));
+                                if let ResponseTypeName::Concrete(typename) = typename {
+                                    entity.insert(
+                                        "__typename",
+                                        Value::String(typename.clone().into()),
+                                    );
+                                }
                                 entity.insert(field_name.clone(), res_data);
                                 entities.insert(index, Value::Object(entity));
                             }
@@ -777,6 +781,7 @@ mod tests {
                 headers: vec![],
             }),
             selection: JSONSelection::parse(".data").unwrap().1,
+            on_interface_object: false,
         };
 
         let connector =
@@ -918,6 +923,7 @@ mod tests {
                 headers: vec![],
             }),
             selection: JSONSelection::parse(".data").unwrap().1,
+            on_interface_object: false,
         };
 
         let connector =
@@ -989,6 +995,7 @@ mod tests {
                 headers: vec![],
             }),
             selection: JSONSelection::parse(".data").unwrap().1,
+            on_interface_object: false,
         };
 
         let connector =
@@ -1046,6 +1053,8 @@ mod tests {
 }
 
 mod graphql_utils {
+    use apollo_compiler::ast;
+    use apollo_compiler::ast::Definition;
     use apollo_compiler::executable::Field;
     use apollo_compiler::schema::Value;
     use apollo_compiler::Node;
@@ -1139,5 +1148,64 @@ mod graphql_utils {
                     .collect::<Result<Map<_, _>, _>>()?,
             )),
         }
+    }
+
+    pub(super) fn get_entity_fields(query: &str) -> Result<(Node<ast::Field>, bool), BoxError> {
+        // Use the AST because the `_entities` field is not actually present in the supergraph
+        let doc = apollo_compiler::ast::Document::parse(query, "op.graphql")
+            .map_err(|_| "cannot parse operation document")?;
+
+        // Assume a single operation (because this is from a query plan)
+        let op = doc
+            .definitions
+            .into_iter()
+            .find_map(|d| match d {
+                Definition::OperationDefinition(op) => Some(op),
+                _ => None,
+            })
+            .ok_or_else(|| BoxError::from("missing operation"))?;
+
+        let root_field = op
+            .selection_set
+            .iter()
+            .find_map(|s| match s {
+                apollo_compiler::ast::Selection::Field(f) => Some(f),
+                _ => None,
+            })
+            .ok_or_else(|| BoxError::from("missing entities root field"))?;
+
+        let mut typename_requested = false;
+
+        for selection in root_field.selection_set.iter() {
+            match selection {
+                apollo_compiler::ast::Selection::Field(f) => {
+                    if f.name == "__typename" {
+                        typename_requested = true;
+                    }
+                }
+                apollo_compiler::ast::Selection::FragmentSpread(_) => {
+                    return Err(BoxError::from("fragment spread not supported"))
+                }
+                apollo_compiler::ast::Selection::InlineFragment(f) => {
+                    for selection in f.selection_set.iter() {
+                        match selection {
+                            apollo_compiler::ast::Selection::Field(f) => {
+                                if f.name == "__typename" {
+                                    typename_requested = true;
+                                }
+                            }
+                            apollo_compiler::ast::Selection::FragmentSpread(_) => {
+                                return Err(BoxError::from("fragment spread not supported"))
+                            }
+                            apollo_compiler::ast::Selection::InlineFragment(_) => {
+                                return Err(BoxError::from("inline fragment not supported"))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok((root_field.clone(), typename_requested))
     }
 }

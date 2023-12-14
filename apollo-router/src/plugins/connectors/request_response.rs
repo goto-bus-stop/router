@@ -21,9 +21,6 @@ use crate::Context;
 const REPRESENTATIONS_VAR: &str = "representations";
 const ENTITIES: &str = "_entities";
 
-#[derive(Clone)]
-pub(super) struct HackEntityResponseKey(pub(super) String);
-
 #[derive(Debug)]
 pub(crate) struct ResponseParams {
     key: ResponseKey,
@@ -354,14 +351,9 @@ pub(super) async fn handle_responses(
     context: Context,
     connector: &Connector,
     responses: Vec<http::Response<hyper::Body>>,
-    hack_entity_response_key: Option<HackEntityResponseKey>,
 ) -> Result<SubgraphResponse, BoxError> {
     let mut data = serde_json_bytes::Map::new();
     let mut errors = Vec::new();
-
-    let entity_response_key = hack_entity_response_key
-        .map(|e| e.0.clone())
-        .unwrap_or(ENTITIES.to_string());
 
     for response in responses {
         let (parts, body) = response.into_parts();
@@ -386,7 +378,6 @@ pub(super) async fn handle_responses(
                     }
                 };
 
-                // TODO __typename injection
                 // TODO alias handling
 
                 match response_params.key {
@@ -409,9 +400,7 @@ pub(super) async fn handle_responses(
                         let ResponseTypeName::Concrete(typename) = typename;
                         inject_typename(&mut res_data, typename);
 
-                        let entities = data
-                            .entry(entity_response_key.clone())
-                            .or_insert(Value::Array(vec![]));
+                        let entities = data.entry(ENTITIES).or_insert(Value::Array(vec![]));
                         entities
                             .as_array_mut()
                             .ok_or_else(|| BoxError::from("entities is not an array"))?
@@ -428,7 +417,7 @@ pub(super) async fn handle_responses(
                         let ResponseTypeName::Concrete(typename) = typename;
 
                         let entities = data
-                            .entry(entity_response_key.clone())
+                            .entry(ENTITIES)
                             .or_insert(Value::Array(vec![]))
                             .as_array_mut()
                             .ok_or_else(|| BoxError::from("entities is not an array"))?;
@@ -1026,13 +1015,9 @@ mod tests {
             .body(hyper::Body::from(r#"{"data":"world"}"#))
             .expect("response builder");
 
-        let res = super::handle_responses(
-            Context::default(),
-            &connector,
-            vec![response1, response2],
-            None,
-        )
-        .await?;
+        let res =
+            super::handle_responses(Context::default(), &connector, vec![response1, response2])
+                .await?;
 
         assert_debug_snapshot!(res.response.body(), @r###"
         Response {

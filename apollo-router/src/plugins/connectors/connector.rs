@@ -15,7 +15,6 @@ use super::http_json_transport::HttpJsonTransport;
 use super::join_spec_helpers::Key;
 use super::request_response::handle_responses;
 use super::request_response::make_requests;
-use super::request_response::HackEntityResponseKey;
 use super::request_response::ResponseParams;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
@@ -206,9 +205,8 @@ impl Connector {
         &self,
         responses: Vec<http::Response<hyper::Body>>,
         context: Context,
-        hack_entity_response_key: Option<HackEntityResponseKey>,
     ) -> Result<SubgraphResponse, BoxError> {
-        handle_responses(context, self, responses, hack_entity_response_key).await
+        handle_responses(context, self, responses).await
     }
 
     pub(crate) fn print_url(&self) -> String {

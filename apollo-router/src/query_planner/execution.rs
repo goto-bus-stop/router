@@ -255,7 +255,7 @@ impl PlanNode {
                     let fetch_time_offset =
                         parameters.context.created_at.elapsed().as_nanos() as i64;
                     match fetch_node
-                        .fetch_node(parameters, parent_value, current_dir, sender)
+                        .fetch_node(parameters, parent_value, current_dir)
                         .instrument(tracing::info_span!(
                             FETCH_SPAN_NAME,
                             "otel.kind" = "INTERNAL",

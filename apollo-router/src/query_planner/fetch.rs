@@ -4,7 +4,6 @@ use std::mem;
 use std::sync::Arc;
 
 use apollo_compiler::ast::Document;
-use aws_config::connector;
 use indexmap::IndexSet;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
@@ -252,7 +251,6 @@ impl FetchNode {
         parameters: &'a ExecutionParameters<'a>,
         data: &'a Value,
         current_dir: &'a Path,
-        sender: mpsc::Sender<graphql::Response>,
     ) -> Result<(Value, Vec<Error>), FetchError> {
         let FetchNode {
             operation,

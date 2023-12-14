@@ -189,7 +189,10 @@ type User
             http: { GET: "/data/2.5/weather" }
             selection: """
             name
-            temp: .main { temp }
+            temp: .main.temp
+            feels_like: .main.feels_like
+            temp_min: .main.temp_min
+            temp_max: .main.temp_max
             """
           }
         }
@@ -199,11 +202,11 @@ type User
 
 type Weather @join__type(graph: NETWORK, key: "id") {
   id: ID
-  temp: Int
-  # feels_like: Int
-  # temp_min: Int
-  # temp_max: Int
-  # main: String
+  temp: Float
+  feels_like: Float
+  temp_min: Float
+  temp_max: Float
+  main: String
   name: String
 }
 

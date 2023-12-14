@@ -171,26 +171,62 @@ impl PlanNode {
                     ))
                     .await
                 }
-                PlanNode::Flatten(FlattenNode { path, node }) => {
+                PlanNode::Flatten(FlattenNode {
+                    path,
+                    node,
+                    connector,
+                }) => {
                     // Note that the span must be `info` as we need to pick this up in apollo tracing
                     let current_dir = current_dir.join(path);
-                    let (v, err) = node
-                        .execute_recursively(
-                            parameters,
-                            // this is the only command that actually changes the "current dir"
-                            &current_dir,
-                            parent_value,
-                            sender,
-                        )
-                        .instrument(tracing::info_span!(
-                            FLATTEN_SPAN_NAME,
-                            "graphql.path" = %current_dir,
-                            "otel.kind" = "INTERNAL"
-                        ))
-                        .await;
+                    match connector {
+                        None => {
+                            let (v, err) = node
+                                .execute_recursively(
+                                    parameters,
+                                    // this is the only command that actually changes the "current dir"
+                                    &current_dir,
+                                    parent_value,
+                                    sender,
+                                )
+                                .instrument(tracing::info_span!(
+                                    FLATTEN_SPAN_NAME,
+                                    "graphql.path" = %current_dir,
+                                    "otel.kind" = "INTERNAL"
+                                ))
+                                .await;
 
-                    value = v;
-                    errors = err;
+                            value = v;
+                            errors = err;
+                        }
+                        Some(fetch_node) => {
+                            match fetch_node
+                                .connector_execution(
+                                    parameters,
+                                    &current_dir,
+                                    parent_value,
+                                    sender,
+                                    &node,
+                                )
+                                .instrument(tracing::info_span!(
+                                    FLATTEN_SPAN_NAME,
+                                    "graphql.path" = %current_dir,
+                                    "otel.kind" = "INTERNAL"
+                                ))
+                                .await
+                            {
+                                Ok((v, e)) => {
+                                    value = v;
+                                    errors = e;
+                                }
+                                Err(err) => {
+                                    failfast_error!("Fetch error: {}", err);
+                                    errors =
+                                        vec![err.to_graphql_error(Some(current_dir.to_owned()))];
+                                    value = Value::default();
+                                }
+                            }
+                        }
+                    }
                 }
                 PlanNode::Subscription { primary, .. } => {
                     if parameters.subscription_handle.is_some() {

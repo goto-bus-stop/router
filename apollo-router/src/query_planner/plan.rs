@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::mem;
 use std::sync::Arc;
 
 use futures::future;
@@ -9,6 +10,9 @@ use serde::Serialize;
 
 pub(crate) use self::fetch::OperationKind;
 use super::fetch;
+use super::fetch::FetchNode;
+use super::fetch::ProtocolKind;
+use super::fetch::RestProtocolWrapper;
 use super::subscription::SubscriptionNode;
 use super::QueryPlanResult;
 use crate::error::QueryPlannerError;
@@ -338,9 +342,33 @@ impl PlanNode {
         Box::pin(async move {
             match self {
                 PlanNode::Fetch(fetch_node) => {
-                    fetch_node
+                    if let Some((plan, magic_finder_field)) = fetch_node
                         .generate_connector_plan(subgraph_schemas, subgraph_planners)
-                        .await
+                        .await?
+                    {
+                        if let Some(connector_node) = plan.data.query_plan.node {
+                            if let PlanNode::Fetch(mut fetch_node) = mem::replace(
+                                self,
+                                PlanNode::Flatten(FlattenNode {
+                                    path: Path::default(),
+                                    node: Box::new(connector_node),
+                                    connector: None,
+                                }),
+                            ) {
+                                match self {
+                                    PlanNode::Flatten(flatten) => {
+                                        fetch_node.protocol_kind =
+                                            Arc::new(ProtocolKind::RestWrapper(
+                                                RestProtocolWrapper { magic_finder_field },
+                                            ));
+                                        flatten.connector = Some(fetch_node)
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                    Ok(())
                 }
                 PlanNode::Sequence { nodes } => {
                     for node in nodes.iter_mut() {
@@ -461,6 +489,9 @@ pub(crate) struct FlattenNode {
 
     /// The child execution plan.
     pub(crate) node: Box<PlanNode>,
+
+    #[serde(default)]
+    pub(crate) connector: Option<FetchNode>,
 }
 
 /// A primary query for a Defer node, the non deferred part

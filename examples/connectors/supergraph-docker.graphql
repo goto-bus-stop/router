@@ -188,11 +188,17 @@ type User
             api: "weather"
             http: { GET: "/data/2.5/weather" }
             selection: """
-            name
+            name: .weather.main
+            description: .weather.description
             temp: .main.temp
             feels_like: .main.feels_like
             min: .main.temp_min
             max: .main.temp_max
+            details: .weather {
+              id
+              description
+              name: main
+            }
             """
           }
         }
@@ -207,6 +213,14 @@ type Weather @join__type(graph: NETWORK, key: "id") {
   min: Float
   max: Float
   main: String
+  details: [WeatherDetails]
+  description: [String]
+  name: [String]
+}
+
+type WeatherDetails @join__type(graph: NETWORK, key: "id") {
+  id: ID
+  description: String
   name: String
 }
 

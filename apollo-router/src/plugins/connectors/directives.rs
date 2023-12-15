@@ -57,10 +57,11 @@ fn graph_enum_map(schema: &apollo_compiler::Schema) -> Option<HashMap<String, St
     })
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct JoinWithDirectives {
     graph: String,
     directives: Vec<DirectiveAsObject>,
+    is_interface_object: Option<bool>,
 }
 
 impl JoinWithDirectives {
@@ -94,11 +95,19 @@ impl JoinWithDirectives {
             })?
             .to_string();
 
-        Ok(Some(Self { graph, directives }))
+        let is_interface_object = directive
+            .argument_by_name("isInterfaceObject")
+            .and_then(|a| a.to_bool());
+
+        Ok(Some(Self {
+            graph,
+            directives,
+            is_interface_object,
+        }))
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct DirectiveAsObject {
     name: String,
     args: HashMap<Name, Node<apollo_compiler::ast::Value>>,
@@ -243,14 +252,6 @@ impl SourceAPI {
 
         Ok(Self { graph, name, http })
     }
-
-    pub(super) fn base_uri(&self) -> Result<http::Uri, http::uri::InvalidUri> {
-        self.http
-            .as_ref()
-            .map(|http| http.base_url.as_str())
-            .unwrap_or_default()
-            .parse::<_>()
-    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -386,6 +387,7 @@ pub(super) struct SourceType {
     pub(super) http: Option<HTTPSource>,
     pub(super) selection: JSONSelection,
     pub(super) key_type_map: Option<KeyTypeMap>,
+    pub(super) is_interface_object: bool,
 }
 
 impl SourceType {
@@ -407,12 +409,12 @@ impl SourceType {
                 .collect::<Result<Vec<_>, _>>()?;
 
             let source_types = directives
-                .into_iter()
+                .iter()
                 .flat_map(|obj| {
                     obj.directives
-                        .into_iter()
+                        .iter()
                         .filter(|d| d.name == SOURCE_TYPE_DIRECTIVE_NAME)
-                        .map(move |d| (obj.graph.clone(), d.args))
+                        .map(move |d| (obj, d.args.clone()))
                 })
                 .collect::<Vec<_>>();
 
@@ -420,14 +422,14 @@ impl SourceType {
                 result.extend(
                     source_types
                         .iter()
-                        .map(|(graph, args)| {
-                            let graph_name = graph_names.get(graph).ok_or_else(|| {
+                        .map(|(join, args)| {
+                            let graph_name = graph_names.get(&join.graph).ok_or_else(|| {
                                 ConnectorDirectiveError::InvalidJoinDirective(
-                                    format!("Missing graph {} in join__Graph enum", graph)
+                                    format!("Missing graph {} in join__Graph enum", join.graph)
                                         .to_string(),
                                 )
                             })?;
-                            Self::from_directive(graph_name.clone(), name.clone(), args)
+                            Self::from_directive(graph_name.clone(), name.clone(), args, join)
                         })
                         .collect::<Result<Vec<_>, _>>()?,
                 );
@@ -437,10 +439,11 @@ impl SourceType {
         Ok(result)
     }
 
-    pub(super) fn from_directive(
+    fn from_directive(
         graph: String,
         type_name: Name,
         directive: &HashMap<Name, Node<apollo_compiler::ast::Value>>,
+        join_directive: &JoinWithDirectives,
     ) -> Result<Self, ConnectorDirectiveError> {
         let api = directive
             .get(&name!("api"))
@@ -494,6 +497,8 @@ impl SourceType {
             .map(KeyTypeMap::from_argument)
             .transpose()?;
 
+        let is_interface_object = join_directive.is_interface_object.unwrap_or_default();
+
         Ok(Self {
             graph,
             type_name,
@@ -501,6 +506,7 @@ impl SourceType {
             http,
             selection,
             key_type_map,
+            is_interface_object,
         })
     }
 
@@ -537,6 +543,7 @@ pub(super) struct SourceField {
     pub(super) api: String,
     pub(super) http: Option<HTTPSource>,
     pub(super) selection: JSONSelection,
+    pub(super) on_interface_object: bool,
 }
 
 impl SourceField {
@@ -546,34 +553,43 @@ impl SourceField {
         })?;
 
         let mut source_fields = vec![];
-        for (parent_type_name, ty) in schema.types.iter() {
-            source_fields.extend(Self::from_type(&graph_names, parent_type_name.clone(), ty)?);
+        for (_, ty) in schema.types.iter() {
+            source_fields.extend(Self::from_type(&graph_names, ty)?);
         }
         Ok(source_fields)
     }
 
     fn from_type(
         graph_names: &HashMap<String, String>,
-        parent_type_name: Name,
         ty: &ExtendedType,
     ) -> Result<Vec<Self>, ConnectorDirectiveError> {
         Ok(match ty {
-            ExtendedType::Object(ty) => {
-                Self::from_fields(graph_names, parent_type_name, &ty.fields)?
-            }
-            ExtendedType::Interface(ty) => {
-                Self::from_fields(graph_names, parent_type_name, &ty.fields)?
-            }
+            ExtendedType::Object(obj) => Self::from_fields(graph_names, ty, &obj.fields)?,
+            ExtendedType::Interface(obj) => Self::from_fields(graph_names, ty, &obj.fields)?,
             _ => vec![],
         })
     }
 
     fn from_fields(
         graph_names: &HashMap<String, String>,
-        parent_type_name: Name,
+        parent_type: &ExtendedType,
         fields: &IndexMap<Name, Component<FieldDefinition>>,
     ) -> Result<Vec<Self>, ConnectorDirectiveError> {
         let mut result: Vec<Self> = vec![];
+
+        let parent_type_name = parent_type.name().clone();
+
+        let join_types = parent_type
+            .directives()
+            .iter()
+            .filter(|d| d.name == JOIN_TYPE_DIRECTIVE_NAME)
+            .filter_map(|d| JoinWithDirectives::from_directive(d).transpose())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let join_types_by_graph = join_types
+            .iter()
+            .map(|join_type| (join_type.graph.clone(), join_type))
+            .collect::<HashMap<_, _>>();
 
         for (field_name, field_def) in fields {
             let directives = field_def
@@ -602,12 +618,14 @@ impl SourceField {
                                 format!("Missing graph {} in join__Graph enum", graph).to_string(),
                             )
                         })?;
+
                         Self::from_directive(
                             graph_name.clone(),
                             parent_type_name.clone(),
                             field_name.clone(),
                             field_def.ty.inner_named_type().clone(),
                             args,
+                            join_types_by_graph.get(graph),
                         )
                     })
                     .collect::<Result<Vec<_>, _>>()?,
@@ -617,12 +635,13 @@ impl SourceField {
         Ok(result)
     }
 
-    pub(super) fn from_directive(
+    fn from_directive(
         graph: String,
         parent_type_name: Name,
         field_name: Name,
         output_type_name: Name,
         directive: &HashMap<Name, Node<apollo_compiler::ast::Value>>,
+        parent_join: Option<&&JoinWithDirectives>,
     ) -> Result<Self, ConnectorDirectiveError> {
         let api = directive
             .get(&name!("api"))
@@ -671,6 +690,10 @@ impl SourceField {
             .map(HTTPSource::from_argument)
             .transpose()?;
 
+        let on_interface_object = parent_join
+            .and_then(|join| join.is_interface_object)
+            .unwrap_or_default();
+
         Ok(Self {
             graph,
             parent_type_name,
@@ -679,6 +702,7 @@ impl SourceField {
             api,
             http,
             selection,
+            on_interface_object,
         })
     }
 
@@ -1054,7 +1078,8 @@ mod tests {
                     ],
                     "star": null
                   }
-                }
+                },
+                "on_interface_object": false
               }
             ]
             "###);

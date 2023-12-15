@@ -10,7 +10,7 @@ schema
     directives: [
       {
         name: "sourceAPI"
-        args: { name: "ipinfo", http: { baseURL: "https://ipinfo.io" } }
+        args: { name: "ipinfo", http: { baseURL: "https://ipinfo.io/" } }
       }
     ]
   ) {

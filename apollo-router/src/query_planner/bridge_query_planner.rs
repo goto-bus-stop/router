@@ -63,6 +63,7 @@ pub(crate) struct BridgeQueryPlanner {
     enable_authorization_directives: bool,
     subgraph_schemas: Arc<HashMap<String, Arc<Schema>>>,
     subgraph_planners: Arc<HashMap<String, Arc<Planner<QueryPlanResult>>>>,
+    connector_urls: HashMap<String, String>,
 }
 
 impl BridgeQueryPlanner {
@@ -188,6 +189,11 @@ impl BridgeQueryPlanner {
 
         let connectors = Arc::from(Connector::from_schema(&schema.definitions).unwrap());
         let mut subgraph_planners = HashMap::new();
+        let connector_urls = connectors
+            .iter()
+            .map(|(name, connector)| (name.clone(), connector.print_url()))
+            .collect::<HashMap<_, _>>();
+
         if !connectors.is_empty() {
             let connector_subgraph_names = connector_subgraph_names(&connectors);
             let connector_schema =
@@ -244,6 +250,7 @@ impl BridgeQueryPlanner {
             configuration,
             subgraph_schemas: Arc::new(subgraph_schemas),
             subgraph_planners: Arc::new(subgraph_planners),
+            connector_urls,
         })
     }
 
@@ -277,6 +284,10 @@ impl BridgeQueryPlanner {
 
         let connectors = Arc::from(Connector::from_schema(&schema.definitions).unwrap());
         let mut subgraph_planners = HashMap::new();
+        let connector_urls = connectors
+            .iter()
+            .map(|(name, connector)| (name.clone(), connector.print_url()))
+            .collect::<HashMap<_, _>>();
         if !connectors.is_empty() {
             let connector_subgraph_names = connector_subgraph_names(&connectors);
             let connector_schema =
@@ -335,6 +346,7 @@ impl BridgeQueryPlanner {
             configuration,
             subgraph_schemas: Arc::new(subgraph_schemas),
             subgraph_planners: Arc::new(subgraph_planners),
+            connector_urls,
         })
     }
 
@@ -477,7 +489,7 @@ impl BridgeQueryPlanner {
             Ok(mut plan) => {
                 if let Some(node) = plan.data.query_plan.node.as_mut() {
                     node.extract_authorization_metadata(&self.schema.definitions, &key);
-                    node.generate_connector_plan(&self.subgraph_schemas, &self.subgraph_planners)
+                    node.generate_connector_plan(&self.subgraph_planners, &self.connector_urls)
                         .await?;
                 }
                 tracing::debug!(

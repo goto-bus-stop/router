@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::mem;
 use std::sync::Arc;
 
 use apollo_compiler::ast::Document;
 use indexmap::IndexSet;
+use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
 use serde::Deserialize;
 use serde::Serialize;
@@ -128,10 +130,6 @@ pub(crate) struct FetchNode {
     #[serde(default)]
     pub(crate) authorization: Arc<CacheKeyMetadata>,
 
-    // query plan for the connector subgraph
-    #[serde(default)]
-    pub(crate) connector_node: Option<Arc<PlanNode>>,
-
     #[serde(default)]
     pub(crate) protocol_kind: Arc<ProtocolKind>,
 }
@@ -148,11 +146,12 @@ pub(crate) enum ProtocolKind {
 #[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RestProtocolWrapper {
-    magic_finder_field: Option<String>,
+    pub(crate) magic_finder_field: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub(crate) struct RestFetchNode {
+    connector_service_name: String,
     parent_service_name: String,
 }
 
@@ -252,14 +251,7 @@ impl FetchNode {
         parameters: &'a ExecutionParameters<'a>,
         data: &'a Value,
         current_dir: &'a Path,
-        sender: mpsc::Sender<graphql::Response>,
     ) -> Result<(Value, Vec<Error>), FetchError> {
-        if let Some(connector_node) = self.connector_node.clone() {
-            return self
-                .connector_execution(parameters, current_dir, data, sender, &connector_node)
-                .await;
-        }
-
         let FetchNode {
             operation,
             operation_kind,
@@ -287,16 +279,17 @@ impl FetchNode {
             }
         };
 
-        let parent_service_name = match &*self.protocol_kind {
+        let (service_name, subgraph_service_name) = match &*self.protocol_kind {
             ProtocolKind::RestFetch(RestFetchNode {
+                connector_service_name,
                 parent_service_name,
-            }) => parent_service_name,
-            _ => service_name,
+            }) => (parent_service_name, connector_service_name),
+            _ => (service_name, service_name),
         };
 
         let uri = parameters
             .schema
-            .subgraph_url(parent_service_name)
+            .subgraph_url(service_name)
             .unwrap_or_else(|| {
                 panic!("schema uri for subgraph '{service_name}' should already have been checked")
             })
@@ -318,7 +311,7 @@ impl FetchNode {
                     .build()
                     .expect("it won't fail because the url is correct and already checked; qed"),
             )
-            .subgraph_name(self.service_name.clone())
+            .subgraph_name(subgraph_service_name)
             .operation_kind(*operation_kind)
             .context(parameters.context.clone())
             .build();
@@ -326,7 +319,7 @@ impl FetchNode {
 
         let service = parameters
             .service_factory
-            .create(parent_service_name)
+            .create(service_name)
             .expect("we already checked that the service exists during planning; qed");
 
         // TODO not sure if we need a RouterReponse here as we don't do anything with it
@@ -500,7 +493,7 @@ impl FetchNode {
         }
     }
 
-    async fn connector_execution<'a>(
+    pub(crate) async fn connector_execution<'a>(
         &'a self,
         parameters: &'a ExecutionParameters<'a>,
         current_dir: &'a Path,
@@ -612,9 +605,9 @@ impl FetchNode {
 
     pub(crate) async fn generate_connector_plan(
         &mut self,
-        _subgraph_schemas: &HashMap<String, Arc<Schema>>,
         subgraph_planners: &HashMap<String, Arc<Planner<QueryPlanResult>>>,
-    ) -> Result<(), QueryPlannerError> {
+        connector_urls: &HashMap<String, String>,
+    ) -> Result<Option<(PlanSuccess<QueryPlanResult>, Option<String>)>, QueryPlannerError> {
         if let Some(planner) = subgraph_planners.get(&self.service_name) {
             tracing::debug!(
                 "planning for subgraph '{}' and query '{}'",
@@ -639,25 +632,36 @@ impl FetchNode {
             {
                 Ok(mut plan) => {
                     if let Some(node) = plan.data.query_plan.node.as_mut() {
-                        node.update_connector_plan(&self.service_name);
+                        node.update_connector_plan(&self.service_name, connector_urls);
                     }
 
-                    self.connector_node = plan.data.query_plan.node.map(Arc::new);
-                    self.protocol_kind = Arc::new(ProtocolKind::RestWrapper(RestProtocolWrapper {
-                        magic_finder_field,
-                    }));
+                    return Ok(Some((plan, magic_finder_field)));
                 }
                 Err(err) => {
                     return Err(QueryPlannerError::from(err));
                 }
             }
         }
-        Ok(())
+        Ok(None)
     }
 
-    pub(crate) fn update_connector_plan(&mut self, parent_service_name: &String) {
+    pub(crate) fn update_connector_plan(
+        &mut self,
+        parent_service_name: &String,
+        connector_urls: &HashMap<String, String>,
+    ) {
+        let parent_service_name = parent_service_name.to_string();
+        let url = connector_urls
+            .get(&self.service_name)
+            .map(|s| s.as_str())
+            .unwrap_or("");
+        let service_name = mem::replace(
+            &mut self.service_name,
+            format!("{parent_service_name}: {}", url),
+        );
         self.protocol_kind = Arc::new(ProtocolKind::RestFetch(RestFetchNode {
-            parent_service_name: parent_service_name.to_string(),
+            connector_service_name: service_name,
+            parent_service_name,
         }))
     }
 }

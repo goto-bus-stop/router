@@ -73,7 +73,6 @@ expression: "serde_json::to_value(response).unwrap()"
                 "scopes": [],
                 "policies": []
               },
-              "connectorNode": null,
               "protocolKind": "graphQL"
             },
             {
@@ -113,9 +112,9 @@ expression: "serde_json::to_value(response).unwrap()"
                   "scopes": [],
                   "policies": []
                 },
-                "connectorNode": null,
                 "protocolKind": "graphQL"
-              }
+              },
+              "connector": null
             },
             {
               "kind": "Parallel",
@@ -160,9 +159,9 @@ expression: "serde_json::to_value(response).unwrap()"
                       "scopes": [],
                       "policies": []
                     },
-                    "connectorNode": null,
                     "protocolKind": "graphQL"
-                  }
+                  },
+                  "connector": null
                 },
                 {
                   "kind": "Flatten",
@@ -204,9 +203,9 @@ expression: "serde_json::to_value(response).unwrap()"
                       "scopes": [],
                       "policies": []
                     },
-                    "connectorNode": null,
                     "protocolKind": "graphQL"
-                  }
+                  },
+                  "connector": null
                 }
               ]
             }

@@ -211,6 +211,12 @@ impl Connector {
     ) -> Result<SubgraphResponse, BoxError> {
         handle_responses(context, self, responses).await
     }
+
+    pub(crate) fn print_url(&self) -> String {
+        let ConnectorTransport::HttpJson(tr) = &self.transport;
+
+        format!("{} {}", tr.method, tr.path_template)
+    }
 }
 
 #[cfg(test)]

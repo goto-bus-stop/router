@@ -158,7 +158,7 @@ impl PlanNode {
                             match connector_node
                                 .connector_execution(
                                     parameters,
-                                    &current_dir,
+                                    current_dir,
                                     parent_value,
                                     sender,
                                     node,

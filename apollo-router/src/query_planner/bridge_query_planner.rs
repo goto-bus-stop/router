@@ -1152,7 +1152,7 @@ mod tests {
                         }
                     }
                 }
-                PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
+                PlanNode::Sequence { nodes, .. } | PlanNode::Parallel { nodes } => {
                     for node in nodes {
                         check_query_plan_coverage(node, path, parent_label.clone(), subselections)
                     }

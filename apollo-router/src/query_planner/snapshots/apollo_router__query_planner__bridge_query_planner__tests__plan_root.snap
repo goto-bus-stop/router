@@ -18,6 +18,6 @@ Fetch(
             scopes: [],
             policies: [],
         },
-        protocol_kind: GraphQL,
+        protocol: GraphQL,
     },
 )

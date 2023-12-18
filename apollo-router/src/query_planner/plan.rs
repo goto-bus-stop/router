@@ -11,7 +11,7 @@ use serde::Serialize;
 pub(crate) use self::fetch::OperationKind;
 use super::fetch;
 use super::fetch::FetchNode;
-use super::fetch::ProtocolKind;
+use super::fetch::Protocol;
 use super::fetch::RestProtocolWrapper;
 use super::subscription::SubscriptionNode;
 use super::QueryPlanResult;
@@ -57,7 +57,10 @@ impl QueryPlan {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
             }),
-            root: root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() }),
+            root: root.unwrap_or_else(|| PlanNode::Sequence {
+                nodes: Vec::new(),
+                connector: None,
+            }),
             formatted_query_plan: Default::default(),
             query: Arc::new(Query::empty()),
         }
@@ -85,6 +88,9 @@ pub(crate) enum PlanNode {
     Sequence {
         /// The plan nodes that make up the sequence execution.
         nodes: Vec<PlanNode>,
+
+        #[serde(default)]
+        connector: Option<FetchNode>,
     },
 
     /// These nodes may be executed in parallel.
@@ -120,7 +126,7 @@ pub(crate) enum PlanNode {
 impl PlanNode {
     pub(crate) fn contains_mutations(&self) -> bool {
         match self {
-            Self::Sequence { nodes } => nodes.iter().any(|n| n.contains_mutations()),
+            Self::Sequence { nodes, .. } => nodes.iter().any(|n| n.contains_mutations()),
             Self::Parallel { nodes } => nodes.iter().any(|n| n.contains_mutations()),
             Self::Fetch(fetch_node) => fetch_node.operation_kind() == &OperationKind::Mutation,
             Self::Defer { primary, .. } => primary
@@ -157,7 +163,7 @@ impl PlanNode {
         query: &Query,
     ) -> bool {
         match self {
-            Self::Sequence { nodes } => nodes
+            Self::Sequence { nodes, .. } => nodes
                 .iter()
                 .any(|n| n.is_deferred(operation, variables, query)),
             Self::Parallel { nodes } => nodes
@@ -197,7 +203,7 @@ impl PlanNode {
 
     pub(crate) fn subgraph_fetches(&self) -> usize {
         match self {
-            PlanNode::Sequence { nodes } => nodes.iter().map(|n| n.subgraph_fetches()).sum(),
+            PlanNode::Sequence { nodes, .. } => nodes.iter().map(|n| n.subgraph_fetches()).sum(),
             PlanNode::Parallel { nodes } => nodes.iter().map(|n| n.subgraph_fetches()).sum(),
             PlanNode::Fetch(_) => 1,
             PlanNode::Flatten(node) => node.node.subgraph_fetches(),
@@ -236,7 +242,7 @@ impl PlanNode {
     /// Note that duplicates are not filtered.
     pub(crate) fn service_usage<'a>(&'a self) -> Box<dyn Iterator<Item = &'a str> + 'a> {
         match self {
-            Self::Sequence { nodes } | Self::Parallel { nodes } => {
+            Self::Sequence { nodes, .. } | Self::Parallel { nodes } => {
                 Box::new(nodes.iter().flat_map(|x| x.service_usage()))
             }
             Self::Fetch(fetch) => Box::new(Some(fetch.service_name()).into_iter()),
@@ -289,7 +295,7 @@ impl PlanNode {
                 fetch_node.extract_authorization_metadata(schema, key);
             }
 
-            PlanNode::Sequence { nodes } => {
+            PlanNode::Sequence { nodes, .. } => {
                 for node in nodes {
                     node.extract_authorization_metadata(schema, key);
                 }
@@ -345,28 +351,28 @@ impl PlanNode {
                         .generate_connector_plan(subgraph_planners, connector_urls)
                         .await?
                     {
+                        // replace leaf with connector root
                         if let Some(connector_node) = plan.data.query_plan.node {
                             if let PlanNode::Fetch(mut fetch_node) = mem::replace(
                                 self,
-                                PlanNode::Flatten(FlattenNode {
-                                    path: Path::default(),
-                                    node: Box::new(connector_node),
+                                PlanNode::Sequence {
+                                    nodes: vec![connector_node],
                                     connector: None,
-                                }),
+                                },
                             ) {
-                                if let PlanNode::Flatten(flatten) = self {
-                                    fetch_node.protocol_kind =
-                                        Arc::new(ProtocolKind::RestWrapper(RestProtocolWrapper {
+                                if let PlanNode::Sequence { connector, .. } = self {
+                                    fetch_node.protocol =
+                                        Arc::new(Protocol::RestWrapper(RestProtocolWrapper {
                                             magic_finder_field,
                                         }));
-                                    flatten.connector = Some(fetch_node)
+                                    *connector = Some(fetch_node);
                                 }
                             }
                         }
                     }
                     Ok(())
                 }
-                PlanNode::Sequence { nodes } => {
+                PlanNode::Sequence { nodes, .. } => {
                     for node in nodes.iter_mut() {
                         node.generate_connector_plan(subgraph_planners, connector_urls)
                             .await?;
@@ -438,7 +444,7 @@ impl PlanNode {
             PlanNode::Fetch(fetch_node) => {
                 fetch_node.update_connector_plan(service, connector_urls)
             }
-            PlanNode::Sequence { nodes } => {
+            PlanNode::Sequence { nodes, .. } => {
                 for node in nodes.iter_mut() {
                     node.update_connector_plan(service, connector_urls);
                 }
@@ -493,9 +499,6 @@ pub(crate) struct FlattenNode {
 
     /// The child execution plan.
     pub(crate) node: Box<PlanNode>,
-
-    #[serde(default)]
-    pub(crate) connector: Option<FetchNode>,
 }
 
 /// A primary query for a Defer node, the non deferred part

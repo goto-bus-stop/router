@@ -131,12 +131,12 @@ pub(crate) struct FetchNode {
     pub(crate) authorization: Arc<CacheKeyMetadata>,
 
     #[serde(default)]
-    pub(crate) protocol_kind: Arc<ProtocolKind>,
+    pub(crate) protocol: Arc<Protocol>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) enum ProtocolKind {
+pub(crate) enum Protocol {
     #[default]
     GraphQL,
     RestWrapper(RestProtocolWrapper),
@@ -279,8 +279,8 @@ impl FetchNode {
             }
         };
 
-        let (service_name, subgraph_service_name) = match &*self.protocol_kind {
-            ProtocolKind::RestFetch(RestFetchNode {
+        let (service_name, subgraph_service_name) = match &*self.protocol {
+            Protocol::RestFetch(RestFetchNode {
                 connector_service_name,
                 parent_service_name,
             }) => (parent_service_name, connector_service_name),
@@ -659,7 +659,7 @@ impl FetchNode {
             &mut self.service_name,
             format!("{parent_service_name}: {}", url),
         );
-        self.protocol_kind = Arc::new(ProtocolKind::RestFetch(RestFetchNode {
+        self.protocol = Arc::new(Protocol::RestFetch(RestFetchNode {
             connector_service_name: service_name,
             parent_service_name,
         }))

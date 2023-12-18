@@ -31,7 +31,7 @@ const JOIN_GRAPH_DIRECTIVE_NAME: &str = "join__graph";
 
 // --- @join__* ----------------------------------------------------------------
 
-fn graph_enum_map(schema: &apollo_compiler::Schema) -> Option<HashMap<String, String>> {
+pub(super) fn graph_enum_map(schema: &apollo_compiler::Schema) -> Option<HashMap<String, String>> {
     schema.get_enum(JOIN_GRAPH_ENUM_NAME).map(|e| {
         e.values
             .iter()

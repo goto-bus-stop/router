@@ -52,14 +52,21 @@ type Query @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: C
   _Hello_finder(representations: [_Any!]!): [Hello!]! @join__field(graph: CONNECTOR_HELLO_1) @join__field(graph: CONNECTOR_HELLO_WORLD_1)
   hello: Hello @join__field(graph: CONNECTOR_QUERY_HELLO_3)
   interfaces: [TestingInterface] @join__field(graph: CONNECTOR_QUERY_INTERFACES_5)
-  withArguments(value: String, done: Boolean): String @join__field(graph: CONNECTOR_QUERY_WITHARGUMENTS_4)
+  withArguments(value: String, done: Boolean, enum: InputEnum): String @join__field(graph: CONNECTOR_QUERY_WITHARGUMENTS_4)
   _TestingInterfaceObject_finder(representations: [_Any!]!): [TestingInterfaceObject!]! @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_6)
 }
 
 type Hello @join__type(graph: CONNECTOR_HELLO_1, key: "id") @join__type(graph: CONNECTOR_HELLO_WORLD_1, key: "id") @join__type(graph: CONNECTOR_QUERY_HELLO_3) {
   id: ID! @join__field(graph: CONNECTOR_HELLO_1) @join__field(graph: CONNECTOR_HELLO_WORLD_1) @join__field(graph: CONNECTOR_QUERY_HELLO_3)
   field: String @join__field(graph: CONNECTOR_HELLO_1)
+  enum: OutputEnum @join__field(graph: CONNECTOR_HELLO_1)
   world: World @join__field(graph: CONNECTOR_HELLO_WORLD_1)
+}
+
+enum OutputEnum @join__type(graph: CONNECTOR_HELLO_1) {
+  A @join__enumValue(graph: CONNECTOR_HELLO_1)
+  B @join__enumValue(graph: CONNECTOR_HELLO_1)
+  C @join__enumValue(graph: CONNECTOR_HELLO_1)
 }
 
 type World @join__type(graph: CONNECTOR_HELLO_WORLD_1) {
@@ -117,6 +124,11 @@ type NIa implements NestedInterface @join__implements(graph: CONNECTOR_QUERY_INT
 type NIb implements NestedInterface @join__implements(graph: CONNECTOR_QUERY_INTERFACES_5, interface: "NestedInterface") @join__implements(graph: CONNECTOR_QUERY_INTERFACES_5, interface: "NestedInterface") @join__implements(graph: CONNECTOR_QUERY_INTERFACES_5, interface: "NestedInterface") @join__implements(graph: CONNECTOR_QUERY_INTERFACES_5, interface: "NestedInterface") @join__implements(graph: CONNECTOR_QUERY_INTERFACES_5, interface: "NestedInterface") @join__type(graph: CONNECTOR_QUERY_INTERFACES_5) @join__implements(graph: CONNECTOR_QUERY_INTERFACES_5, interface: "NestedInterface") {
   id: ID! @join__field(graph: CONNECTOR_QUERY_INTERFACES_5)
   b: String @join__field(graph: CONNECTOR_QUERY_INTERFACES_5)
+}
+
+enum InputEnum @join__type(graph: CONNECTOR_QUERY_WITHARGUMENTS_4) {
+  Y @join__enumValue(graph: CONNECTOR_QUERY_WITHARGUMENTS_4)
+  Z @join__enumValue(graph: CONNECTOR_QUERY_WITHARGUMENTS_4)
 }
 
 interface TestingInterfaceObject @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2, key: "id", isInterfaceObject: true) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_6, key: "id", isInterfaceObject: true) {

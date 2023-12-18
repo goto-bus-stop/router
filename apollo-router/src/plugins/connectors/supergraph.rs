@@ -5,6 +5,7 @@ use anyhow::bail;
 use apollo_compiler::ast;
 use apollo_compiler::ast::Selection;
 use apollo_compiler::name;
+use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
 use apollo_compiler::schema::InputValueDefinition;
@@ -19,6 +20,7 @@ use super::connector::ConnectorKind;
 use super::directives::graph_enum_map;
 use super::join_spec_helpers::add_entities_field;
 use super::join_spec_helpers::add_input_join_field_directive;
+use super::join_spec_helpers::add_join_enum_value_directive;
 use super::join_spec_helpers::add_join_field_directive;
 use super::join_spec_helpers::add_join_implements;
 use super::join_spec_helpers::add_join_type_directive;
@@ -262,6 +264,12 @@ pub(super) enum Change {
     },
     /// Add a special field to Query that we can use instead of `_entities`
     MagicFinder { type_name: Name, graph: String },
+    /// Add an enum value
+    EnumValue {
+        enum_name: Name,
+        value_name: Name,
+        graph: String,
+    },
 }
 
 impl Change {
@@ -320,6 +328,27 @@ impl Change {
                     format!("_{}_finder", type_name).as_str(),
                     type_name,
                 )?;
+            }
+
+            Change::EnumValue {
+                enum_name,
+                value_name,
+                graph,
+            } => {
+                let ty = upsert_type(original_schema, schema, enum_name)?;
+                add_join_type_directive(ty, graph, None, None);
+                if let ExtendedType::Enum(enm) = ty {
+                    let value = enm.make_mut().values.entry(value_name.clone()).or_insert(
+                        EnumValueDefinition {
+                            description: Default::default(),
+                            value: value_name.clone(),
+                            directives: Default::default(),
+                        }
+                        .into(),
+                    );
+                    let value = value.make_mut();
+                    add_join_enum_value_directive(value, graph);
+                }
             }
         }
         Ok(())
@@ -527,12 +556,20 @@ fn recurse_selection(
                             graph: graph.clone(),
                         });
 
-                        if !selection.selection_set.is_empty() {
-                            let field_type = schema
-                                .types
-                                .get(field_type_name)
-                                .ok_or(anyhow!("missing type {}", field_type_name))?;
+                        let field_type = schema
+                            .types
+                            .get(field_type_name)
+                            .ok_or(anyhow!("missing type {}", field_type_name))?;
 
+                        if field_type.is_enum() {
+                            mutations.extend(enum_values_for_graph(
+                                field_type,
+                                origin_graph,
+                                &graph,
+                            ));
+                        }
+
+                        if !selection.selection_set.is_empty() {
                             mutations.extend(recurse_selection(
                                 origin_graph,
                                 graph.clone(),
@@ -617,12 +654,20 @@ fn recurse_selection(
                                                 graph: graph.clone(),
                                             });
 
-                                            if !selection.selection_set.is_empty() {
-                                                let field_type =
-                                                    schema.types.get(field_type_name).ok_or(
-                                                        anyhow!("missing type {}", field_type_name),
-                                                    )?;
+                                            let field_type =
+                                                schema.types.get(field_type_name).ok_or(
+                                                    anyhow!("missing type {}", field_type_name),
+                                                )?;
 
+                                            if field_type.is_enum() {
+                                                mutations.extend(enum_values_for_graph(
+                                                    field_type,
+                                                    origin_graph,
+                                                    &graph,
+                                                ));
+                                            }
+
+                                            if !selection.selection_set.is_empty() {
                                                 mutations.extend(recurse_selection(
                                                     origin_graph,
                                                     graph.clone(),
@@ -646,7 +691,7 @@ fn recurse_selection(
                 }
             }
         }
-        ExtendedType::InputObject(_) => todo!(),
+        ExtendedType::InputObject(_) => return Err(anyhow!("input object in selection")),
         _ => {} // hit a scalar and we're done
     }
 
@@ -677,18 +722,57 @@ fn recurse_inputs(
         });
     }
 
-    if let ExtendedType::InputObject(obj) = ty {
-        for field in obj.fields.values() {
-            changes.push(Change::InputField {
-                type_name: output_type_name.clone(),
-                field_name: field.name.clone(),
-                graph: graph.clone(),
-            });
-            changes.extend(recurse_inputs(graph.clone(), schema, &field.node)?);
+    match ty {
+        ExtendedType::InputObject(obj) => {
+            for field in obj.fields.values() {
+                changes.push(Change::InputField {
+                    type_name: output_type_name.clone(),
+                    field_name: field.name.clone(),
+                    graph: graph.clone(),
+                });
+                changes.extend(recurse_inputs(graph.clone(), schema, &field.node)?);
+            }
         }
+        ExtendedType::Enum(enm) => {
+            for value in enm.values.values() {
+                changes.push(Change::EnumValue {
+                    enum_name: ty.name().clone(),
+                    value_name: value.value.clone(),
+                    graph: graph.to_string(),
+                });
+            }
+        }
+        _ => {}
     }
 
     Ok(changes)
+}
+
+/// Given an enum definition, find all the values that are associated with the origin
+/// subgraph. Return a list of enum value inclusions for the connector subgraph.
+fn enum_values_for_graph(ty: &ExtendedType, origin_graph: &str, graph: &str) -> Vec<Change> {
+    let mut results = Vec::new();
+
+    if let ExtendedType::Enum(enm) = ty {
+        for value in enm.values.values() {
+            let has_join = value.directives.iter().any(|d| {
+                d.name == "join__enumValue"
+                    && d.argument_by_name("graph")
+                        .and_then(|a| a.as_enum())
+                        .map(|e| *e == origin_graph)
+                        .unwrap_or(false)
+            });
+            if has_join {
+                results.push(Change::EnumValue {
+                    enum_name: ty.name().clone(),
+                    value_name: value.value.clone(),
+                    graph: graph.to_string(),
+                });
+            }
+        }
+    }
+
+    results
 }
 
 #[cfg(test)]

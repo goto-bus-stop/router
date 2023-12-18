@@ -389,10 +389,28 @@ pub(super) fn add_join_implements(
     Ok(())
 }
 
+// @join__enumValue ------------------------------------------------------------
+
+/*
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+*/
+
+pub(super) fn add_join_enum_value_directive(value: &mut EnumValueDefinition, graph: &str) {
+    value.directives.push(
+        Directive {
+            name: name!("join__enumValue"),
+            arguments: vec![Argument {
+                name: name!("graph"),
+                value: Value::Enum(ast::Name::new_unchecked(graph.into())).into(),
+            }
+            .into()],
+        }
+        .into(),
+    );
+}
+
 /*
 TODO:
-
-directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
 directive @join__unionMember(
   graph: join__Graph!

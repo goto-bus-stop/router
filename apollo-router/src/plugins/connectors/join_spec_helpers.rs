@@ -1,4 +1,3 @@
-use anyhow::bail;
 use apollo_compiler::ast;
 use apollo_compiler::ast::DirectiveList;
 use apollo_compiler::executable::Argument;
@@ -297,10 +296,7 @@ fn join_field_directive(graph: &str) -> Directive {
     }
 }
 
-pub(super) fn add_join_field_directive(
-    field: &mut FieldDefinition,
-    graph: &str,
-) -> anyhow::Result<()> {
+pub(super) fn add_join_field_directive(field: &mut FieldDefinition, graph: &str) {
     let exists = field.directives.iter().any(|d| {
         d.name == "join__field"
             && d.argument_by_name("graph")
@@ -310,18 +306,13 @@ pub(super) fn add_join_field_directive(
     });
 
     if exists {
-        return Ok(());
+        return;
     }
 
     field.directives.push(join_field_directive(graph).into());
-
-    Ok(())
 }
 
-pub(super) fn add_input_join_field_directive(
-    field: &mut InputValueDefinition,
-    graph: &str,
-) -> anyhow::Result<()> {
+pub(super) fn add_input_join_field_directive(field: &mut InputValueDefinition, graph: &str) {
     let exists = field.directives.iter().any(|d| {
         d.name == "join__field"
             && d.argument_by_name("graph")
@@ -331,12 +322,10 @@ pub(super) fn add_input_join_field_directive(
     });
 
     if exists {
-        return Ok(());
+        return;
     }
 
     field.directives.push(join_field_directive(graph).into());
-
-    Ok(())
 }
 
 // @join__implements -----------------------------------------------------------
@@ -368,11 +357,7 @@ fn join_implements_directive(graph: &str, interface: &str) -> Directive {
     }
 }
 
-pub(super) fn add_join_implements(
-    ty: &mut ExtendedType,
-    graph: &str,
-    interface: &Name,
-) -> anyhow::Result<()> {
+pub(super) fn add_join_implements(ty: &mut ExtendedType, graph: &str, interface: &Name) {
     match ty {
         ExtendedType::Object(ref mut ty) => {
             let ty = ty.make_mut();
@@ -384,9 +369,8 @@ pub(super) fn add_join_implements(
             ty.directives
                 .push(join_implements_directive(graph, interface).into());
         }
-        _ => bail!("Cannot add join__implements directive to non-object type"),
+        _ => debug_assert!(false, "Cannot add join__implements to non-object type"),
     }
-    Ok(())
 }
 
 // @join__enumValue ------------------------------------------------------------
@@ -426,7 +410,7 @@ pub(super) fn add_entities_field(
     graph: &str,
     name: &str,
     entity_name: &str,
-) -> anyhow::Result<()> {
+) {
     match ty {
         ExtendedType::Object(ref mut ty) => {
             let ty = ty.make_mut();
@@ -458,10 +442,8 @@ pub(super) fn add_entities_field(
                     .into()
                 });
         }
-        _ => bail!("Cannot add entities field to non-object type"),
+        _ => debug_assert!(false, "Cannot add entities field to non-object type"),
     }
-
-    Ok(())
 }
 
 pub(super) fn make_any_scalar() -> ExtendedType {

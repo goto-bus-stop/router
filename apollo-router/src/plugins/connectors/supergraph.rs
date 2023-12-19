@@ -290,7 +290,7 @@ impl Change {
                 let ty = upsert_type(original_schema, schema, name)?;
                 add_join_type_directive(ty, graph, key.clone(), Some(*is_interface_object));
                 if let Some(implements) = implements {
-                    add_join_implements(ty, graph, implements)?;
+                    add_join_implements(ty, graph, implements);
                 }
             }
 
@@ -300,7 +300,7 @@ impl Change {
                 graph,
             } => {
                 if let Some(field) = upsert_field(original_schema, schema, type_name, field_name)? {
-                    add_join_field_directive(field, graph)?;
+                    add_join_field_directive(field, graph);
                 }
             }
 
@@ -310,7 +310,7 @@ impl Change {
                 graph,
             } => {
                 let field = upsert_input_field(original_schema, schema, type_name, field_name)?;
-                add_input_join_field_directive(field, graph)?;
+                add_input_join_field_directive(field, graph);
             }
 
             Change::MagicFinder { type_name, graph } => {
@@ -327,7 +327,7 @@ impl Change {
                     graph,
                     format!("_{}_finder", type_name).as_str(),
                     type_name,
-                )?;
+                );
             }
 
             Change::EnumValue {

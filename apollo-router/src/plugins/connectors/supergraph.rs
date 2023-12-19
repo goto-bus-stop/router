@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 
-use anyhow::anyhow;
-use anyhow::bail;
 use apollo_compiler::ast;
 use apollo_compiler::ast::Selection;
 use apollo_compiler::name;
@@ -13,7 +11,6 @@ use apollo_compiler::schema::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use itertools::Itertools;
-use tower::BoxError;
 
 use super::connector::Connector;
 use super::connector::ConnectorKind;
@@ -34,13 +31,13 @@ use super::join_spec_helpers::make_any_scalar;
 pub(crate) fn generate_connector_supergraph(
     schema: &Schema,
     connectors: &HashMap<String, Connector>,
-) -> Result<Schema, BoxError> {
+) -> Result<Schema, ConnectorSupergraphError> {
     let mut new_schema = Schema::new();
     copy_definitions(schema, &mut new_schema);
 
     /* enum name -> subgraph name  */
     let origin_subgraph_map = graph_enum_map(schema)
-        .ok_or("missing join__Graph enum")?
+        .ok_or_else(|| InvalidOuterSupergraph("missing join__Graph enum".into()))?
         .into_iter()
         .map(|(k, v)| (v, k))
         .collect::<HashMap<_, _>>();
@@ -74,11 +71,11 @@ pub(super) fn make_changes(
     connector: &Connector,
     schema: &Schema,
     subgraph_enum_map: &HashMap<String, String>,
-) -> anyhow::Result<Vec<Change>> {
+) -> Result<Vec<Change>, ConnectorSupergraphError> {
     let graph = connector.name.clone();
     let origin_subgraph_name = subgraph_enum_map
         .get(connector.origin_subgraph.as_str())
-        .ok_or(anyhow!("missing origin subgraph"))?;
+        .ok_or_else(|| InvalidOuterSupergraph("missing origin subgraph".into()))?;
 
     match &connector.kind {
         // Root fields: add the parent type and the field, then recursively
@@ -111,13 +108,13 @@ pub(super) fn make_changes(
                 schema
                     .types
                     .get(output_type_name)
-                    .ok_or(anyhow!("missing type"))?,
+                    .ok_or_else(|| MissingType(output_type_name.to_string()))?,
                 &connector.output_selection,
             )?);
 
             let field_def = schema
                 .type_field(parent_type_name, field_name)
-                .map_err(|_| anyhow::anyhow!("missing field"))?;
+                .map_err(|_| MissingField(parent_type_name.to_string(), field_name.to_string()))?;
 
             for arg in field_def.arguments.iter() {
                 changes.extend(recurse_inputs(graph.clone(), schema, arg)?);
@@ -151,7 +148,10 @@ pub(super) fn make_changes(
                 graph.clone(),
                 schema,
                 type_name,
-                schema.types.get(type_name).ok_or(anyhow!("missing type"))?,
+                schema
+                    .types
+                    .get(type_name)
+                    .ok_or_else(|| MissingType(type_name.to_string()))?,
                 &connector.output_selection,
             )?);
 
@@ -162,7 +162,10 @@ pub(super) fn make_changes(
                 graph,
                 schema,
                 type_name,
-                schema.types.get(type_name).ok_or(anyhow!("missing type"))?,
+                schema
+                    .types
+                    .get(type_name)
+                    .ok_or_else(|| MissingType(type_name.to_string()))?,
                 &connector.input_selection,
             )?);
 
@@ -205,7 +208,7 @@ pub(super) fn make_changes(
                 schema
                     .types
                     .get(output_type_name)
-                    .ok_or(anyhow!("missing type"))?,
+                    .ok_or_else(|| MissingType(output_type_name.to_string()))?,
                 &connector.output_selection,
             )?);
 
@@ -219,13 +222,13 @@ pub(super) fn make_changes(
                 schema
                     .types
                     .get(type_name.as_str())
-                    .ok_or(anyhow!("missing type"))?,
+                    .ok_or_else(|| MissingType(type_name.to_string()))?,
                 &connector.input_selection,
             )?);
 
             let field_def = schema
                 .type_field(type_name, field_name)
-                .map_err(|_| anyhow::anyhow!("missing field"))?;
+                .map_err(|_| MissingField(type_name.to_string(), field_name.to_string()))?;
 
             for arg in field_def.arguments.iter() {
                 changes.extend(recurse_inputs(graph.clone(), schema, arg)?);
@@ -278,7 +281,7 @@ impl Change {
         &self,
         original_schema: &Schema,
         schema: &mut Schema,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), ConnectorSupergraphError> {
         match self {
             Change::Type {
                 name,
@@ -360,11 +363,11 @@ fn upsert_field<'a>(
     dest: &'a mut Schema,
     type_name: &Name,
     field_name: &Name,
-) -> anyhow::Result<Option<&'a mut FieldDefinition>> {
+) -> Result<Option<&'a mut FieldDefinition>, ConnectorSupergraphError> {
     let new_ty = dest
         .types
         .get_mut(type_name)
-        .ok_or(anyhow!("Cannot copy field to type that does not exist"))?;
+        .ok_or_else(|| MissingType(type_name.to_string()))?;
 
     if let Ok(field) = source.type_field(type_name, field_name) {
         let new_field = match new_ty {
@@ -378,7 +381,11 @@ fn upsert_field<'a>(
                 .fields
                 .entry(field_name.clone())
                 .or_insert_with(|| clean_copy_of_field(field).into()),
-            _ => bail!("Cannot copy field into non-composite type"),
+            _ => {
+                return Err(Invariant(
+                    "Cannot copy field into non-composite type".into(),
+                ))
+            }
         };
 
         Ok(Some(new_field.make_mut()))
@@ -392,23 +399,20 @@ fn upsert_input_field<'a>(
     dest: &'a mut Schema,
     type_name: &Name,
     field_name: &Name,
-) -> anyhow::Result<&'a mut InputValueDefinition> {
+) -> Result<&'a mut InputValueDefinition, ConnectorSupergraphError> {
     let new_ty = dest
         .types
         .get_mut(type_name)
-        .ok_or(anyhow!("Cannot copy field to type that does not exist"))?;
+        .ok_or_else(|| MissingType(type_name.to_string()))?;
 
-    let ty = source.get_input_object(type_name).ok_or_else(|| {
-        anyhow!(
-            "Cannot copy field to type that does not exist: {}",
-            type_name
-        )
-    })?;
+    let ty = source
+        .get_input_object(type_name)
+        .ok_or_else(|| MissingType(type_name.to_string()))?;
 
     let field = ty
         .fields
         .get(field_name)
-        .ok_or_else(|| anyhow!("Missing field {}.{}", type_name, field_name))?;
+        .ok_or_else(|| MissingField(type_name.to_string(), field_name.to_string()))?;
 
     let new_field = match new_ty {
         ExtendedType::InputObject(ref mut ty) => ty
@@ -416,7 +420,11 @@ fn upsert_input_field<'a>(
             .fields
             .entry(field_name.clone())
             .or_insert_with(|| clean_copy_of_input_field(field).into()),
-        _ => bail!("Cannot copy field into non-composite type"),
+        _ => {
+            return Err(Invariant(
+                "Cannot copy field into non-composite type".into(),
+            ))
+        }
     };
 
     Ok(new_field.make_mut())
@@ -426,11 +434,11 @@ fn upsert_type<'a>(
     source: &Schema,
     dest: &'a mut Schema,
     name: &str,
-) -> anyhow::Result<&'a mut ExtendedType> {
+) -> Result<&'a mut ExtendedType, ConnectorSupergraphError> {
     let original = source
         .types
         .get(name)
-        .ok_or(anyhow!("Cannot copy type that does not exist"))?;
+        .ok_or_else(|| MissingType(name.to_string()))?;
 
     if source
         .root_operation(apollo_compiler::executable::OperationType::Query)
@@ -460,7 +468,7 @@ fn add_type<'a>(
     dest: &'a mut Schema,
     name: &str,
     ty: ExtendedType,
-) -> anyhow::Result<&'a mut ExtendedType> {
+) -> Result<&'a mut ExtendedType, ConnectorSupergraphError> {
     Ok(dest
         .types
         .entry(ast::Name::new(name)?)
@@ -526,7 +534,7 @@ fn recurse_selection(
     type_name: &Name,
     ty: &ExtendedType,
     selections: &Vec<Selection>,
-) -> anyhow::Result<Vec<Change>> {
+) -> Result<Vec<Change>, ConnectorSupergraphError> {
     let mut mutations = Vec::new();
 
     mutations.push(Change::Type {
@@ -542,11 +550,9 @@ fn recurse_selection(
             for selection in selections {
                 match selection {
                     Selection::Field(selection) => {
-                        let field = obj.fields.get(&selection.name).ok_or(anyhow!(
-                            "missing field {} for type {}",
-                            selection.name.to_string().as_str(),
-                            type_name
-                        ))?;
+                        let field = obj.fields.get(&selection.name).ok_or_else(|| {
+                            MissingField(selection.name.to_string(), type_name.to_string())
+                        })?;
 
                         let field_type_name = field.ty.inner_named_type();
 
@@ -559,7 +565,7 @@ fn recurse_selection(
                         let field_type = schema
                             .types
                             .get(field_type_name)
-                            .ok_or(anyhow!("missing type {}", field_type_name))?;
+                            .ok_or_else(|| MissingType(field_type_name.to_string()))?;
 
                         if field_type.is_enum() {
                             mutations.extend(enum_values_for_graph(
@@ -589,7 +595,7 @@ fn recurse_selection(
             let implementors_map = schema.implementers_map();
             let possible_types = implementors_map
                 .get(type_name)
-                .ok_or(anyhow!("get possible types for {} failed", type_name))?
+                .ok_or(MissingPossibleTypes(type_name.to_string()))?
                 .iter()
                 .flat_map(|name| schema.types.get(name))
                 .filter(|ty| {
@@ -620,7 +626,7 @@ fn recurse_selection(
                                 let field_type = schema
                                     .types
                                     .get(field_type_name)
-                                    .ok_or(anyhow!("missing type {}", field_type_name))?;
+                                    .ok_or(MissingType(field_type_name.to_string()))?;
 
                                 mutations.extend(recurse_selection(
                                     origin_graph,
@@ -654,10 +660,10 @@ fn recurse_selection(
                                                 graph: graph.clone(),
                                             });
 
-                                            let field_type =
-                                                schema.types.get(field_type_name).ok_or(
-                                                    anyhow!("missing type {}", field_type_name),
-                                                )?;
+                                            let field_type = schema
+                                                .types
+                                                .get(field_type_name)
+                                                .ok_or(MissingType(field_type_name.to_string()))?;
 
                                             if field_type.is_enum() {
                                                 mutations.extend(enum_values_for_graph(
@@ -680,18 +686,30 @@ fn recurse_selection(
                                         }
                                     }
                                 }
-                                ExtendedType::Interface(_) => todo!(),
+                                ExtendedType::Interface(_) => {
+                                    return Err(Unsupported("interfaces on interfaces".into()))
+                                }
                                 _ => {}
                             }
                         }
                     }
 
-                    Selection::FragmentSpread(_) => todo!(),
-                    Selection::InlineFragment(_) => todo!(),
+                    Selection::FragmentSpread(_) => {
+                        return Err(Unsupported(
+                            "fragment spreads in connector selections".into(),
+                        ))
+                    }
+                    Selection::InlineFragment(_) => {
+                        return Err(Unsupported(
+                            "inline fragments in connector selections".into(),
+                        ))
+                    }
                 }
             }
         }
-        ExtendedType::InputObject(_) => return Err(anyhow!("input object in selection")),
+        ExtendedType::InputObject(_) => {
+            return Err(InvalidSelection("input object in selection".into()))
+        }
         _ => {} // hit a scalar and we're done
     }
 
@@ -702,7 +720,7 @@ fn recurse_inputs(
     graph: String,
     schema: &Schema,
     input_value_def: &Node<InputValueDefinition>,
-) -> anyhow::Result<Vec<Change>> {
+) -> Result<Vec<Change>, ConnectorSupergraphError> {
     let mut changes = Vec::new();
 
     let output_type_name = input_value_def.ty.inner_named_type();
@@ -710,7 +728,7 @@ fn recurse_inputs(
     let ty = schema
         .types
         .get(output_type_name.as_str())
-        .ok_or(anyhow!("missing type {}", output_type_name))?;
+        .ok_or_else(|| MissingType(output_type_name.to_string()))?;
 
     if !ty.is_built_in() {
         changes.push(Change::Type {
@@ -747,6 +765,34 @@ fn recurse_inputs(
 
     Ok(changes)
 }
+
+#[derive(Debug, thiserror::Error, displaydoc::Display)]
+pub(crate) enum ConnectorSupergraphError {
+    /// Invalid outer supergraph: {0}
+    InvalidOuterSupergraph(String),
+
+    /// Missing field {0} on type {1}
+    MissingField(String, String),
+
+    /// Missing type {0}
+    MissingType(String),
+
+    /// Missing possible types for {0}
+    MissingPossibleTypes(String),
+
+    /// Unsupported: {0}
+    Unsupported(String),
+
+    /// Invalid connector selection: {0}
+    InvalidSelection(String),
+
+    /// Invariant failed: {0}
+    Invariant(String),
+
+    /// Invalid GraphQL name
+    InvalidName(#[from] apollo_compiler::ast::InvalidNameError),
+}
+use ConnectorSupergraphError::*;
 
 /// Given an enum definition, find all the values that are associated with the origin
 /// subgraph. Return a list of enum value inclusions for the connector subgraph.
@@ -791,7 +837,7 @@ mod tests {
     const SCHEMA: &str = include_str!("./test_supergraph.graphql");
 
     #[test]
-    fn it_works() -> anyhow::Result<()> {
+    fn it_works() {
         let schema = Schema::parse_and_validate(SCHEMA, "outer.graphql").unwrap();
 
         let connectors = Arc::from(Connector::from_schema(&schema).unwrap());
@@ -801,7 +847,8 @@ mod tests {
         let result = RouterSchema::parse(
             inner.serialize().to_string().as_str(),
             &Configuration::fake_builder().build().unwrap(),
-        )?;
+        )
+        .unwrap();
 
         assert_eq!(
             result
@@ -825,6 +872,5 @@ mod tests {
         );
 
         assert_snapshot!(inner.serialize().to_string());
-        Ok(())
     }
 }

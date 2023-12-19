@@ -1,0 +1,31 @@
+telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        listen: 127.0.0.1:4000
+        enabled: true
+        path: /metrics
+    tracing:
+      common:
+        service_name: router
+        sampler: always_on
+      jaeger:
+        enabled: true
+        batch_processor:
+          scheduled_delay: 100ms
+        agent:
+          endpoint: default
+cors:
+  allow_any_origin: true
+supergraph:
+  listen: 127.0.0.1:4000
+  introspection: true
+sandbox:
+  enabled: true
+homepage:
+  enabled: false
+include_subgraph_errors:
+  all: true # Propagate errors from all subraphs
+plugins:
+  experimental.expose_query_plan: true
+experimental_graphql_validation_mode: both

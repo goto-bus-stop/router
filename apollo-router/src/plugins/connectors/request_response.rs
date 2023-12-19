@@ -362,93 +362,85 @@ pub(super) async fn handle_responses(
             .get::<ResponseParams>()
             .ok_or_else(|| BoxError::from("missing response params"))?;
 
-        match parts.status {
-            hyper::StatusCode::OK => {
-                let json_data: Value = serde_json::from_slice(
-                    &hyper::body::to_bytes(body)
-                        .await
-                        .map_err(|_| "couldn't retrieve http response body")?,
-                )
-                .map_err(|_| "couldn't deserialize response body")?;
+        if parts.status.is_success() {
+            let json_data: Value = serde_json::from_slice(
+                &hyper::body::to_bytes(body)
+                    .await
+                    .map_err(|_| "couldn't retrieve http response body")?,
+            )
+            .map_err(|_| "couldn't deserialize response body")?;
 
-                let mut res_data = match connector.transport {
-                    ConnectorTransport::HttpJson(ref transport) => {
-                        transport.map_response(json_data)?
+            let mut res_data = match connector.transport {
+                ConnectorTransport::HttpJson(ref transport) => transport.map_response(json_data)?,
+            };
+
+            // TODO alias handling
+
+            match response_params.key {
+                // add the response to the "data" using the root field name or alias
+                ResponseKey::RootField {
+                    ref name,
+                    ref typename,
+                } => {
+                    if let ResponseTypeName::Concrete(typename) = typename {
+                        inject_typename(&mut res_data, typename);
                     }
-                };
 
-                // TODO alias handling
+                    data.insert(name.clone(), res_data);
+                }
 
-                match response_params.key {
-                    // add the response to the "data" using the root field name or alias
-                    ResponseKey::RootField {
-                        ref name,
-                        ref typename,
-                    } => {
-                        if let ResponseTypeName::Concrete(typename) = typename {
-                            inject_typename(&mut res_data, typename);
+                // add the response to the "_entities" array at the right index
+                ResponseKey::Entity {
+                    index,
+                    ref typename,
+                } => {
+                    if let ResponseTypeName::Concrete(typename) = typename {
+                        inject_typename(&mut res_data, typename);
+                    }
+
+                    let entities = data.entry(ENTITIES).or_insert(Value::Array(vec![]));
+                    entities
+                        .as_array_mut()
+                        .ok_or_else(|| BoxError::from("entities is not an array"))?
+                        .insert(index, res_data);
+                }
+
+                // make an entity object and assign the response to the appropriate field or aliased field,
+                // then add the object to the _entities array at the right index (or add the field to an existing object)
+                ResponseKey::EntityField {
+                    index,
+                    ref field_name,
+                    ref typename,
+                } => {
+                    let entities = data
+                        .entry(ENTITIES)
+                        .or_insert(Value::Array(vec![]))
+                        .as_array_mut()
+                        .ok_or_else(|| BoxError::from("entities is not an array"))?;
+
+                    match entities.get_mut(index) {
+                        Some(Value::Object(entity)) => {
+                            entity.insert(field_name.clone(), res_data);
                         }
-
-                        data.insert(name.clone(), res_data);
-                    }
-
-                    // add the response to the "_entities" array at the right index
-                    ResponseKey::Entity {
-                        index,
-                        ref typename,
-                    } => {
-                        if let ResponseTypeName::Concrete(typename) = typename {
-                            inject_typename(&mut res_data, typename);
+                        _ => {
+                            let mut entity = serde_json_bytes::Map::new();
+                            if let ResponseTypeName::Concrete(typename) = typename {
+                                entity.insert("__typename", Value::String(typename.clone().into()));
+                            }
+                            entity.insert(field_name.clone(), res_data);
+                            entities.insert(index, Value::Object(entity));
                         }
-
-                        let entities = data.entry(ENTITIES).or_insert(Value::Array(vec![]));
-                        entities
-                            .as_array_mut()
-                            .ok_or_else(|| BoxError::from("entities is not an array"))?
-                            .insert(index, res_data);
-                    }
-
-                    // make an entity object and assign the response to the appropriate field or aliased field,
-                    // then add the object to the _entities array at the right index (or add the field to an existing object)
-                    ResponseKey::EntityField {
-                        index,
-                        ref field_name,
-                        ref typename,
-                    } => {
-                        let entities = data
-                            .entry(ENTITIES)
-                            .or_insert(Value::Array(vec![]))
-                            .as_array_mut()
-                            .ok_or_else(|| BoxError::from("entities is not an array"))?;
-
-                        match entities.get_mut(index) {
-                            Some(Value::Object(entity)) => {
-                                entity.insert(field_name.clone(), res_data);
-                            }
-                            _ => {
-                                let mut entity = serde_json_bytes::Map::new();
-                                if let ResponseTypeName::Concrete(typename) = typename {
-                                    entity.insert(
-                                        "__typename",
-                                        Value::String(typename.clone().into()),
-                                    );
-                                }
-                                entity.insert(field_name.clone(), res_data);
-                                entities.insert(index, Value::Object(entity));
-                            }
-                        };
-                    }
+                    };
                 }
             }
-            _ => {
-                errors.push(
-                    crate::graphql::Error::builder()
-                        .message(format!("http error: {}", parts.status))
-                        // todo path: ["_entities", i, "???"]
-                        .extension_code(format!("{}", parts.status))
-                        .build(),
-                );
-            }
+        } else {
+            errors.push(
+                crate::graphql::Error::builder()
+                    .message(format!("http error: {}", parts.status))
+                    // todo path: ["_entities", i, "???"]
+                    .extension_code(format!("{}", parts.status))
+                    .build(),
+            );
         }
     }
 

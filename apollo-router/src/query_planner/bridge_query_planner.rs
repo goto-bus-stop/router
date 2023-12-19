@@ -191,7 +191,7 @@ impl BridgeQueryPlanner {
         let mut subgraph_planners = HashMap::new();
         let connector_urls = connectors
             .iter()
-            .map(|(name, connector)| (name.clone(), connector.print_url()))
+            .map(|(name, connector)| (name.clone(), connector.to_string()))
             .collect::<HashMap<_, _>>();
 
         if !connectors.is_empty() {
@@ -286,7 +286,7 @@ impl BridgeQueryPlanner {
         let mut subgraph_planners = HashMap::new();
         let connector_urls = connectors
             .iter()
-            .map(|(name, connector)| (name.clone(), connector.print_url()))
+            .map(|(name, connector)| (name.clone(), connector.to_string()))
             .collect::<HashMap<_, _>>();
         if !connectors.is_empty() {
             let connector_subgraph_names = connector_subgraph_names(&connectors);

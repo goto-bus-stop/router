@@ -232,7 +232,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         let subgraph_services =
             create_subgraph_services(&plugins, Arc::clone(&schema), &configuration)?;
         for (name, subgraph_service) in subgraph_services {
-            builder = if let Some(connector) = connector_subgraphs.get(name.as_str()) {
+            builder = if let Some(connector) = connector_subgraphs.get(&name) {
                 builder.with_subgraph_service(name.as_str(), connector.clone())
             } else {
                 builder.with_subgraph_service(&name, subgraph_service)

@@ -651,14 +651,11 @@ impl FetchNode {
         connector_urls: &HashMap<String, String>,
     ) {
         let parent_service_name = parent_service_name.to_string();
-        let url = connector_urls
+        let connector = connector_urls
             .get(&self.service_name)
-            .map(|s| s.as_str())
-            .unwrap_or("");
-        let service_name = mem::replace(
-            &mut self.service_name,
-            format!("{parent_service_name}: {}", url),
-        );
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        let service_name = mem::replace(&mut self.service_name, connector.to_string());
         self.protocol = Arc::new(Protocol::RestFetch(RestFetchNode {
             connector_service_name: service_name,
             parent_service_name,

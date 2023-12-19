@@ -77,7 +77,7 @@ pub(super) fn make_changes(
 ) -> anyhow::Result<Vec<Change>> {
     let graph = connector.name.clone();
     let origin_subgraph_name = subgraph_enum_map
-        .get(&connector.origin_subgraph)
+        .get(connector.origin_subgraph.as_str())
         .ok_or(anyhow!("missing origin subgraph"))?;
 
     match &connector.kind {

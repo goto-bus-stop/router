@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::fmt::Display;
 use std::sync::Arc;
 
 use apollo_compiler::ast::Selection as GraphQLSelection;
@@ -25,6 +26,8 @@ use crate::Context;
 pub(crate) struct Connector {
     /// Internal name used to construct "subgraphs" in the inner supergraph
     pub(super) name: String,
+    /// The api name, as defined in the `sourceAPI` directive
+    api: String,
     pub(crate) origin_subgraph: String,
     pub(super) kind: ConnectorKind,
     pub(super) transport: ConnectorTransport,
@@ -96,6 +99,7 @@ impl Connector {
 
         Ok(Connector {
             name,
+            api: directive.api.clone(),
             origin_subgraph: directive.graph.clone(),
             kind,
             transport,
@@ -143,6 +147,7 @@ impl Connector {
 
         Ok(Connector {
             name,
+            api: directive.api.clone(),
             origin_subgraph: directive.graph.clone(),
             kind,
             transport,
@@ -211,11 +216,12 @@ impl Connector {
     ) -> Result<SubgraphResponse, BoxError> {
         handle_responses(context, self, responses).await
     }
+}
 
-    pub(crate) fn print_url(&self) -> String {
+impl Display for Connector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let ConnectorTransport::HttpJson(tr) = &self.transport;
-
-        format!("{} {}", tr.method, tr.path_template)
+        write!(f, "{}: {} {}", self.api, tr.method, tr.path_template)
     }
 }
 

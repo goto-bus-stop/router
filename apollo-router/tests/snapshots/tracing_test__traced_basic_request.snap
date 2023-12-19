@@ -256,7 +256,7 @@ expression: get_spans()
                       ],
                       [
                         "plan",
-                        "{\"kind\":\"Fetch\",\"serviceName\":\"products\",\"variableUsages\":[],\"operation\":\"{topProducts{name name2:name}}\",\"operationName\":null,\"operationKind\":\"query\",\"id\":null,\"inputRewrites\":null,\"outputRewrites\":null,\"authorization\":{\"is_authenticated\":false,\"scopes\":[],\"policies\":[]},\"protocolKind\":\"graphQL\"}"
+                        "{\"kind\":\"Fetch\",\"serviceName\":\"products\",\"variableUsages\":[],\"operation\":\"{topProducts{name name2:name}}\",\"operationName\":null,\"operationKind\":\"query\",\"id\":null,\"inputRewrites\":null,\"outputRewrites\":null,\"authorization\":{\"is_authenticated\":false,\"scopes\":[],\"policies\":[]},\"protocol\":\"graphQL\"}"
                       ],
                       [
                         "histogram.apollo_router_query_planning_time",

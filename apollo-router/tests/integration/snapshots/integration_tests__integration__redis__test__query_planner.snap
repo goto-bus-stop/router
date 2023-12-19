@@ -17,5 +17,5 @@ expression: query_plan
     "scopes": [],
     "policies": []
   },
-  "protocolKind": "graphQL"
+  "protocol": "graphQL"
 }

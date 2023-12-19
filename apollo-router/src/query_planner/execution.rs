@@ -119,30 +119,70 @@ impl PlanNode {
             let mut errors;
 
             match self {
-                PlanNode::Sequence { nodes } => {
-                    value = parent_value.clone();
-                    errors = Vec::new();
-                    async {
-                        for node in nodes {
-                            let (v, err) = node
-                                .execute_recursively(
+                PlanNode::Sequence { nodes, connector } => match connector {
+                    None => {
+                        value = parent_value.clone();
+                        errors = Vec::new();
+                        async {
+                            for node in nodes {
+                                let (v, err) = node
+                                    .execute_recursively(
+                                        parameters,
+                                        current_dir,
+                                        &value,
+                                        sender.clone(),
+                                    )
+                                    .in_current_span()
+                                    .await;
+                                value.deep_merge(v);
+                                errors.extend(err.into_iter());
+                            }
+                        }
+                        .instrument(tracing::info_span!(
+                            SEQUENCE_SPAN_NAME,
+                            "otel.kind" = "INTERNAL"
+                        ))
+                        .await
+                    }
+                    Some(connector_node) => {
+                        value = parent_value.clone();
+                        errors = Vec::new();
+
+                        debug_assert_eq!(
+                            1,
+                            nodes.len(),
+                            "connector sequence should only contain 1 node"
+                        );
+
+                        if let Some(node) = nodes.first() {
+                            match connector_node
+                                .connector_execution(
                                     parameters,
                                     current_dir,
-                                    &value,
-                                    sender.clone(),
+                                    parent_value,
+                                    sender,
+                                    node,
                                 )
-                                .in_current_span()
-                                .await;
-                            value.deep_merge(v);
-                            errors.extend(err.into_iter());
+                                .instrument(tracing::info_span!(
+                                    SEQUENCE_SPAN_NAME,
+                                    "otel.kind" = "INTERNAL"
+                                ))
+                                .await
+                            {
+                                Ok((v, e)) => {
+                                    value = v;
+                                    errors = e;
+                                }
+                                Err(err) => {
+                                    failfast_error!("Fetch error: {}", err);
+                                    errors =
+                                        vec![err.to_graphql_error(Some(current_dir.to_owned()))];
+                                    value = Value::default();
+                                }
+                            }
                         }
                     }
-                    .instrument(tracing::info_span!(
-                        SEQUENCE_SPAN_NAME,
-                        "otel.kind" = "INTERNAL"
-                    ))
-                    .await
-                }
+                },
                 PlanNode::Parallel { nodes } => {
                     value = Value::default();
                     errors = Vec::new();
@@ -171,62 +211,27 @@ impl PlanNode {
                     ))
                     .await
                 }
-                PlanNode::Flatten(FlattenNode {
-                    path,
-                    node,
-                    connector,
-                }) => {
+                PlanNode::Flatten(FlattenNode { path, node }) => {
                     // Note that the span must be `info` as we need to pick this up in apollo tracing
                     let current_dir = current_dir.join(path);
-                    match connector {
-                        None => {
-                            let (v, err) = node
-                                .execute_recursively(
-                                    parameters,
-                                    // this is the only command that actually changes the "current dir"
-                                    &current_dir,
-                                    parent_value,
-                                    sender,
-                                )
-                                .instrument(tracing::info_span!(
-                                    FLATTEN_SPAN_NAME,
-                                    "graphql.path" = %current_dir,
-                                    "otel.kind" = "INTERNAL"
-                                ))
-                                .await;
 
-                            value = v;
-                            errors = err;
-                        }
-                        Some(fetch_node) => {
-                            match fetch_node
-                                .connector_execution(
-                                    parameters,
-                                    &current_dir,
-                                    parent_value,
-                                    sender,
-                                    node,
-                                )
-                                .instrument(tracing::info_span!(
-                                    FLATTEN_SPAN_NAME,
-                                    "graphql.path" = %current_dir,
-                                    "otel.kind" = "INTERNAL"
-                                ))
-                                .await
-                            {
-                                Ok((v, e)) => {
-                                    value = v;
-                                    errors = e;
-                                }
-                                Err(err) => {
-                                    failfast_error!("Fetch error: {}", err);
-                                    errors =
-                                        vec![err.to_graphql_error(Some(current_dir.to_owned()))];
-                                    value = Value::default();
-                                }
-                            }
-                        }
-                    }
+                    let (v, err) = node
+                        .execute_recursively(
+                            parameters,
+                            // this is the only command that actually changes the "current dir"
+                            &current_dir,
+                            parent_value,
+                            sender,
+                        )
+                        .instrument(tracing::info_span!(
+                            FLATTEN_SPAN_NAME,
+                            "graphql.path" = %current_dir,
+                            "otel.kind" = "INTERNAL"
+                        ))
+                        .await;
+
+                    value = v;
+                    errors = err;
                 }
                 PlanNode::Subscription { primary, .. } => {
                     if parameters.subscription_handle.is_some() {

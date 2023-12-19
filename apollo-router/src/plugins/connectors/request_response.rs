@@ -7,10 +7,10 @@ use apollo_compiler::Schema;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
-use tower::BoxError;
 
 use super::connector::ConnectorKind;
 use super::connector::ConnectorTransport;
+use super::http_json_transport::HttpJsonTransportError;
 use super::Connector;
 use crate::json_ext::Object;
 use crate::services::SubgraphRequest;
@@ -71,7 +71,7 @@ pub(super) fn make_requests(
     request: SubgraphRequest,
     connector: &Connector,
     schema: Arc<Valid<Schema>>,
-) -> Result<Vec<(http::Request<hyper::Body>, ResponseParams)>, BoxError> {
+) -> Result<Vec<(http::Request<hyper::Body>, ResponseParams)>, MakeRequestError> {
     match connector.kind {
         ConnectorKind::RootField { .. } => {
             let parts = root_fields(&request, schema)?;
@@ -91,7 +91,7 @@ pub(super) fn make_requests(
 fn request_params_to_requests(
     connector: &Connector,
     from_request: Vec<(ResponseKey, RequestInputs)>,
-) -> Result<Vec<(http::Request<hyper::Body>, ResponseParams)>, BoxError> {
+) -> Result<Vec<(http::Request<hyper::Body>, ResponseParams)>, MakeRequestError> {
     from_request
         .into_iter()
         .map(|(response_key, inputs)| {
@@ -108,6 +108,41 @@ fn request_params_to_requests(
         .collect::<Result<Vec<_>, _>>()
 }
 
+// --- ERRORS ------------------------------------------------------------------
+
+#[derive(Debug, thiserror::Error, displaydoc::Display)]
+pub(super) enum MakeRequestError {
+    /// Invalid request operation: {0}
+    InvalidOperation(String),
+
+    /// Unsupported request operation: {0}
+    UnsupportedOperation(String),
+
+    /// Invalid request arguments: {0}
+    InvalidArguments(String),
+
+    /// Invalid entity representation: {0}
+    InvalidRepresentations(String),
+
+    /// Cannot create HTTP request: {0}
+    TransportError(#[from] HttpJsonTransportError),
+}
+
+#[derive(Debug, thiserror::Error, displaydoc::Display)]
+pub(super) enum HandleResponseError {
+    /// Missing response params
+    MissingResponseParams,
+
+    /// Invalid response body: {0}
+    InvalidResponseBody(String),
+
+    /// Cannot map response: {0}
+    MapResponseError(#[from] HttpJsonTransportError),
+
+    /// Merge error: {0}
+    MergeError(String),
+}
+
 // --- ROOT FIELDS -------------------------------------------------------------
 
 /// Given a query, find the root fields and return a list of requests.
@@ -116,20 +151,21 @@ fn request_params_to_requests(
 fn root_fields(
     request: &SubgraphRequest,
     schema: Arc<Valid<Schema>>,
-) -> Result<Vec<(ResponseKey, RequestInputs)>, BoxError> {
+) -> Result<Vec<(ResponseKey, RequestInputs)>, MakeRequestError> {
     let query = request
         .subgraph_request
         .body()
         .query
         .clone()
-        .ok_or_else(|| BoxError::from("missing query"))?;
+        .ok_or_else(|| MakeRequestError::InvalidOperation("missing query".into()))?;
 
-    let doc = ExecutableDocument::parse(&schema, query, "op.graphql")
-        .map_err(|_| "cannot parse operation document")?;
+    let doc = ExecutableDocument::parse(&schema, query, "op.graphql").map_err(|_| {
+        MakeRequestError::InvalidOperation("cannot parse operation document".into())
+    })?;
 
     let op = doc
         .get_operation(request.subgraph_request.body().operation_name.as_deref())
-        .map_err(|_| anyhow::anyhow!("invalid operation"))?;
+        .map_err(|_| MakeRequestError::InvalidOperation("no operation found".into()))?;
 
     op.selection_set
         .selections
@@ -144,7 +180,12 @@ fn root_fields(
                 let arguments = graphql_utils::field_arguments_map(
                     field,
                     &request.subgraph_request.body().variables,
-                )?;
+                )
+                .map_err(|_| {
+                    MakeRequestError::InvalidArguments(
+                        "cannot get inputs from field arguments".into(),
+                    )
+                })?;
 
                 let request_inputs = RequestInputs {
                     arguments,
@@ -155,14 +196,14 @@ fn root_fields(
             }
 
             // TODO if the client operation uses fragments, we'll probably need to handle that here
-            Selection::FragmentSpread(_) => {
-                Err(BoxError::from("root field fragment spread not supported"))
-            }
-            Selection::InlineFragment(_) => {
-                Err(BoxError::from("root field inline fragment not supported"))
-            }
+            Selection::FragmentSpread(_) => Err(MakeRequestError::UnsupportedOperation(
+                "root field fragment spread not supported".into(),
+            )),
+            Selection::InlineFragment(_) => Err(MakeRequestError::UnsupportedOperation(
+                "root field inline fragment not supported".into(),
+            )),
         })
-        .collect::<Result<Vec<_>, BoxError>>()
+        .collect::<Result<Vec<_>, MakeRequestError>>()
 }
 
 // --- ENTITIES ----------------------------------------------------------------
@@ -175,14 +216,16 @@ fn root_fields(
 fn entities_from_request(
     request: &SubgraphRequest,
     _schema: Arc<Valid<Schema>>,
-) -> Result<Vec<(ResponseKey, RequestInputs)>, BoxError> {
+) -> Result<Vec<(ResponseKey, RequestInputs)>, MakeRequestError> {
+    use MakeRequestError::InvalidRepresentations;
+
     let (_, typename_requested) = graphql_utils::get_entity_fields(
         request
             .subgraph_request
             .body()
             .query
             .as_ref()
-            .ok_or_else(|| BoxError::from("missing query"))?,
+            .ok_or_else(|| MakeRequestError::InvalidOperation("missing query".into()))?,
     )?;
 
     request
@@ -190,20 +233,22 @@ fn entities_from_request(
         .body()
         .variables
         .get(REPRESENTATIONS_VAR)
-        .ok_or_else(|| BoxError::from("missing representations variable"))?
+        .ok_or_else(|| InvalidRepresentations("missing representations variable".into()))?
         .as_array()
-        .ok_or_else(|| BoxError::from("representations is not an array"))?
+        .ok_or_else(|| InvalidRepresentations("representations is not an array".into()))?
         .iter()
         .enumerate()
         .map(|(i, rep)| {
             // TODO abstract types?
             let typename = rep
                 .as_object()
-                .ok_or_else(|| BoxError::from("representation is not an object"))?
+                .ok_or_else(|| InvalidRepresentations("representation is not an object".into()))?
                 .get("__typename")
-                .ok_or_else(|| BoxError::from("representation is missing __typename"))?
+                .ok_or_else(|| {
+                    InvalidRepresentations("representation is missing __typename".into())
+                })?
                 .as_str()
-                .ok_or_else(|| BoxError::from("__typename is not a string"))?
+                .ok_or_else(|| InvalidRepresentations("__typename is not a string".into()))?
                 .to_string();
 
             let typename = if typename_requested {
@@ -218,7 +263,9 @@ fn entities_from_request(
                     arguments: Default::default(),
                     parent: rep
                         .as_object()
-                        .ok_or_else(|| BoxError::from("representation is not an object"))?
+                        .ok_or_else(|| {
+                            InvalidRepresentations("representation is not an object".into())
+                        })?
                         .clone(),
                 },
             ))
@@ -238,7 +285,7 @@ fn entities_with_fields_from_request(
     request: &SubgraphRequest,
     _schema: Arc<Valid<Schema>>,
     connector: &Connector,
-) -> Result<Vec<(ResponseKey, RequestInputs)>, BoxError> {
+) -> Result<Vec<(ResponseKey, RequestInputs)>, MakeRequestError> {
     // TODO this is the fallback when using the magic finder field, which means
     // we won't have a type condition in the query
     let typename = match connector.kind {
@@ -252,7 +299,7 @@ fn entities_with_fields_from_request(
             .body()
             .query
             .as_ref()
-            .ok_or_else(|| BoxError::from("missing query"))?,
+            .ok_or_else(|| MakeRequestError::InvalidOperation("missing query".into()))?,
     )?;
 
     let types_and_fields = entities_field
@@ -270,15 +317,16 @@ fn entities_with_fields_from_request(
                 }
             }
 
-            apollo_compiler::ast::Selection::FragmentSpread(_) => Err(BoxError::from(
-                "_entities selection can't be a named fragment",
-            )),
+            apollo_compiler::ast::Selection::FragmentSpread(_) => {
+                Err(MakeRequestError::InvalidOperation(
+                    "_entities selection can't be a named fragment".into(),
+                ))
+            }
 
             apollo_compiler::ast::Selection::InlineFragment(frag) => {
-                let type_name = frag
-                    .type_condition
-                    .as_ref()
-                    .ok_or_else(|| BoxError::from("missing type condition"))?;
+                let type_name = frag.type_condition.as_ref().ok_or_else(|| {
+                    MakeRequestError::InvalidOperation("missing type condition".into())
+                })?;
                 Ok(frag
                     .selection_set
                     .iter()
@@ -300,9 +348,13 @@ fn entities_with_fields_from_request(
         .body()
         .variables
         .get(REPRESENTATIONS_VAR)
-        .ok_or_else(|| BoxError::from("missing representations variable"))?
+        .ok_or_else(|| {
+            MakeRequestError::InvalidRepresentations("missing representations variable".into())
+        })?
         .as_array()
-        .ok_or_else(|| BoxError::from("representations is not an array"))?
+        .ok_or_else(|| {
+            MakeRequestError::InvalidRepresentations("representations is not an array".into())
+        })?
         .iter()
         .enumerate()
         .collect::<Vec<_>>();
@@ -317,7 +369,12 @@ fn entities_with_fields_from_request(
                 let arguments = graphql_utils::ast_field_arguments_map(
                     field,
                     &request.subgraph_request.body().variables,
-                )?;
+                )
+                .map_err(|_| {
+                    MakeRequestError::InvalidArguments(
+                        "cannot build inputs from field arguments".into(),
+                    )
+                })?;
 
                 let typename = if typename_requested {
                     ResponseTypeName::Concrete(typename.to_string())
@@ -325,7 +382,7 @@ fn entities_with_fields_from_request(
                     ResponseTypeName::Omitted
                 };
 
-                Ok::<_, BoxError>((
+                Ok::<_, MakeRequestError>((
                     ResponseKey::EntityField {
                         index: *i,
                         field_name: field.response_name().to_string(),
@@ -335,7 +392,11 @@ fn entities_with_fields_from_request(
                         arguments,
                         parent: representation
                             .as_object()
-                            .ok_or_else(|| BoxError::from("representation is not an object"))?
+                            .ok_or_else(|| {
+                                MakeRequestError::InvalidRepresentations(
+                                    "representation is not an object".into(),
+                                )
+                            })?
                             .clone(),
                     },
                 ))
@@ -350,7 +411,9 @@ pub(super) async fn handle_responses(
     context: Context,
     connector: &Connector,
     responses: Vec<http::Response<hyper::Body>>,
-) -> Result<SubgraphResponse, BoxError> {
+) -> Result<SubgraphResponse, HandleResponseError> {
+    use HandleResponseError::*;
+
     let mut data = serde_json_bytes::Map::new();
     let mut errors = Vec::new();
 
@@ -360,21 +423,20 @@ pub(super) async fn handle_responses(
         let response_params = parts
             .extensions
             .get::<ResponseParams>()
-            .ok_or_else(|| BoxError::from("missing response params"))?;
+            .ok_or_else(|| MissingResponseParams)?;
 
         if parts.status.is_success() {
-            let json_data: Value = serde_json::from_slice(
-                &hyper::body::to_bytes(body)
-                    .await
-                    .map_err(|_| "couldn't retrieve http response body")?,
-            )
-            .map_err(|_| "couldn't deserialize response body")?;
+            let json_data: Value =
+                serde_json::from_slice(&hyper::body::to_bytes(body).await.map_err(|_| {
+                    InvalidResponseBody("couldn't retrieve http response body".into())
+                })?)
+                .map_err(|_| InvalidResponseBody("couldn't deserialize response body".into()))?;
 
             let mut res_data = match connector.transport {
-                ConnectorTransport::HttpJson(ref transport) => transport.map_response(json_data)?,
+                ConnectorTransport::HttpJson(ref transport) => transport
+                    .map_response(json_data)
+                    .map_err(MapResponseError)?,
             };
-
-            // TODO alias handling
 
             match response_params.key {
                 // add the response to the "data" using the root field name or alias
@@ -401,7 +463,7 @@ pub(super) async fn handle_responses(
                     let entities = data.entry(ENTITIES).or_insert(Value::Array(vec![]));
                     entities
                         .as_array_mut()
-                        .ok_or_else(|| BoxError::from("entities is not an array"))?
+                        .ok_or_else(|| MergeError("entities is not an array".into()))?
                         .insert(index, res_data);
                 }
 
@@ -416,7 +478,7 @@ pub(super) async fn handle_responses(
                         .entry(ENTITIES)
                         .or_insert(Value::Array(vec![]))
                         .as_array_mut()
-                        .ok_or_else(|| BoxError::from("entities is not an array"))?;
+                        .ok_or_else(|| MergeError("entities is not an array".into()))?;
 
                     match entities.get_mut(index) {
                         Some(Value::Object(entity)) => {
@@ -471,7 +533,6 @@ mod tests {
     use apollo_compiler::name;
     use apollo_compiler::Schema;
     use insta::assert_debug_snapshot;
-    use tower::BoxError;
 
     use crate::plugins::connectors::connector::Connector;
     use crate::plugins::connectors::directives::HTTPSource;
@@ -483,7 +544,7 @@ mod tests {
     use crate::Context;
 
     #[test]
-    fn root_fields() -> anyhow::Result<()> {
+    fn root_fields() {
         let schema = Arc::new(Schema::parse_and_validate(
             r#"
             scalar JSON
@@ -699,11 +760,10 @@ mod tests {
             ],
         )
         "###);
-        Ok(())
     }
 
     #[test]
-    fn entities_with_fields_from_request() -> anyhow::Result<()> {
+    fn entities_with_fields_from_request() {
         let partial_sdl = r#"
         type Query {
           field: String
@@ -864,11 +924,10 @@ mod tests {
             ),
         ]
         "###);
-        Ok(())
     }
 
     #[test]
-    fn make_requests() -> anyhow::Result<()> {
+    fn make_requests() {
         let req = crate::services::SubgraphRequest::fake_builder()
             .subgraph_name("CONNECTOR_0")
             .subgraph_request(
@@ -959,11 +1018,10 @@ mod tests {
             },
         }
         "###);
-        Ok(())
     }
 
     #[tokio::test]
-    async fn handle_requests() -> Result<(), BoxError> {
+    async fn handle_requests() {
         let api = SourceAPI {
             graph: "B".to_string(),
             name: "API".to_string(),
@@ -1016,7 +1074,8 @@ mod tests {
 
         let res =
             super::handle_responses(Context::default(), &connector, vec![response1, response2])
-                .await?;
+                .await
+                .unwrap();
 
         assert_debug_snapshot!(res.response.body(), @r###"
         Response {
@@ -1040,7 +1099,6 @@ mod tests {
             incremental: [],
         }
         "###);
-        Ok(())
     }
 }
 
@@ -1055,6 +1113,8 @@ mod graphql_utils {
     use serde_json_bytes::Map;
     use serde_json_bytes::Value as JSONValue;
     use tower::BoxError;
+
+    use super::MakeRequestError;
 
     pub(super) fn field_arguments_map(
         field: &Node<Field>,
@@ -1142,10 +1202,14 @@ mod graphql_utils {
         }
     }
 
-    pub(super) fn get_entity_fields(query: &str) -> Result<(Node<ast::Field>, bool), BoxError> {
+    pub(super) fn get_entity_fields(
+        query: &str,
+    ) -> Result<(Node<ast::Field>, bool), MakeRequestError> {
+        use MakeRequestError::*;
+
         // Use the AST because the `_entities` field is not actually present in the supergraph
         let doc = apollo_compiler::ast::Document::parse(query, "op.graphql")
-            .map_err(|_| "cannot parse operation document")?;
+            .map_err(|_| InvalidOperation("cannot parse operation document".into()))?;
 
         // Assume a single operation (because this is from a query plan)
         let op = doc
@@ -1155,7 +1219,7 @@ mod graphql_utils {
                 Definition::OperationDefinition(op) => Some(op),
                 _ => None,
             })
-            .ok_or_else(|| BoxError::from("missing operation"))?;
+            .ok_or_else(|| InvalidOperation("missing operation".into()))?;
 
         let root_field = op
             .selection_set
@@ -1164,7 +1228,7 @@ mod graphql_utils {
                 apollo_compiler::ast::Selection::Field(f) => Some(f),
                 _ => None,
             })
-            .ok_or_else(|| BoxError::from("missing entities root field"))?;
+            .ok_or_else(|| InvalidOperation("missing entities root field".into()))?;
 
         let mut typename_requested = false;
 
@@ -1176,7 +1240,7 @@ mod graphql_utils {
                     }
                 }
                 apollo_compiler::ast::Selection::FragmentSpread(_) => {
-                    return Err(BoxError::from("fragment spread not supported"))
+                    return Err(UnsupportedOperation("fragment spread not supported".into()))
                 }
                 apollo_compiler::ast::Selection::InlineFragment(f) => {
                     for selection in f.selection_set.iter() {
@@ -1187,10 +1251,14 @@ mod graphql_utils {
                                 }
                             }
                             apollo_compiler::ast::Selection::FragmentSpread(_) => {
-                                return Err(BoxError::from("fragment spread not supported"))
+                                return Err(UnsupportedOperation(
+                                    "fragment spread not supported".into(),
+                                ))
                             }
                             apollo_compiler::ast::Selection::InlineFragment(_) => {
-                                return Err(BoxError::from("inline fragment not supported"))
+                                return Err(UnsupportedOperation(
+                                    "inline fragment not supported".into(),
+                                ))
                             }
                         }
                     }

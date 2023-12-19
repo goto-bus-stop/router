@@ -4,7 +4,6 @@ use std::collections::HashMap;
 
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
-use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
 use apollo_compiler::schema::Name;
@@ -23,7 +22,7 @@ const HTTP_ARGUMENT_NAME: &str = "http";
 const SOURCE_TYPE_DIRECTIVE_NAME: &str = "sourceType";
 const SOURCE_FIELD_DIRECTIVE_NAME: &str = "sourceField";
 
-const JOIN_SCHEMA_DIRECTIVE_NAME: &str = "join__schema";
+const JOIN_DIRECTIVE_DIRECTIVE_NAME: &str = "join__directive";
 const JOIN_TYPE_DIRECTIVE_NAME: &str = "join__type";
 const JOIN_FIELD_DIRECTIVE_NAME: &str = "join__field";
 const JOIN_GRAPH_ENUM_NAME: &str = "join__Graph";
@@ -58,52 +57,86 @@ pub(super) fn graph_enum_map(schema: &apollo_compiler::Schema) -> Option<HashMap
 }
 
 #[derive(Clone, Debug)]
-struct JoinWithDirectives {
-    graph: String,
-    directives: Vec<DirectiveAsObject>,
-    is_interface_object: Option<bool>,
+struct JoinedDirective {
+    graphs: Vec<String>,
+    directive: DirectiveAsObject,
 }
 
-impl JoinWithDirectives {
-    fn from_directive(
-        directive: &Node<Directive>,
-    ) -> Result<Option<Self>, ConnectorDirectiveError> {
-        let directives = if let Some(directives) = directive.argument_by_name("directives") {
-            directives
-                .as_list()
-                .map(|directives| {
-                    directives
-                        .iter()
-                        .map(|directive| directive.try_into())
-                        .collect::<Result<Vec<_>, _>>()
-                })
+impl JoinedDirective {
+    fn from_schema_directive_list(
+        // Unfortunately we use a_c::schema::DL in some places and a_c::ast::DL
+        // in others, so this method handles the apollo_compiler::schema case.
+        list: &apollo_compiler::schema::DirectiveList,
+    ) -> Result<Vec<Self>, ConnectorDirectiveError> {
+        let ast_directive_list = apollo_compiler::ast::DirectiveList(
+            list.iter()
+                .map(|component| component.node.clone())
+                .collect::<Vec<_>>(),
+        );
+        // Delegate to the main implementation below.
+        Self::from_directive_list(&ast_directive_list)
+    }
+
+    fn from_directive_list(
+        list: &apollo_compiler::ast::DirectiveList,
+    ) -> Result<Vec<Self>, ConnectorDirectiveError> {
+        let mut joins = vec![];
+
+        for join_directive in list
+            .iter()
+            .filter(|d| d.name == JOIN_DIRECTIVE_DIRECTIVE_NAME)
+        {
+            let directive_name = join_directive
+                .argument_by_name("name")
+                .and_then(|name| name.as_str())
+                .map(|name| name.to_string())
                 .ok_or_else(|| {
                     ConnectorDirectiveError::InvalidJoinDirective(
-                        "Expected directives to be a list".to_string(),
+                        "Expected name to be a string".to_string(),
                     )
-                })??
-        } else {
-            return Ok(None);
-        };
+                })?;
 
-        let graph = directive
-            .argument_by_name("graph")
-            .as_ref()
-            .and_then(|graph| graph.as_enum())
-            .ok_or_else(|| {
-                ConnectorDirectiveError::InvalidJoinDirective("graph: must be an enum".to_string())
-            })?
-            .to_string();
+            let directive_args =
+                join_directive
+                    .argument_by_name("args")
+                    .map_or_else(HashMap::new, |args| {
+                        args.as_object()
+                            .map(|args| {
+                                args.iter()
+                                    .map(|(name, value)| (name.clone(), value.clone()))
+                                    .collect::<HashMap<_, _>>()
+                            })
+                            .unwrap_or_default()
+                    });
 
-        let is_interface_object = directive
-            .argument_by_name("isInterfaceObject")
-            .and_then(|a| a.to_bool());
+            if let Some(graphs_node) = join_directive.argument_by_name("graphs") {
+                if let Some(graphs_list) = graphs_node.as_list() {
+                    // Convert the graphs enum list to a list of String.
+                    let graphs = graphs_list
+                        .iter()
+                        .map(|graph| {
+                            Ok(graph
+                                .as_enum()
+                                .ok_or_else(|| {
+                                    ConnectorDirectiveError::InvalidJoinDirective(
+                                        "Expected graphs to be an enum".to_string(),
+                                    )
+                                })?
+                                .to_string())
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(Some(Self {
-            graph,
-            directives,
-            is_interface_object,
-        }))
+                    let directive = DirectiveAsObject {
+                        name: directive_name,
+                        args: directive_args,
+                    };
+
+                    joins.push(Self { graphs, directive });
+                }
+            }
+        }
+
+        Ok(joins)
     }
 }
 
@@ -190,33 +223,29 @@ impl SourceAPI {
 
         let mut result = HashMap::new();
 
-        let directives = schema
-            .schema_definition
-            .directives
-            .iter()
-            .filter(|d| d.name == JOIN_SCHEMA_DIRECTIVE_NAME)
-            .filter_map(|join_schema| {
-                JoinWithDirectives::from_directive(&join_schema.node).transpose()
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let joins =
+            JoinedDirective::from_schema_directive_list(&schema.schema_definition.directives)?;
 
-        let source_apis = directives
-            .into_iter()
-            .flat_map(|obj| {
-                obj.directives
-                    .into_iter()
-                    .filter(|d| d.name == SOURCE_API_DIRECTIVE_NAME)
-                    .map(move |d| (obj.graph.clone(), d.args))
-            })
-            .collect::<Vec<_>>();
+        let mut source_apis = vec![];
+        for joined in joins.iter() {
+            if joined.directive.name == SOURCE_API_DIRECTIVE_NAME {
+                source_apis.extend(
+                    joined
+                        .graphs
+                        .iter()
+                        .map(|graph| (graph, &joined.directive.args))
+                        .collect::<Vec<_>>(),
+                );
+            }
+        }
 
         for (graph, args) in source_apis {
-            let graph_name = graph_names.get(&graph).ok_or_else(|| {
+            let graph_name = graph_names.get(graph).ok_or_else(|| {
                 ConnectorDirectiveError::InvalidJoinDirective(
                     format!("Missing graph {} in join__Graph enum", graph).to_string(),
                 )
             })?;
-            let source_api = Self::from_schema_directive(graph_name.clone(), args)?;
+            let source_api = Self::from_schema_directive(graph_name, args)?;
             let name = format!("{}_{}", source_api.graph, source_api.name);
             result.insert(name, source_api);
         }
@@ -225,8 +254,8 @@ impl SourceAPI {
     }
 
     pub(super) fn from_schema_directive(
-        graph: String,
-        args: HashMap<Name, Node<apollo_compiler::ast::Value>>,
+        graph: &str,
+        args: &HashMap<Name, Node<apollo_compiler::ast::Value>>,
     ) -> Result<Self, ConnectorDirectiveError> {
         let name = args
             .get(&name!("name"))
@@ -250,7 +279,11 @@ impl SourceAPI {
             .map(HTTPSourceAPI::from_directive)
             .transpose()?;
 
-        Ok(Self { graph, name, http })
+        Ok(Self {
+            graph: graph.to_owned(),
+            name,
+            http,
+        })
     }
 }
 
@@ -398,38 +431,43 @@ impl SourceType {
 
         let mut result: Vec<Self> = Vec::new();
 
-        for (name, ty) in &schema.types {
-            let directives = ty
-                .directives()
+        for (type_name, ty) in &schema.types {
+            let is_interface_object_map = Self::get_is_interface_object_map(ty);
+            let joins = JoinedDirective::from_schema_directive_list(ty.directives())?;
+            let source_types = joins
                 .iter()
-                .filter(|d| d.name == JOIN_TYPE_DIRECTIVE_NAME)
-                .filter_map(|join_type| {
-                    JoinWithDirectives::from_directive(&join_type.node).transpose()
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-
-            let source_types = directives
-                .iter()
-                .flat_map(|obj| {
-                    obj.directives
-                        .iter()
-                        .filter(|d| d.name == SOURCE_TYPE_DIRECTIVE_NAME)
-                        .map(move |d| (obj, d.args.clone()))
+                .flat_map(|joined| {
+                    if joined.directive.name == SOURCE_TYPE_DIRECTIVE_NAME {
+                        joined
+                            .graphs
+                            .iter()
+                            .map(|graph| (graph, &joined.directive.args))
+                            .collect::<Vec<_>>()
+                    } else {
+                        vec![]
+                    }
                 })
                 .collect::<Vec<_>>();
 
             if !source_types.is_empty() {
                 result.extend(
                     source_types
-                        .iter()
-                        .map(|(join, args)| {
-                            let graph_name = graph_names.get(&join.graph).ok_or_else(|| {
+                        .into_iter()
+                        .map(|(graph, args)| {
+                            let graph_name = graph_names.get(graph).ok_or_else(|| {
                                 ConnectorDirectiveError::InvalidJoinDirective(
-                                    format!("Missing graph {} in join__Graph enum", join.graph)
+                                    format!("Missing graph {} in join__Graph enum", graph)
                                         .to_string(),
                                 )
                             })?;
-                            Self::from_directive(graph_name.clone(), name.clone(), args, join)
+                            let is_interface_object =
+                                is_interface_object_map.get(graph).copied().unwrap_or(false);
+                            Self::from_directive(
+                                graph_name.clone(),
+                                type_name.clone(),
+                                args,
+                                is_interface_object,
+                            )
                         })
                         .collect::<Result<Vec<_>, _>>()?,
                 );
@@ -439,11 +477,29 @@ impl SourceType {
         Ok(result)
     }
 
+    fn get_is_interface_object_map(from_type: &ExtendedType) -> HashMap<String, bool> {
+        let mut is_iface_obj_by_graph_name = HashMap::new();
+        from_type
+            .directives()
+            .iter()
+            .filter(|d| d.name == JOIN_TYPE_DIRECTIVE_NAME)
+            .for_each(|d| {
+                if let Some(graph_name) = d.argument_by_name("graph").and_then(|g| g.as_enum()) {
+                    let is_interface_object = d
+                        .argument_by_name("isInterfaceObject")
+                        .and_then(|is_interface| is_interface.to_bool())
+                        .unwrap_or(false);
+                    is_iface_obj_by_graph_name.insert(graph_name.to_string(), is_interface_object);
+                }
+            });
+        is_iface_obj_by_graph_name
+    }
+
     fn from_directive(
         graph: String,
         type_name: Name,
         directive: &HashMap<Name, Node<apollo_compiler::ast::Value>>,
-        join_directive: &JoinWithDirectives,
+        is_interface_object: bool,
     ) -> Result<Self, ConnectorDirectiveError> {
         let api = directive
             .get(&name!("api"))
@@ -496,8 +552,6 @@ impl SourceType {
             .get(&name!("keyTypeMap"))
             .map(KeyTypeMap::from_argument)
             .transpose()?;
-
-        let is_interface_object = join_directive.is_interface_object.unwrap_or_default();
 
         Ok(Self {
             graph,
@@ -579,39 +633,29 @@ impl SourceField {
 
         let parent_type_name = parent_type.name().clone();
 
-        let join_types = parent_type
-            .directives()
-            .iter()
-            .filter(|d| d.name == JOIN_TYPE_DIRECTIVE_NAME)
-            .filter_map(|d| JoinWithDirectives::from_directive(d).transpose())
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let join_types_by_graph = join_types
-            .iter()
-            .map(|join_type| (join_type.graph.clone(), join_type))
-            .collect::<HashMap<_, _>>();
+        let is_interface_object_map = SourceType::get_is_interface_object_map(parent_type);
 
         for (field_name, field_def) in fields {
-            let directives = field_def
-                .directives
-                .iter()
-                .filter(|d| d.name == JOIN_FIELD_DIRECTIVE_NAME)
-                .filter_map(|d| JoinWithDirectives::from_directive(d).transpose())
-                .collect::<Result<Vec<_>, _>>()?;
+            let joins = JoinedDirective::from_directive_list(&field_def.directives)?;
 
-            let source_fields = directives
-                .into_iter()
-                .flat_map(|obj| {
-                    obj.directives
-                        .into_iter()
-                        .filter(|d| d.name == SOURCE_FIELD_DIRECTIVE_NAME)
-                        .map(move |d| (obj.graph.clone(), d.args))
+            let source_fields = joins
+                .iter()
+                .flat_map(|joined| {
+                    if joined.directive.name == SOURCE_FIELD_DIRECTIVE_NAME {
+                        joined
+                            .graphs
+                            .iter()
+                            .map(|graph| (graph, &joined.directive.args))
+                            .collect::<Vec<_>>()
+                    } else {
+                        vec![]
+                    }
                 })
                 .collect::<Vec<_>>();
 
             result.extend(
                 source_fields
-                    .iter()
+                    .into_iter()
                     .map(|(graph, args)| {
                         let graph_name = graph_names.get(graph).ok_or_else(|| {
                             ConnectorDirectiveError::InvalidJoinDirective(
@@ -619,13 +663,16 @@ impl SourceField {
                             )
                         })?;
 
+                        let on_interface_object =
+                            is_interface_object_map.get(graph).copied().unwrap_or(false);
+
                         Self::from_directive(
                             graph_name.clone(),
                             parent_type_name.clone(),
                             field_name.clone(),
                             field_def.ty.inner_named_type().clone(),
                             args,
-                            join_types_by_graph.get(graph),
+                            on_interface_object,
                         )
                     })
                     .collect::<Result<Vec<_>, _>>()?,
@@ -641,7 +688,7 @@ impl SourceField {
         field_name: Name,
         output_type_name: Name,
         directive: &HashMap<Name, Node<apollo_compiler::ast::Value>>,
-        parent_join: Option<&&JoinWithDirectives>,
+        on_interface_object: bool,
     ) -> Result<Self, ConnectorDirectiveError> {
         let api = directive
             .get(&name!("api"))
@@ -689,10 +736,6 @@ impl SourceField {
             .get(&name!("http"))
             .map(HTTPSource::from_argument)
             .transpose()?;
-
-        let on_interface_object = parent_join
-            .and_then(|join| join.is_interface_object)
-            .unwrap_or_default();
 
         Ok(Self {
             graph,
@@ -814,43 +857,41 @@ mod tests {
             }
 
             schema
-              @join__schema(
-                graph: CONTACTS
-                directives: [
-                  {
-                    name: "sourceAPI"
-                    args: {
-                      name: "rest_contacts"
-                      http: {
-                          baseURL: "http://localhost:4002/contacts/"
-                          default: true
-                          headers: [
-                              { name: "x-test", value: "test1234" }
-                              { name: "x-before-rename-test", as: "x-after-rename-test" }
-                              {
-                                  name: "x-before-rename-and-with-value-test",
-                                  as: "x-after-rename-and-with-value-test",
-                                  value: "test5678"
-                              }
-                          ]
+              @join__directive(
+                graphs: [CONTACTS]
+                name: "sourceAPI"
+                args: {
+                  name: "rest_contacts"
+                  http: {
+                    baseURL: "http://localhost:4002/contacts/"
+                    default: true
+                    headers: [
+                      { name: "x-test", value: "test1234" }
+                      { name: "x-before-rename-test", as: "x-after-rename-test" }
+                      {
+                        name: "x-before-rename-and-with-value-test",
+                        as: "x-after-rename-and-with-value-test",
+                        value: "test5678"
                       }
-                    }
+                    ]
                   }
-                  {
-                    name: "sourceAPI"
-                    args: {
-                      name: "rest_notes"
-                      http: { baseURL: "http://localhost:4002/notes/" }
-                    }
-                  }
-                  {
-                    name: "sourceAPI"
-                    args: {
-                      name: "legacy_contacts"
-                      http: { baseURL: "http://localhost:4002/legacy/contacts/" }
-                    }
-                  }
-                ]
+                }
+              )
+              @join__directive(
+                graphs: [CONTACTS]
+                name: "sourceAPI"
+                args: {
+                  name: "rest_notes"
+                  http: { baseURL: "http://localhost:4002/notes/" }
+                }
+              )
+              @join__directive(
+                graphs: [CONTACTS]
+                name: "sourceAPI"
+                args: {
+                  name: "legacy_contacts"
+                  http: { baseURL: "http://localhost:4002/legacy/contacts/" }
+                }
               )
             {
                 query: Query
@@ -873,18 +914,14 @@ mod tests {
             }
 
             schema
-              @join__schema(
-                graph: CONTACTS
-                directives: [
-                  {
-                    name: "sourceAPI"
-                    args: {
-                      http: {
-                        baseURL: "http://localhost:4002/contacts/"
-                      }
-                    }
+              @join__directive(
+                graphs: [CONTACTS]
+                name: "sourceAPI"
+                args: {
+                  http: {
+                    baseURL: "http://localhost:4002/contacts/"
                   }
-                ]
+                }
               )
             { query: Query }
             "#;
@@ -905,19 +942,15 @@ mod tests {
             }
 
             schema
-              @join__schema(
-                graph: CONTACTS
-                directives: [
-                  {
-                    name: "sourceAPI"
-                    args: {
-                      name: "missing_base_url"
-                      http: {
-                          default: true
-                      }
-                    }
+              @join__directive(
+                graphs: [CONTACTS]
+                name: "sourceAPI"
+                args: {
+                  name: "missing_base_url"
+                  http: {
+                      default: true
                   }
-                ]
+                }
               )
             { query: Query }
             "#;
@@ -938,20 +971,16 @@ mod tests {
             }
 
             schema
-              @join__schema(
-                graph: CONTACTS
-                directives: [
-                  {
-                    name: "sourceAPI"
-                    args: {
-                      name: "missing_header_name"
-                      http: {
-                          baseURL: "http://localhost:4002/contacts/"
-                          headers: [{ as: "missing mandatory name field" }]
-                      }
-                    }
+              @join__directive(
+                graphs: [CONTACTS]
+                name: "sourceAPI"
+                args: {
+                  name: "missing_header_name"
+                  http: {
+                      baseURL: "http://localhost:4002/contacts/"
+                      headers: [{ as: "missing mandatory name field" }]
                   }
-                ]
+                }
               )
             { query: Query }
             "#;
@@ -975,15 +1004,11 @@ mod tests {
         }
 
         type ValidSourceType
-          @join__type(
-            graph: CONTACTS
-            key: "contactId"
-            directives: [
-              {
-                name: "sourceType"
-                args: { api: "contacts", http: { GET: "/contacts/{contactId}" }, selection: "a" }
-              }
-            ]
+          @join__type(graph: CONTACTS, key: "contactId")
+          @join__directive(
+            graphs: [CONTACTS]
+            name: "sourceType"
+            args: { api: "contacts", http: { GET: "/contacts/{contactId}" }, selection: "a" }
           )
         {
             id: ID!
@@ -991,15 +1016,11 @@ mod tests {
         }
 
         type ValidSourceTypeDefaultHttp
-          @join__type(
-            graph: CONTACTS
-            key: "contactId"
-            directives: [
-              {
-                name: "sourceType"
-                args: { api: "contacts", http: { GET: "/contacts/{contactId}" }, selection: "a" }
-              }
-            ]
+          @join__type(graph: CONTACTS, key: "contactId")
+          @join__directive(
+            graphs: [CONTACTS]
+            name: "sourceType"
+            args: { api: "contacts", http: { GET: "/contacts/{contactId}" }, selection: "a" }
           )
         {
             id: ID!
@@ -1024,18 +1045,14 @@ mod tests {
 
         type Query {
           field: String
-            @join__field(
-              graph: CONTACTS
-              directives: [
-                {
-                  name: "sourceField"
-                  args: {
-                    api: "contacts"
-                    http: { GET: "/contacts/{contactId}" }
-                    selection: "id name"
-                  }
-                }
-              ]
+            @join__directive(
+              graphs: [CONTACTS]
+              name: "sourceField"
+              args: {
+                api: "contacts"
+                http: { GET: "/contacts/{contactId}" }
+                selection: "id name"
+              }
             )
         }
         "#;
@@ -1092,18 +1109,14 @@ mod tests {
 
         type Query {
           field: String
-            @join__field(
-              graph: CONTACTS
-              directives: [
-                {
-                  name: "sourceField"
-                  args: {
-                    api: "contacts"
-                    http: { body: "id name" }
-                    selection: "id name"
-                  }
-                }
-              ]
+            @join__directive(
+              graphs: [CONTACTS]
+              name: "sourceField"
+              args: {
+                api: "contacts"
+                http: { body: "id name" }
+                selection: "id name"
+              }
             )
         }
         "#;

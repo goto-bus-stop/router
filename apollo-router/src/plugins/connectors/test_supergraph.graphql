@@ -1,23 +1,33 @@
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
-  @join__schema(
-    graph: KITCHEN_SINK
-    directives: [
-      {
-        name: "sourceAPI"
-        args: { name: "a", http: { baseURL: "http://localhost:8080/v1/" } }
-      }
-    ]
+  @join__directive(
+    graphs: [KITCHEN_SINK]
+    name: "link"
+    args: {
+      url: "https://specs.apollo.dev/source/v0.1"
+      import: ["@sourceAPI", "@sourceType", "@sourceField"]
+    }
+  )
+  @join__directive(
+    graphs: [KITCHEN_SINK]
+    name: "sourceAPI"
+    args: { name: "a", http: { baseURL: "http://localhost:8080/v1" } }
   ) {
   query: Query
   mutation: Mutation
 }
 
-directive @join__enumValue(
-  graph: join__Graph!
-  directives: [link__Import!]
-) repeatable on ENUM_VALUE
+directive @join__directive(
+  graphs: [join__Graph!]
+  name: String!
+  args: join__DirectiveArguments
+) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+scalar join__DirectiveArguments
+  @specifiedBy(url: "http://just-to-avoid-valiadation-warnings")
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
 directive @join__field(
   graph: join__Graph
@@ -27,19 +37,16 @@ directive @join__field(
   external: Boolean
   override: String
   usedOverridden: Boolean
-  directives: [link__Import!]
 ) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
 directive @join__graph(
   name: String!
   url: String!
-  directives: [link__Import!]
 ) on ENUM_VALUE
 
 directive @join__implements(
   graph: join__Graph!
   interface: String!
-  directives: [link__Import!]
 ) repeatable on OBJECT | INTERFACE
 
 directive @join__type(
@@ -47,14 +54,12 @@ directive @join__type(
   key: join__FieldSet
   extension: Boolean! = false
   resolvable: Boolean! = true
-  isInterfaceObject: Boolean! = false
-  directives: [link__Import!]
+  isInterfaceObject: Boolean = false
 ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
 
 directive @join__unionMember(
   graph: join__Graph!
   member: String!
-  directives: [link__Import!]
 ) repeatable on UNION
 
 directive @link(
@@ -66,20 +71,17 @@ directive @link(
 
 type EntityAcrossBoth
   @join__type(graph: NORMAL, key: "a b")
-  @join__type(
-    graph: KITCHEN_SINK
-    key: "a b"
-    directives: [
-      {
-        name: "sourceType"
-        args: {
-          api: "a"
-          http: { GET: "/entity/{a}/{b}" }
-          selection: ".data { d }"
-        }
-      }
-    ]
-  ) {
+  @join__type(graph: KITCHEN_SINK, key: "a b")
+  @join__directive(
+    graphs: [KITCHEN_SINK]
+    name: "sourceType"
+    args: {
+      api: "a"
+      http: { GET: "/entity/{a}/{b}" }
+      selection: ".data { d }"
+    }
+  )
+{
   a: ID
     @join__field(graph: KITCHEN_SINK, external: true)
     @join__field(graph: NORMAL)
@@ -88,52 +90,40 @@ type EntityAcrossBoth
     @join__field(graph: NORMAL)
   d: String @join__field(graph: KITCHEN_SINK)
   e: String
-    @join__field(
-      graph: KITCHEN_SINK
-      directives: [
-        {
-          name: "sourceField"
-          args: {
-            api: "a"
-            http: { GET: "/entity/{a}/{b}/e" }
-            selection: ".data"
-          }
-        }
-      ]
+    @join__directive(
+      graphs: [KITCHEN_SINK]
+      name: "sourceField"
+      args: {
+        api: "a"
+        http: { GET: "/entity/{a}/{b}/e" }
+        selection: ".data"
+      }
     )
   c: String @join__field(graph: NORMAL)
 }
 
 type Hello
-  @join__type(
-    graph: KITCHEN_SINK
-    key: "id"
-    directives: [
-      {
-        name: "sourceType"
-        args: {
-          api: "a"
-          http: { GET: "/hello/{id}" }
-          selection: ".data { id field enum: .enum_value }"
-        }
-      }
-    ]
+  @join__type(graph: KITCHEN_SINK, key: "id")
+  @join__directive(
+    graphs: [KITCHEN_SINK]
+    name: "sourceType"
+    args: {
+      api: "a"
+      http: { GET: "/hello/{id}" }
+      selection: ".data { id field enum: .enum_value }"
+    }
   ) {
   id: ID!
   field: String
   world: World
-    @join__field(
-      graph: KITCHEN_SINK
-      directives: [
-        {
-          name: "sourceField"
-          args: {
-            api: "a"
-            http: { GET: "/hello/{id}/world" }
-            selection: ".data { field nested { field } }"
-          }
-        }
-      ]
+    @join__directive(
+      graphs: [KITCHEN_SINK]
+      name: "sourceField"
+      args: {
+        api: "a"
+        http: { GET: "/hello/{id}/world" }
+        selection: ".data { field nested { field } }"
+      }
     )
   enum: OutputEnum
 }
@@ -201,21 +191,22 @@ enum link__Purpose {
 
 type Mutation @join__type(graph: KITCHEN_SINK) {
   mutation(input: MutationInput): MutationOutput
-    @join__field(
-      graph: KITCHEN_SINK
-      directives: [
-        {
-          name: "sourceField"
-          args: {
-            api: "a"
-            http: {
-              POST: "/mutation"
-              body: "nums: .input.nums\nvalues: .input.values {\n  num\n}"
-            }
-            selection: ".data { success }"
+    @join__directive(
+      graphs: [KITCHEN_SINK]
+      name: "sourceField"
+      args: {
+        api: "a"
+        http: {
+          POST: "/mutation"
+          body: """
+          nums: .input.nums
+          values: .input.values {
+            num
           }
+          """
         }
-      ]
+        selection: ".data { success }"
+      }
     )
 }
 
@@ -263,44 +254,35 @@ enum OutputEnum @join__type(graph: KITCHEN_SINK) @join__type(graph: NORMAL) {
 
 type Query @join__type(graph: NORMAL) @join__type(graph: KITCHEN_SINK) {
   hello: Hello
-    @join__field(
-      graph: KITCHEN_SINK
-      directives: [
-        {
-          name: "sourceField"
-          args: { api: "a", http: { GET: "/hello" }, selection: ".data { id }" }
-        }
-      ]
+    @join__field(graph: NORMAL)
+    @join__directive(
+      graphs: [KITCHEN_SINK]
+      name: "sourceField"
+      args: { api: "a", http: { GET: "/hello" }, selection: ".data { id }" }
     )
   withArguments(value: String, done: Boolean, enum: InputEnum): String
-    @join__field(
-      graph: KITCHEN_SINK
-      directives: [
-        {
-          name: "sourceField"
-          args: {
-            api: "a"
-            http: {
-              GET: "/with-arguments?value={value}&done={done}&enum_value={enum}"
-            }
-            selection: ".data"
-          }
+    @join__field(graph: NORMAL)
+    @join__directive(
+      graphs: [KITCHEN_SINK]
+      name: "sourceField"
+      args: {
+        api: "a"
+        http: {
+          GET: "/with-arguments?value={value}&done={done}&enum_value={enum}"
         }
-      ]
+        selection: ".data"
+      }
     )
   interfaces: [TestingInterface]
-    @join__field(
-      graph: KITCHEN_SINK
-      directives: [
-        {
-          name: "sourceField"
-          args: {
-            api: "a"
-            http: { GET: "/interfaces" }
-            selection: ".data { id a b nested { id a b } }"
-          }
-        }
-      ]
+    @join__field(graph: KITCHEN_SINK)
+    @join__directive(
+      graphs: [KITCHEN_SINK]
+      name: "sourceField"
+      args: {
+        api: "a"
+        http: { GET: "/interfaces" }
+        selection: ".data { id a b nested { id a b } }"
+      }
     )
   fieldBackedByRealResolver: TypeWithResolver @join__field(graph: NORMAL)
   startJoin: EntityAcrossBoth @join__field(graph: NORMAL)
@@ -314,38 +296,29 @@ interface TestingInterface @join__type(graph: KITCHEN_SINK) {
 
 interface TestingInterfaceObject
   @join__type(graph: NORMAL, key: "id")
-  @join__type(
-    graph: KITCHEN_SINK
-    key: "id"
-    isInterfaceObject: true
-    directives: [
-      {
-        name: "sourceType"
-        args: {
-          api: "a"
-          http: { GET: "/interface-object/{id}" }
-          selection: ".data { c }"
-        }
-      }
-    ]
+  @join__type(graph: KITCHEN_SINK, key: "id", isInterfaceObject: true)
+  @join__directive(
+    graphs: [KITCHEN_SINK]
+    name: "sourceType"
+    args: {
+      api: "a"
+      http: { GET: "/interface-object/{id}" }
+      selection: ".data { c }"
+    }
   ) {
   id: ID!
     @join__field(graph: KITCHEN_SINK, external: true)
     @join__field(graph: NORMAL)
   c: String @join__field(graph: KITCHEN_SINK)
   d: String
-    @join__field(
-      graph: KITCHEN_SINK
-      directives: [
-        {
-          name: "sourceField"
-          args: {
-            api: "a"
-            http: { GET: "/interface-object/{id}/d" }
-            selection: ".data"
-          }
-        }
-      ]
+    @join__directive(
+      graphs: [KITCHEN_SINK]
+      name: "sourceField"
+      args: {
+        api: "a"
+        http: { GET: "/interface-object/{id}/d" }
+        selection: ".data"
+      }
     )
 }
 
@@ -357,8 +330,3 @@ type World @join__type(graph: KITCHEN_SINK) {
   field: String
   nested: Nested
 }
-
-directive @join__schema(
-  graph: join__Graph!
-  directives: [link__Import!]
-) repeatable on SCHEMA

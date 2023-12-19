@@ -3,11 +3,16 @@ source: apollo-router/src/plugins/connectors/subgraph_connector.rs
 expression: response
 ---
 {
-  "data": {
-    "serverNetworkInfo": {
-      "ip": "1.2.3.4",
-      "city": "Paris",
-      "country": "France"
+  "data": null,
+  "errors": [
+    {
+      "message": "HTTP fetch failed from 'network': error trying to connect: dns error: no record found for Query { name: Name(\"network-subgraph.\"), query_type: AAAA, query_class: IN }",
+      "path": [],
+      "extensions": {
+        "code": "SUBREQUEST_HTTP_ERROR",
+        "service": "network",
+        "reason": "error trying to connect: dns error: no record found for Query { name: Name(\"network-subgraph.\"), query_type: AAAA, query_class: IN }"
+      }
     }
-  }
+  ]
 }

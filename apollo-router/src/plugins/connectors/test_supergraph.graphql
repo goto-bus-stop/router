@@ -231,6 +231,21 @@ interface NestedInterface @join__type(graph: KITCHEN_SINK) {
   id: ID!
 }
 
+union NestedUnion
+  @join__type(graph: KITCHEN_SINK)
+  @join__unionMember(graph: KITCHEN_SINK, member: "NestedUnionC")
+  @join__unionMember(graph: KITCHEN_SINK, member: "NestedUnionD") =
+    NestedUnionC
+  | NestedUnionD
+
+type NestedUnionC @join__type(graph: KITCHEN_SINK) {
+  x: String
+}
+
+type NestedUnionD @join__type(graph: KITCHEN_SINK) {
+  w: String
+}
+
 type NIa implements NestedInterface
   @join__implements(graph: KITCHEN_SINK, interface: "NestedInterface")
   @join__type(graph: KITCHEN_SINK) {
@@ -284,6 +299,20 @@ type Query @join__type(graph: NORMAL) @join__type(graph: KITCHEN_SINK) {
         selection: ".data { id a b nested { id a b } }"
       }
     )
+  unions: [TestingUnion]
+    @join__field(
+      graph: KITCHEN_SINK
+      directives: [
+        {
+          name: "sourceField"
+          args: {
+            api: "a"
+            http: { GET: "/unions" }
+            selection: ".data { z y nested { x w } }"
+          }
+        }
+      ]
+    )
   fieldBackedByRealResolver: TypeWithResolver @join__field(graph: NORMAL)
   startJoin: EntityAcrossBoth @join__field(graph: NORMAL)
   interfaceObject: [TestingInterfaceObject] @join__field(graph: NORMAL)
@@ -322,8 +351,24 @@ interface TestingInterfaceObject
     )
 }
 
+union TestingUnion
+  @join__type(graph: KITCHEN_SINK)
+  @join__unionMember(graph: KITCHEN_SINK, member: "UnionA")
+  @join__unionMember(graph: KITCHEN_SINK, member: "UnionB") =
+    UnionA
+  | UnionB
+
 type TypeWithResolver @join__type(graph: NORMAL, key: "id") {
   id: ID!
+}
+
+type UnionA @join__type(graph: KITCHEN_SINK) {
+  z: String
+  nested: NestedUnion
+}
+
+type UnionB @join__type(graph: KITCHEN_SINK) {
+  y: String
 }
 
 type World @join__type(graph: KITCHEN_SINK) {

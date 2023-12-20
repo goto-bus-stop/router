@@ -206,7 +206,13 @@ impl Connector {
         subgraph_request: SubgraphRequest,
         schema: Arc<Valid<Schema>>,
     ) -> Result<Vec<(http::Request<hyper::Body>, ResponseParams)>, BoxError> {
-        make_requests(subgraph_request, self, schema.clone())
+        make_requests(subgraph_request, self, schema.clone()).map_err(|e| {
+            format!(
+                "Failed to create requests for connector `{}`: {}",
+                self.name, e
+            )
+            .into()
+        })
     }
 
     pub(super) async fn map_http_responses(
@@ -214,7 +220,15 @@ impl Connector {
         responses: Vec<http::Response<hyper::Body>>,
         context: Context,
     ) -> Result<SubgraphResponse, BoxError> {
-        handle_responses(context, self, responses).await
+        handle_responses(context, self, responses)
+            .await
+            .map_err(|e| {
+                format!(
+                    "Failed to map responses for connector `{}`: {}",
+                    self.name, e
+                )
+                .into()
+            })
     }
 }
 

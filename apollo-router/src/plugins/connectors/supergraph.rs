@@ -758,57 +758,54 @@ fn recurse_selection(
                 match selection {
                     Selection::Field(selection) => {
                         for member_type in member_types.iter() {
-                            match member_type {
-                                ExtendedType::Object(obj) => {
-                                    if let Some(field) = obj.fields.get(&selection.name) {
-                                        mutations.push(Change::UnionMember {
-                                            union_name: un.name.clone(),
-                                            member_name: obj.name.clone(),
-                                            graph: graph.clone(),
-                                        });
+                            if let ExtendedType::Object(obj) = member_type {
+                                if let Some(field) = obj.fields.get(&selection.name) {
+                                    mutations.push(Change::UnionMember {
+                                        union_name: un.name.clone(),
+                                        member_name: obj.name.clone(),
+                                        graph: graph.clone(),
+                                    });
 
-                                        mutations.push(Change::Type {
-                                            name: member_type.name().clone(),
-                                            graph: graph.clone(),
-                                            key: None,
-                                            is_interface_object: false,
-                                            implements: None,
-                                        });
+                                    mutations.push(Change::Type {
+                                        name: member_type.name().clone(),
+                                        graph: graph.clone(),
+                                        key: None,
+                                        is_interface_object: false,
+                                        implements: None,
+                                    });
 
-                                        let field_type_name = field.ty.inner_named_type();
+                                    let field_type_name = field.ty.inner_named_type();
 
-                                        mutations.push(Change::Field {
-                                            type_name: member_type.name().clone(),
-                                            field_name: selection.name.clone(),
-                                            graph: graph.clone(),
-                                        });
+                                    mutations.push(Change::Field {
+                                        type_name: member_type.name().clone(),
+                                        field_name: selection.name.clone(),
+                                        graph: graph.clone(),
+                                    });
 
-                                        let field_type = schema
-                                            .types
-                                            .get(field_type_name)
-                                            .ok_or(MissingType(field_type_name.to_string()))?;
+                                    let field_type = schema
+                                        .types
+                                        .get(field_type_name)
+                                        .ok_or(MissingType(field_type_name.to_string()))?;
 
-                                        if field_type.is_enum() {
-                                            mutations.extend(enum_values_for_graph(
-                                                field_type,
-                                                origin_graph,
-                                                &graph,
-                                            ));
-                                        }
+                                    if field_type.is_enum() {
+                                        mutations.extend(enum_values_for_graph(
+                                            field_type,
+                                            origin_graph,
+                                            &graph,
+                                        ));
+                                    }
 
-                                        if !selection.selection_set.is_empty() {
-                                            mutations.extend(recurse_selection(
-                                                origin_graph,
-                                                graph.clone(),
-                                                schema,
-                                                field_type_name,
-                                                field_type,
-                                                &selection.selection_set,
-                                            )?);
-                                        }
+                                    if !selection.selection_set.is_empty() {
+                                        mutations.extend(recurse_selection(
+                                            origin_graph,
+                                            graph.clone(),
+                                            schema,
+                                            field_type_name,
+                                            field_type,
+                                            &selection.selection_set,
+                                        )?);
                                     }
                                 }
-                                _ => {}
                             }
                         }
                     }

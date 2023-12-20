@@ -5,14 +5,10 @@ schema
     url: "https://specs.apollo.dev/source/v0.1"
     import: ["@sourceAPI", "@sourceType", "@sourceField"]
   )
-  @join__schema(
-    graph: NETWORK
-    directives: [
-      {
-        name: "sourceAPI"
-        args: { name: "ipinfo", http: { baseURL: "https://ipinfo.io/" } }
-      }
-    ]
+  @join__directive(
+    graphs: [NETWORK]
+    name: "sourceAPI"
+    args: { name: "ipinfo", http: { baseURL: "https://ipinfo.io/" } }
   ) {
   query: Query
   mutation: Mutation
@@ -111,6 +107,7 @@ type Query
   @join__type(graph: NETWORK) {
   me: User @join__field(graph: ACCOUNTS)
   serverNetworkInfo: IP
+    @join__field(graph: NETWORK)
     @join__directive(
       graphs: [NETWORK]
       name: "sourceField"
@@ -165,6 +162,7 @@ type User
     @join__field(graph: REVIEWS, external: true)
   reviews: [Review] @join__field(graph: REVIEWS)
   ip: IP
+    @join__field(graph: NETWORK)
     @join__directive(
       graphs: [NETWORK]
       name: "sourceField"

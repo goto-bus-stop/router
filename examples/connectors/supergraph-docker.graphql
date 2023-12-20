@@ -5,19 +5,16 @@ schema
     url: "https://specs.apollo.dev/source/v0.1"
     import: ["@sourceAPI", "@sourceType", "@sourceField"]
   )
+  @join__directive(
+    graphs: [NETWORK]
+    name: "sourceAPI"
+    args: { name: "ipinfo", http: { baseURL: "http://localhost:4002" } }
+  )
   # https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={API key}
-  @join__schema(
-    graph: NETWORK
-    directives: [
-      {
-        name: "sourceAPI"
-        args: { name: "ipinfo", http: { baseURL: "http://localhost:4002" } }
-      }
-      {
-        name: "sourceAPI"
-        args: { name: "weather", http: { baseURL: "http://localhost:4003" } }
-      }
-    ]
+  @join__directive(
+    graphs: [NETWORK]
+    name: "sourceAPI"
+    args: { name: "weather", http: { baseURL: "http://localhost:4003" } }
   ) {
   query: Query
   mutation: Mutation
@@ -116,6 +113,7 @@ type Query
   @join__type(graph: NETWORK) {
   me: User @join__field(graph: ACCOUNTS)
   serverNetworkInfo: IP
+    @join__field(graph: NETWORK)
     @join__directive(
       graphs: [NETWORK]
       name: "sourceField"
@@ -170,6 +168,7 @@ type User
     @join__field(graph: REVIEWS, external: true)
   reviews: [Review] @join__field(graph: REVIEWS)
   ip: IP
+    @join__field(graph: NETWORK)
     @join__directive(
       graphs: [NETWORK]
       name: "sourceField"
@@ -180,6 +179,7 @@ type User
       }
     )
   weather: Weather
+    @join__field(graph: NETWORK)
     @join__directive(
       graphs: [NETWORK]
       name: "sourceField"

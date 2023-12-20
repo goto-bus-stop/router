@@ -500,7 +500,8 @@ pub(super) async fn handle_responses(
                 crate::graphql::Error::builder()
                     .message(format!("http error: {}", parts.status))
                     // todo path: ["_entities", i, "???"]
-                    .extension_code(format!("{}", parts.status))
+                    .extension_code(format!("{}", parts.status.as_u16()))
+                    .extension("connector", connector.to_string())
                     .build(),
             );
         }

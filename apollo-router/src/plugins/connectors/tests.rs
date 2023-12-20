@@ -1,0 +1,661 @@
+use std::sync::Arc;
+
+use futures::StreamExt;
+use http::header::CONTENT_TYPE;
+use itertools::EitherOrBoth;
+use itertools::Itertools;
+use mime::APPLICATION_JSON;
+use req_asserts::Matcher;
+use tower::ServiceExt;
+use wiremock::matchers::body_json;
+use wiremock::matchers::method;
+use wiremock::matchers::path;
+use wiremock::Mock;
+use wiremock::MockServer;
+use wiremock::ResponseTemplate;
+
+use crate::router_factory::RouterSuperServiceFactory;
+use crate::router_factory::YamlRouterFactory;
+use crate::services::new_service::ServiceFactory;
+use crate::services::supergraph;
+
+mod mock_api {
+    struct PathTemplate(String);
+
+    impl wiremock::Match for PathTemplate {
+        fn matches(&self, request: &wiremock::Request) -> bool {
+            let path = request.url.path();
+            let path = path.split('/');
+            let template = self.0.split('/');
+
+            for pair in path.zip_longest(template) {
+                match pair {
+                    EitherOrBoth::Both(p, t) => {
+                        if t.starts_with('{') && t.ends_with('}') {
+                            continue;
+                        }
+
+                        if p != t {
+                            return false;
+                        }
+                    }
+                    _ => return false,
+                }
+            }
+            true
+        }
+    }
+
+    fn path_template(template: &str) -> PathTemplate {
+        PathTemplate(template.to_string())
+    }
+
+    use super::*;
+
+    pub(super) fn hello() -> Mock {
+        Mock::given(method("GET"))
+            .and(path("/v1/hello"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+              "data": {
+                "id": 42,
+              }
+            })))
+    }
+
+    pub(super) fn hello_id() -> Mock {
+        Mock::given(method("GET"))
+            .and(path_template("/v1/hello/{id}"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+              "data": {
+                "id": 42,
+                "field": "hello",
+                "enum_value": "A"
+              }
+            })))
+    }
+
+    pub(super) fn hello_id_world() -> Mock {
+        Mock::given(method("GET"))
+            .and(path_template("/v1/hello/{id}/world"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+              "data": {
+                "field": "world",
+                "nested": {
+                  "field": "hi"
+                }
+              }
+            })))
+    }
+
+    pub(super) fn with_arguments() -> Mock {
+        Mock::given(method("GET"))
+            .and(path("/v1/with-arguments"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+              "data": "hello world"
+            })))
+    }
+
+    pub(super) fn mutation() -> Mock {
+        Mock::given(method("POST"))
+            .and(path("/v1/mutation"))
+            // don't assert body here because we can do that with matchers later
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+              "data": { "success": true }
+            })))
+    }
+
+    pub(super) fn entity() -> Mock {
+        Mock::given(method("GET"))
+            .and(path_template("/v1/entity/{a}/{b}"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+              "data": {
+                "d": "d"
+              }
+            })))
+    }
+
+    pub(super) fn entity_e() -> Mock {
+        Mock::given(method("GET"))
+            .and(path_template("/v1/entity/{a}/{b}/e"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+              "data": "e"
+            })))
+    }
+
+    pub(super) fn interface_object_id() -> Mock {
+        Mock::given(method("GET"))
+            .and(path_template("/v1/interface-object/{id}"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+              "data": {
+                "c": "c: 1"
+              }
+            })))
+    }
+
+    pub(super) fn interface_object_id_d() -> Mock {
+        Mock::given(method("GET"))
+            .and(path_template("/v1/interface-object/{id}/d"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+              "data": "d: 1"
+            })))
+    }
+
+    pub(super) fn interfaces() -> Mock {
+        Mock::given(method("GET"))
+            .and(path("/v1/interfaces"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+              "data": [
+                {
+                  "id": "i1",
+                  "a": "a1",
+                  "nested": {
+                    "id": "ni1",
+                    "a": "na1"
+                  }
+                },
+                {
+                  "id": "i2",
+                  "b": "b2",
+                  "nested": {
+                    "id": "ni2",
+                    "b": "nb2"
+                  }
+                }
+              ]
+            })))
+    }
+
+    pub(super) fn unions() -> Mock {
+        Mock::given(method("GET"))
+            .and(path("/v1/unions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+              "data": [
+                {
+                  "z": "a1",
+                  "nested": {
+                    "x": "na1"
+                  }
+                },
+                {
+                  "y": "b2"
+                }
+              ]
+            })))
+    }
+
+    pub(super) async fn mount_all(server: &MockServer) {
+        futures::stream::iter(vec![
+            hello(),
+            hello_id(),
+            hello_id_world(),
+            with_arguments(),
+            mutation(),
+            entity(),
+            entity_e(),
+            interface_object_id(),
+            interface_object_id_d(),
+            interfaces(),
+            unions(),
+        ])
+        .then(|mock| async { mock.mount(server).await })
+        .collect::<Vec<_>>()
+        .await;
+    }
+}
+
+mod mock_subgraph {
+    use super::*;
+
+    pub(super) fn start_join() -> Mock {
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_json(serde_json::json!({
+              "query": "{startJoin{__typename a b c}}"
+            })))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .set_body_json(serde_json::json!({
+                      "data": {
+                        "startJoin": {
+                          "__typename": "EntityAcrossBoth",
+                          "a": "a",
+                          "b": "b",
+                          "c": "c",
+                        }
+                      }
+                    })),
+            )
+    }
+}
+
+#[tokio::test]
+
+async fn test_root_field_plus_entity() {
+    let mock_server = MockServer::start().await;
+    mock_api::mount_all(&mock_server).await;
+
+    // @sourceField on Query.hello
+    // @sourceType on Hello
+    let response = execute(&mock_server.uri(), "query { hello { id field enum } }").await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new().method("GET").path("/v1/hello").build(),
+            Matcher::new().method("GET").path("/v1/hello/42").build(),
+        ],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "hello": {
+          "id": 42,
+          "field": "hello",
+          "enum": "A"
+        }
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+
+async fn test_root_field_plus_entity_field() {
+    let mock_server = MockServer::start().await;
+    mock_api::mount_all(&mock_server).await;
+
+    // @sourceField on Query.hello
+    // @sourceField on Hello.world
+    let response = execute(
+        &mock_server.uri(),
+        "query { hello { __typename id world { __typename field nested { __typename field }} } }",
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new().method("GET").path("/v1/hello").build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/hello/42/world")
+                .build(),
+        ],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "hello": {
+          "__typename": "Hello",
+          "id": 42,
+          "world": {
+            "__typename": "World",
+            "field": "world",
+            "nested": {
+              "__typename": "Nested",
+              "field": "hi"
+            }
+          }
+        }
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn test_query_parameters() {
+    let mock_server = MockServer::start().await;
+    mock_api::mount_all(&mock_server).await;
+
+    // @sourceField on Query.withArguments
+    let response = execute(
+        &mock_server.uri(),
+        "query { withArguments(done: true, value: \"bye\", enum: Y) }",
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new()
+            .method("GET")
+            .path("/v1/with-arguments")
+            .query("value=bye&done=true&enum_value=Y")
+            .build()],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "withArguments": "hello world"
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn test_mutation_inputs() {
+    let mock_server = MockServer::start().await;
+    mock_api::mount_all(&mock_server).await;
+
+    // @sourceField on Mutation.mutation
+    let response = execute(
+        &mock_server.uri(),
+        "mutation { mutation(input: { nums: [1,2,3], values: [{ num: 42 }]}) { success } }",
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new()
+            .method("POST")
+            .path("/v1/mutation")
+            .body(serde_json::json!({
+              "nums": [1, 2, 3],
+              "values": [{
+                "num": 42
+              }]
+            }))
+            .build()],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "mutation": {
+          "success": true
+        }
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn test_entity_join() {
+    let mock_server = MockServer::start().await;
+    mock_api::mount_all(&mock_server).await;
+
+    mock_subgraph::start_join().mount(&mock_server).await;
+
+    // Query.startJoin from subgraph
+    // @sourceType on EntityAcrossBoth
+    // @sourceField on EntityAcrossBoth.e
+    let response = execute(&mock_server.uri(), "query { startJoin { a b c d e } }").await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new()
+                .method("POST")
+                .path("/graphql")
+                .body(serde_json::json!({
+                  "query": "{startJoin{__typename a b c}}"
+                }))
+                .build(),
+            Matcher::new().method("GET").path("/v1/entity/a/b").build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/entity/a/b/e")
+                .build(),
+        ],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "startJoin": {
+          "a": "a",
+          "b": "b",
+          "c": "c",
+          "d": "d",
+          "e": "e"
+        }
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn aliases_on_connector_fields() {
+    let mock_server = MockServer::start().await;
+    mock_api::mount_all(&mock_server).await;
+    mock_subgraph::start_join().mount(&mock_server).await;
+
+    // @sourceField on Query
+    let response = execute(
+        &mock_server.uri(),
+        r#"
+        query {
+          alias1: hello { id }
+          alias2: hello { id }
+          startJoin { a b c alias3: e alias4: e }
+        }
+        "#,
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new().method("GET").path("/v1/hello").build(),
+            Matcher::new().method("GET").path("/v1/hello").build(),
+            Matcher::new()
+                .method("POST")
+                .path("/graphql")
+                .body(serde_json::json!({
+                  "query": "{startJoin{__typename a b c}}"
+                }))
+                .build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/entity/a/b/e")
+                .build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/entity/a/b/e")
+                .build(),
+        ],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "alias1": {
+          "id": 42
+        },
+        "alias2": {
+          "id": 42
+        },
+        "startJoin": {
+          "a": "a",
+          "b": "b",
+          "c": "c",
+          "alias3": "e",
+          "alias4": "e"
+        }
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn basic_errors() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/hello"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+          "error": "not found"
+        })))
+        .mount(&mock_server)
+        .await;
+
+    // @sourceField on Query
+    let response = execute(&mock_server.uri(), "{ hello { id } }").await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new().method("GET").path("/v1/hello").build()],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "hello": null
+      },
+      "errors": [
+        {
+          "message": "http error: 404 Not Found",
+          "extensions": {
+            "connector": "a: GET /hello",
+            "code": "404"
+          }
+        }
+      ]
+    }
+    "###);
+}
+
+const SCHEMA: &str = include_str!("./test_supergraph.graphql");
+
+async fn execute(uri: &str, query: &str) -> serde_json::Value {
+    let schema = SCHEMA.replace("http://localhost:8080", uri);
+    let schema = schema.replace(
+        "http://localhost:8081/",
+        format!("{}/graphql", uri).as_str(),
+    );
+
+    // we cannot use Testharness because the subgraph connectors are actually extracted in YamlRouterFactory
+    let mut factory = YamlRouterFactory;
+
+    let router_creator = factory
+        .create(
+            Arc::new(
+                serde_json::from_value(serde_json::json!({
+                    "include_subgraph_errors": { "all": true }
+                }))
+                .unwrap(),
+            ),
+            schema,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    let service = router_creator.create();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .build()
+        .unwrap()
+        .try_into()
+        .unwrap();
+
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap()
+        .unwrap();
+
+    serde_json::from_slice(&response).unwrap()
+}
+
+mod req_asserts {
+    #[derive(Clone)]
+    pub(super) struct Matcher {
+        method: Option<String>,
+        path: Option<String>,
+        query: Option<String>,
+        body: Option<serde_json::Value>,
+        // TODO headers
+    }
+
+    impl Matcher {
+        pub(super) fn new() -> Self {
+            Self {
+                method: None,
+                path: None,
+                query: None,
+                body: None,
+            }
+        }
+
+        pub(super) fn method(&mut self, method: &str) -> &mut Self {
+            self.method = Some(method.to_string());
+            self
+        }
+
+        pub(super) fn path(&mut self, path: &str) -> &mut Self {
+            self.path = Some(path.to_string());
+            self
+        }
+
+        pub(super) fn query(&mut self, query: &str) -> &mut Self {
+            self.query = Some(query.to_string());
+            self
+        }
+
+        pub(super) fn body(&mut self, body: serde_json::Value) -> &mut Self {
+            self.body = Some(body);
+            self
+        }
+
+        pub(super) fn build(&mut self) -> Self {
+            self.clone()
+        }
+
+        fn matches(&self, request: &wiremock::Request, index: usize) {
+            if let Some(method) = self.method.as_ref() {
+                assert_eq!(
+                    method,
+                    &request.method.to_string(),
+                    "[Request {}]: Expected method {}, got {}",
+                    index,
+                    method,
+                    request.method
+                )
+            }
+
+            if let Some(path) = self.path.as_ref() {
+                assert_eq!(
+                    path,
+                    request.url.path(),
+                    "[Request {}]: Expected path {}, got {}",
+                    index,
+                    path,
+                    request.url.path()
+                )
+            }
+
+            if let Some(query) = self.query.as_ref() {
+                assert_eq!(
+                    query,
+                    request.url.query().unwrap_or_default(),
+                    "[Request {}]: Expected query {}, got {}",
+                    index,
+                    query,
+                    request.url.query().unwrap_or_default()
+                )
+            }
+
+            if let Some(body) = self.body.as_ref() {
+                assert_eq!(
+                    body,
+                    &request.body_json::<serde_json::Value>().unwrap(),
+                    "[Request {}]: incorrect body",
+                    index,
+                )
+            }
+        }
+    }
+
+    pub(super) fn matches(received: &[wiremock::Request], matchers: Vec<Matcher>) {
+        for (i, (request, matcher)) in received.iter().zip(matchers.iter()).enumerate() {
+            matcher.matches(request, i);
+        }
+    }
+}

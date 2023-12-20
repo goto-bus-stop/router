@@ -5,14 +5,10 @@ schema
     url: "https://specs.apollo.dev/source/v0.1"
     import: ["@sourceAPI", "@sourceType", "@sourceField"]
   )
-  @join__schema(
-    graph: NETWORK
-    directives: [
-      {
-        name: "sourceAPI"
-        args: { name: "ipinfo", http: { baseURL: "https://ipinfo.io/" } }
-      }
-    ]
+  @join__directive(
+    graphs: [NETWORK]
+    name: "sourceAPI"
+    args: { name: "ipinfo", http: { baseURL: "https://ipinfo.io/" } }
   ) {
   query: Query
   mutation: Mutation
@@ -22,6 +18,15 @@ directive @join__schema(
   graph: join__Graph
   directives: join__FieldSet
 ) repeatable on SCHEMA
+
+directive @join__directive(
+  graphs: [join__Graph!]
+  name: String!
+  args: join__DirectiveArguments
+) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+scalar join__DirectiveArguments
+  @specifiedBy(url: "http://just-to-avoid-valiadation-warnings")
 
 directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
 
@@ -102,18 +107,15 @@ type Query
   @join__type(graph: NETWORK) {
   me: User @join__field(graph: ACCOUNTS)
   serverNetworkInfo: IP
-    @join__field(
-      graph: NETWORK
-      directives: [
-        {
-          name: "sourceField"
-          args: {
-            api: "ipinfo"
-            http: { GET: "/json" }
-            selection: "ip hostname city region country loc org postal timezone readme"
-          }
-        }
-      ]
+    @join__field(graph: NETWORK)
+    @join__directive(
+      graphs: [NETWORK]
+      name: "sourceField"
+      args: {
+        api: "ipinfo"
+        http: { GET: "/json" }
+        selection: "ip hostname city region country loc org postal timezone readme"
+      }
     )
   topProducts(first: Int = 5): [Product] @join__field(graph: PRODUCTS)
 }
@@ -160,22 +162,22 @@ type User
     @join__field(graph: REVIEWS, external: true)
   reviews: [Review] @join__field(graph: REVIEWS)
   ip: IP
-    @join__field(
-      graph: NETWORK
-      directives: [
-        {
-          name: "sourceField"
-          args: {
-            api: "ipinfo"
-            http: { GET: "/json" }
-            selection: "ip hostname city region country loc org postal timezone readme"
-          }
-        }
-      ]
+    @join__field(graph: NETWORK)
+    @join__directive(
+      graphs: [NETWORK]
+      name: "sourceField"
+      args: {
+        api: "ipinfo"
+        http: { GET: "/json" }
+        selection: "ip hostname city region country loc org postal timezone readme"
+      }
     )
 }
 
 type IP
+  @join__type(graph: ACCOUNTS)
+  @join__type(graph: PRODUCTS)
+  @join__type(graph: REVIEWS)
   @join__type(
     graph: NETWORK
     key: "ip"

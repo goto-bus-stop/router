@@ -45,15 +45,16 @@ type EntityAcrossBoth @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0, key: "a b
   e: String @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_E_0)
 }
 
-scalar _Any @specifiedBy(url: "https://whatever") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) @join__type(graph: CONNECTOR_HELLO_1) @join__type(graph: CONNECTOR_HELLO_WORLD_1) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_6)
+scalar _Any @specifiedBy(url: "https://whatever") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) @join__type(graph: CONNECTOR_HELLO_1) @join__type(graph: CONNECTOR_HELLO_WORLD_1) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_7)
 
-type Query @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) @join__type(graph: CONNECTOR_HELLO_1) @join__type(graph: CONNECTOR_HELLO_WORLD_1) @join__type(graph: CONNECTOR_QUERY_HELLO_3) @join__type(graph: CONNECTOR_QUERY_INTERFACES_5) @join__type(graph: CONNECTOR_QUERY_WITHARGUMENTS_4) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_6) {
+type Query @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) @join__type(graph: CONNECTOR_HELLO_1) @join__type(graph: CONNECTOR_HELLO_WORLD_1) @join__type(graph: CONNECTOR_QUERY_HELLO_3) @join__type(graph: CONNECTOR_QUERY_INTERFACES_5) @join__type(graph: CONNECTOR_QUERY_UNIONS_6) @join__type(graph: CONNECTOR_QUERY_WITHARGUMENTS_4) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_7) {
   _EntityAcrossBoth_finder(representations: [_Any!]!): [EntityAcrossBoth!]! @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_E_0)
   _Hello_finder(representations: [_Any!]!): [Hello!]! @join__field(graph: CONNECTOR_HELLO_1) @join__field(graph: CONNECTOR_HELLO_WORLD_1)
   hello: Hello @join__field(graph: CONNECTOR_QUERY_HELLO_3)
   interfaces: [TestingInterface] @join__field(graph: CONNECTOR_QUERY_INTERFACES_5)
+  unions: [TestingUnion] @join__field(graph: CONNECTOR_QUERY_UNIONS_6)
   withArguments(value: String, done: Boolean, enum: InputEnum): String @join__field(graph: CONNECTOR_QUERY_WITHARGUMENTS_4)
-  _TestingInterfaceObject_finder(representations: [_Any!]!): [TestingInterfaceObject!]! @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_6)
+  _TestingInterfaceObject_finder(representations: [_Any!]!): [TestingInterfaceObject!]! @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_7)
 }
 
 type Hello @join__type(graph: CONNECTOR_HELLO_1, key: "id") @join__type(graph: CONNECTOR_HELLO_WORLD_1, key: "id") @join__type(graph: CONNECTOR_QUERY_HELLO_3) {
@@ -126,15 +127,36 @@ type NIb implements NestedInterface @join__implements(graph: CONNECTOR_QUERY_INT
   b: String @join__field(graph: CONNECTOR_QUERY_INTERFACES_5)
 }
 
+union TestingUnion @join__type(graph: CONNECTOR_QUERY_UNIONS_6) @join__unionMember(graph: CONNECTOR_QUERY_UNIONS_6, member: "UnionA") @join__unionMember(graph: CONNECTOR_QUERY_UNIONS_6, member: "UnionB") = UnionA | UnionB
+
+type UnionA @join__type(graph: CONNECTOR_QUERY_UNIONS_6) {
+  z: String @join__field(graph: CONNECTOR_QUERY_UNIONS_6)
+  nested: NestedUnion @join__field(graph: CONNECTOR_QUERY_UNIONS_6)
+}
+
+type UnionB @join__type(graph: CONNECTOR_QUERY_UNIONS_6) {
+  y: String @join__field(graph: CONNECTOR_QUERY_UNIONS_6)
+}
+
+union NestedUnion @join__type(graph: CONNECTOR_QUERY_UNIONS_6) @join__unionMember(graph: CONNECTOR_QUERY_UNIONS_6, member: "NestedUnionC") @join__unionMember(graph: CONNECTOR_QUERY_UNIONS_6, member: "NestedUnionD") = NestedUnionC | NestedUnionD
+
+type NestedUnionC @join__type(graph: CONNECTOR_QUERY_UNIONS_6) {
+  x: String @join__field(graph: CONNECTOR_QUERY_UNIONS_6)
+}
+
+type NestedUnionD @join__type(graph: CONNECTOR_QUERY_UNIONS_6) {
+  w: String @join__field(graph: CONNECTOR_QUERY_UNIONS_6)
+}
+
 enum InputEnum @join__type(graph: CONNECTOR_QUERY_WITHARGUMENTS_4) {
   Y @join__enumValue(graph: CONNECTOR_QUERY_WITHARGUMENTS_4)
   Z @join__enumValue(graph: CONNECTOR_QUERY_WITHARGUMENTS_4)
 }
 
-interface TestingInterfaceObject @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2, key: "id", isInterfaceObject: true) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_6, key: "id", isInterfaceObject: true) {
+interface TestingInterfaceObject @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2, key: "id", isInterfaceObject: true) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_7, key: "id", isInterfaceObject: true) {
   c: String @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2)
-  id: ID! @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_6)
-  d: String @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_6)
+  id: ID! @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_7)
+  d: String @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_7)
 }
 
 enum join__Graph {
@@ -145,8 +167,9 @@ enum join__Graph {
   CONNECTOR_MUTATION_MUTATION_2 @join__graph(name: "CONNECTOR_MUTATION_MUTATION_2", url: "http://unused")
   CONNECTOR_QUERY_HELLO_3 @join__graph(name: "CONNECTOR_QUERY_HELLO_3", url: "http://unused")
   CONNECTOR_QUERY_INTERFACES_5 @join__graph(name: "CONNECTOR_QUERY_INTERFACES_5", url: "http://unused")
+  CONNECTOR_QUERY_UNIONS_6 @join__graph(name: "CONNECTOR_QUERY_UNIONS_6", url: "http://unused")
   CONNECTOR_QUERY_WITHARGUMENTS_4 @join__graph(name: "CONNECTOR_QUERY_WITHARGUMENTS_4", url: "http://unused")
   CONNECTOR_TESTINGINTERFACEOBJECT_2 @join__graph(name: "CONNECTOR_TESTINGINTERFACEOBJECT_2", url: "http://unused")
-  CONNECTOR_TESTINGINTERFACEOBJECT_D_6 @join__graph(name: "CONNECTOR_TESTINGINTERFACEOBJECT_D_6", url: "http://unused")
+  CONNECTOR_TESTINGINTERFACEOBJECT_D_7 @join__graph(name: "CONNECTOR_TESTINGINTERFACEOBJECT_D_7", url: "http://unused")
 }
 

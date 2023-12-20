@@ -28,6 +28,15 @@ directive @join__schema(
   directives: join__FieldSet
 ) repeatable on SCHEMA
 
+directive @join__directive(
+  graphs: [join__Graph!]
+  name: String!
+  args: join__DirectiveArguments
+) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+scalar join__DirectiveArguments
+  @specifiedBy(url: "http://just-to-avoid-valiadation-warnings")
+
 directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
 
 enum link__Purpose {
@@ -107,18 +116,14 @@ type Query
   @join__type(graph: NETWORK) {
   me: User @join__field(graph: ACCOUNTS)
   serverNetworkInfo: IP
-    @join__field(
-      graph: NETWORK
-      directives: [
-        {
-          name: "sourceField"
-          args: {
-            api: "ipinfo"
-            http: { GET: "/json" }
-            selection: "ip hostname city region country loc org postal timezone readme"
-          }
-        }
-      ]
+    @join__directive(
+      graphs: [NETWORK]
+      name: "sourceField"
+      args: {
+        api: "ipinfo"
+        http: { GET: "/json" }
+        selection: "ip hostname city region country loc org postal timezone readme"
+      }
     )
   topProducts(first: Int = 5): [Product] @join__field(graph: PRODUCTS)
 }
@@ -165,48 +170,43 @@ type User
     @join__field(graph: REVIEWS, external: true)
   reviews: [Review] @join__field(graph: REVIEWS)
   ip: IP
-    @join__field(
-      graph: NETWORK
-      directives: [
-        {
-          name: "sourceField"
-          args: {
-            api: "ipinfo"
-            http: { GET: "/json" }
-            selection: "ip hostname city region country loc org postal timezone readme"
-          }
-        }
-      ]
+    @join__directive(
+      graphs: [NETWORK]
+      name: "sourceField"
+      args: {
+        api: "ipinfo"
+        http: { GET: "/json" }
+        selection: "ip hostname city region country loc org postal timezone readme"
+      }
     )
   weather: Weather
-    @join__field(
-      graph: NETWORK
-      directives: [
-        {
-          name: "sourceField"
-          args: {
-            api: "weather"
-            http: { GET: "/data/2.5/weather" }
-            selection: """
-            name: .weather.main
-            description: .weather.description
-            temp: .main.temp
-            feels_like: .main.feels_like
-            min: .main.temp_min
-            max: .main.temp_max
-            details: .weather {
-              id
-              description
-              name: main
-            }
-            """
-          }
+    @join__directive(
+      graphs: [NETWORK]
+      name: "sourceField"
+      args: {
+        api: "weather"
+        http: { GET: "/data/2.5/weather" }
+        selection: """
+        name: .weather.main
+        description: .weather.description
+        temp: .main.temp
+        feels_like: .main.feels_like
+        min: .main.temp_min
+        max: .main.temp_max
+        details: .weather {
+          id
+          description
+          name: main
         }
-      ]
+        """
+      }
     )
 }
 
-type Weather @join__type(graph: NETWORK, key: "id") {
+type Weather
+  @join__type(graph: NETWORK, key: "id")
+  @join__type(graph: ACCOUNTS)
+  @join__type(graph: REVIEWS) {
   id: ID
   temp: Float
   feels_like: Float
@@ -218,13 +218,19 @@ type Weather @join__type(graph: NETWORK, key: "id") {
   name: [String]
 }
 
-type WeatherDetails @join__type(graph: NETWORK, key: "id") {
+type WeatherDetails
+  @join__type(graph: NETWORK, key: "id")
+  @join__type(graph: ACCOUNTS)
+  @join__type(graph: REVIEWS) {
   id: ID
   description: String
   name: String
 }
 
 type IP
+  @join__type(graph: ACCOUNTS)
+  @join__type(graph: PRODUCTS)
+  @join__type(graph: REVIEWS)
   @join__type(
     graph: NETWORK
     key: "ip"

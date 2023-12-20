@@ -372,7 +372,6 @@ async fn subscription_task(
     let mut receiver = sub_params.stream_rx;
     let sender = sub_params.client_sender;
 
-    let graphql_document = &query_plan.query.string;
     // Get the rest of the query_plan to execute for subscription events
     let query_plan = match &query_plan.root {
         crate::query_planner::PlanNode::Subscription { rest, .. } => rest.clone().map(|r| {
@@ -464,7 +463,6 @@ async fn subscription_task(
                         val.created_at = Some(Instant::now());
                         let res = dispatch_event(&supergraph_req, &execution_service_factory, query_plan.as_ref(), context.clone(), val, sender.clone())
                             .instrument(tracing::info_span!(SUBSCRIPTION_EVENT_SPAN_NAME,
-                                graphql.document = graphql_document,
                                 graphql.operation.name = %operation_name,
                                 otel.kind = "INTERNAL",
                                 apollo_private.operation_signature = %operation_signature,

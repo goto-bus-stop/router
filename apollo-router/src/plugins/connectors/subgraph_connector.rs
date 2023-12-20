@@ -1,54 +1,22 @@
-//! Authorization plugin
-
-// To remove once the commented code is out
-#![allow(dead_code)]
-#![allow(unused_imports)]
-#![allow(clippy::needless_borrow)]
-#![allow(clippy::extra_unused_lifetimes)]
-
 use std::collections::HashMap;
-use std::error::Error;
-use std::ops::ControlFlow;
-use std::ops::Deref;
 use std::sync::Arc;
+use std::task::Poll;
 
-use apollo_compiler::schema::Directive;
-use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::schema::Value;
-use apollo_compiler::Node;
-use futures::Future;
-use futures::StreamExt;
-use http::uri::*;
-use http::Uri;
+use futures::future::BoxFuture;
 use hyper::client::HttpConnector;
 use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::HttpsConnector;
-use regex::Regex;
-use tower::Layer;
-use tower::ServiceBuilder;
-use tower::ServiceExt;
+use tower::BoxError;
 use tracing::Instrument;
 use tracing::Span;
 
-use super::directives::HTTPSourceAPI;
-use super::directives::SourceAPI;
 use super::Connector;
-use crate::error::ConnectorDirectiveError;
-use crate::error::FetchError;
-use crate::layers::ServiceBuilderExt;
 use crate::plugins::telemetry::OTEL_STATUS_CODE;
-use crate::services::layers::query_analysis::QueryAnalysisLayer;
-use crate::services::new_service::ServiceFactory;
-use crate::services::subgraph;
 use crate::services::trust_dns_connector::new_async_http_connector;
 use crate::services::trust_dns_connector::AsyncHyperResolver;
-use crate::services::MakeSubgraphService;
-use crate::services::SupergraphCreator;
-use crate::services::SupergraphRequest;
-use crate::spec::Query;
+use crate::services::SubgraphRequest;
+use crate::services::SubgraphResponse;
 use crate::spec::Schema;
-use crate::spec::Selection;
-use crate::Configuration;
 
 static CONNECTOR_HTTP_REQUEST: &str = "connector http request";
 
@@ -72,15 +40,6 @@ impl SubgraphConnector {
         Ok(Self { http_connectors })
     }
 }
-
-use std::task::Poll;
-
-use futures::future::BoxFuture;
-use tower::BoxError;
-use tower::Service;
-
-use crate::services::SubgraphRequest;
-use crate::services::SubgraphResponse;
 
 impl tower::Service<SubgraphRequest> for SubgraphConnector {
     type Response = SubgraphResponse;
@@ -219,11 +178,11 @@ mod tests {
     use hyper::Body;
     use hyper::Server;
     use mime::APPLICATION_JSON;
+    use tower::ServiceExt;
 
-    use super::*;
     use crate::router_factory::YamlRouterFactory;
+    use crate::services::new_service::ServiceFactory;
     use crate::services::supergraph;
-    use crate::TestHarness;
 
     const SCHEMA: &str = include_str!("../../../../examples/connectors/supergraph.graphql");
 

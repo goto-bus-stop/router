@@ -21,6 +21,7 @@ use super::join_spec_helpers::add_join_enum_value_directive;
 use super::join_spec_helpers::add_join_field_directive;
 use super::join_spec_helpers::add_join_implements;
 use super::join_spec_helpers::add_join_type_directive;
+use super::join_spec_helpers::add_join_union_member_directive;
 use super::join_spec_helpers::copy_definitions;
 use super::join_spec_helpers::join_graph_enum;
 use super::join_spec_helpers::make_any_scalar;
@@ -273,6 +274,12 @@ pub(super) enum Change {
         value_name: Name,
         graph: String,
     },
+    /// Union member
+    UnionMember {
+        union_name: Name,
+        member_name: Name,
+        graph: String,
+    },
 }
 
 impl Change {
@@ -352,6 +359,26 @@ impl Change {
                     let value = value.make_mut();
                     add_join_enum_value_directive(value, graph);
                 }
+            }
+
+            Change::UnionMember {
+                union_name,
+                member_name,
+                graph,
+            } => {
+                let ty = upsert_type(original_schema, schema, union_name)?;
+                match ty {
+                    ExtendedType::Union(un) => {
+                        let un = un.make_mut();
+                        un.members.insert(member_name.clone().into());
+                    }
+                    _ => {
+                        return Err(Invariant(
+                            "Cannot add union member to non-union type".into(),
+                        ))
+                    }
+                }
+                add_join_union_member_directive(ty, graph, member_name);
             }
         }
         Ok(())
@@ -707,6 +734,97 @@ fn recurse_selection(
                 }
             }
         }
+        ExtendedType::Union(un) => {
+            let member_types = un
+                .directives
+                .iter()
+                .filter_map(|d| {
+                    if d.name == "join__unionMember"
+                        && d.argument_by_name("graph")
+                            .and_then(|a| a.as_enum())
+                            .map(|e| *e == origin_graph)
+                            .unwrap_or(false)
+                    {
+                        d.argument_by_name("member")
+                            .and_then(|a| a.as_str())
+                            .and_then(|name| schema.types.get(name))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            for selection in selections {
+                match selection {
+                    Selection::Field(selection) => {
+                        for member_type in member_types.iter() {
+                            match member_type {
+                                ExtendedType::Object(obj) => {
+                                    if let Some(field) = obj.fields.get(&selection.name) {
+                                        mutations.push(Change::UnionMember {
+                                            union_name: un.name.clone(),
+                                            member_name: obj.name.clone(),
+                                            graph: graph.clone(),
+                                        });
+
+                                        mutations.push(Change::Type {
+                                            name: member_type.name().clone(),
+                                            graph: graph.clone(),
+                                            key: None,
+                                            is_interface_object: false,
+                                            implements: None,
+                                        });
+
+                                        let field_type_name = field.ty.inner_named_type();
+
+                                        mutations.push(Change::Field {
+                                            type_name: member_type.name().clone(),
+                                            field_name: selection.name.clone(),
+                                            graph: graph.clone(),
+                                        });
+
+                                        let field_type = schema
+                                            .types
+                                            .get(field_type_name)
+                                            .ok_or(MissingType(field_type_name.to_string()))?;
+
+                                        if field_type.is_enum() {
+                                            mutations.extend(enum_values_for_graph(
+                                                field_type,
+                                                origin_graph,
+                                                &graph,
+                                            ));
+                                        }
+
+                                        if !selection.selection_set.is_empty() {
+                                            mutations.extend(recurse_selection(
+                                                origin_graph,
+                                                graph.clone(),
+                                                schema,
+                                                field_type_name,
+                                                field_type,
+                                                &selection.selection_set,
+                                            )?);
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    Selection::FragmentSpread(_) => {
+                        return Err(Unsupported(
+                            "fragment spreads in connector selections".into(),
+                        ))
+                    }
+                    Selection::InlineFragment(_) => {
+                        return Err(Unsupported(
+                            "inline fragments in connector selections".into(),
+                        ))
+                    }
+                }
+            }
+        }
         ExtendedType::InputObject(_) => {
             return Err(InvalidSelection("input object in selection".into()))
         }
@@ -865,9 +983,10 @@ mod tests {
                 "CONNECTOR_MUTATION_MUTATION_2".to_string(),
                 "CONNECTOR_QUERY_HELLO_3".to_string(),
                 "CONNECTOR_QUERY_INTERFACES_5".to_string(),
+                "CONNECTOR_QUERY_UNIONS_6".to_string(),
                 "CONNECTOR_QUERY_WITHARGUMENTS_4".to_string(),
                 "CONNECTOR_TESTINGINTERFACEOBJECT_2".to_string(),
-                "CONNECTOR_TESTINGINTERFACEOBJECT_D_6".to_string()
+                "CONNECTOR_TESTINGINTERFACEOBJECT_D_7".to_string()
             ]
         );
 

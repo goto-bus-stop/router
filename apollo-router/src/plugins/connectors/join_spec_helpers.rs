@@ -393,15 +393,57 @@ pub(super) fn add_join_enum_value_directive(value: &mut EnumValueDefinition, gra
     );
 }
 
-/*
-TODO:
+// @join__unionMember ----------------------------------------------------------
 
+/*
 directive @join__unionMember(
   graph: join__Graph!
   member: String!
 ) repeatable on UNION
-
 */
+
+fn join_union_member_directive(graph: &str, member: &str) -> Directive {
+    Directive {
+        name: name!("join__unionMember"),
+        arguments: vec![
+            Argument {
+                name: name!("graph"),
+                value: Value::Enum(ast::Name::new_unchecked(graph.into())).into(),
+            }
+            .into(),
+            Argument {
+                name: name!("member"),
+                value: Value::String(NodeStr::new(member)).into(),
+            }
+            .into(),
+        ],
+    }
+}
+
+pub(super) fn add_join_union_member_directive(ty: &mut ExtendedType, graph: &str, member: &str) {
+    if ty.directives().iter().any(|d| {
+        d.name == "join__unionMember"
+            && d.argument_by_name("graph")
+                .and_then(|val| val.as_enum())
+                .map(|val| val.as_str() == graph)
+                .unwrap_or(false)
+            && d.argument_by_name("member")
+                .and_then(|val| val.as_str())
+                .map(|val| val == member)
+                .unwrap_or(false)
+    }) {
+        return;
+    }
+
+    match ty {
+        ExtendedType::Union(ref mut ty) => {
+            let ty = ty.make_mut();
+            ty.directives
+                .push(join_union_member_directive(graph, member).into());
+        }
+        _ => debug_assert!(false, "Cannot add join__unionMember to non-union type"),
+    }
+}
 
 // Support for magic finder fields ---------------------------------------------
 

@@ -131,6 +131,7 @@ impl URLPathTemplate {
 
     // Given a URLPathTemplate and a concrete URL path, extract any named/nested
     // variables from the path and return them as a JSON object.
+    #[allow(dead_code)]
     fn extract_vars(&self, path: &str) -> Result<JSON, String> {
         let concrete_template = URLPathTemplate::parse(path)?;
 

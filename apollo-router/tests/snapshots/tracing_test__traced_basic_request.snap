@@ -259,7 +259,7 @@ expression: get_spans()
                         "{\"kind\":\"Fetch\",\"serviceName\":\"products\",\"variableUsages\":[],\"operation\":\"{topProducts{name name2:name}}\",\"operationName\":null,\"operationKind\":\"query\",\"id\":null,\"inputRewrites\":null,\"outputRewrites\":null,\"schemaAwareHash\":\"\",\"authorization\":{\"is_authenticated\":false,\"scopes\":[],\"policies\":[]},\"protocol\":\"graphQL\"}"
                       ],
                       [
-                        "monotonic_counter.apollo.router.validation",
+                        "monotonic_counter.apollo.router.operations.validation",
                         1
                       ],
                       [

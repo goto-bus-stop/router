@@ -5,12 +5,12 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Schema;
 use serde_json_bytes::ByteString;
-use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 
 use super::connector::ConnectorKind;
 use super::connector::ConnectorTransport;
 use super::http_json_transport::HttpJsonTransportError;
+use super::request_inputs::RequestInputs;
 use super::Connector;
 use crate::json_ext::Object;
 use crate::services::SubgraphRequest;
@@ -23,23 +23,6 @@ const ENTITIES: &str = "_entities";
 #[derive(Debug)]
 pub(crate) struct ResponseParams {
     key: ResponseKey,
-}
-
-#[derive(Debug, Default)]
-struct RequestInputs {
-    arguments: Map<ByteString, Value>,
-    parent: Map<ByteString, Value>,
-}
-
-impl RequestInputs {
-    fn merge(&self) -> Value {
-        let mut new = Map::new();
-        new.extend(self.parent.clone());
-        new.extend(self.arguments.clone());
-        // if parent types are shadowed by arguments, we can use `this.` to access them
-        new.insert("this", Value::Object(self.parent.clone()));
-        Value::Object(new)
-    }
 }
 
 #[derive(Clone, Debug)]

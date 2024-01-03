@@ -512,6 +512,8 @@ pub(super) fn make_any_scalar() -> ExtendedType {
 
 use apollo_compiler::ast::Selection as GraphQLSelection;
 
+use super::request_inputs::PARENT_PREFIX;
+
 fn new_field(name: String, selection: Option<Vec<GraphQLSelection>>) -> GraphQLSelection {
     GraphQLSelection::Field(
         apollo_compiler::ast::Field {
@@ -538,8 +540,8 @@ pub(super) fn parameters_to_selection_set(paths: &Vec<String>) -> Vec<GraphQLSel
 
     for path in paths {
         let mut parts: Vec<&str> = path.split('.').collect();
-        // "this" is an alias, so we can ignore it
-        if parts.first() == Some(&"this") {
+        // "$this" is an alias, so we can ignore it
+        if parts.first() == Some(&PARENT_PREFIX) {
             parts = parts[1..].to_vec();
         }
 
@@ -598,8 +600,8 @@ mod tests {
                 "b.c".to_string(),
                 "b.d.e".to_string(),
                 "b.d.f".to_string(),
-                "this.g".to_string(),
-                "this.h.i".to_string()
+                "$this.g".to_string(),
+                "$this.h.i".to_string()
             ])),
             "id b { c d { e f } } g h { i }"
         )

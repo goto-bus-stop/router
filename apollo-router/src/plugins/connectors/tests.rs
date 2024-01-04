@@ -183,6 +183,14 @@ mod mock_api {
             })))
     }
 
+    pub(super) fn shipping() -> Mock {
+        Mock::given(method("GET"))
+            .and(path("/v1/shipping"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+              "data": 100
+            })))
+    }
+
     pub(super) async fn mount_all(server: &MockServer) {
         futures::stream::iter(vec![
             hello(),
@@ -196,6 +204,7 @@ mod mock_api {
             interface_object_id_d(),
             interfaces(),
             unions(),
+            shipping(),
         ])
         .then(|mock| async { mock.mount(server).await })
         .collect::<Vec<_>>()
@@ -227,10 +236,30 @@ mod mock_subgraph {
                     })),
             )
     }
+
+    pub(super) fn test_requires() -> Mock {
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_json(serde_json::json!({
+              "query": "{requires{__typename id weight}}"
+            })))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .set_body_json(serde_json::json!({
+                      "data": {
+                        "requires": {
+                          "__typename": "TestRequires",
+                          "id": "123",
+                          "weight": "50",
+                        }
+                      }
+                    })),
+            )
+    }
 }
 
 #[tokio::test]
-
 async fn test_root_field_plus_entity() {
     let mock_server = MockServer::start().await;
     mock_api::mount_all(&mock_server).await;
@@ -261,7 +290,6 @@ async fn test_root_field_plus_entity() {
 }
 
 #[tokio::test]
-
 async fn test_root_field_plus_entity_field() {
     let mock_server = MockServer::start().await;
     mock_api::mount_all(&mock_server).await;
@@ -513,6 +541,96 @@ async fn basic_errors() {
           }
         }
       ]
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn test_requires() {
+    let mock_server = MockServer::start().await;
+    mock_api::mount_all(&mock_server).await;
+    mock_subgraph::test_requires().mount(&mock_server).await;
+
+    // @sourceField on TestRequires.shippingCost
+    let response = execute(&mock_server.uri(), "query { requires { shippingCost } }").await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new()
+                .method("POST")
+                .path("/graphql")
+                .body(serde_json::json!({
+                  "query": "{requires{__typename id weight}}"
+                }))
+                .build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/shipping")
+                .query("weight=50")
+                .build(),
+        ],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "requires": {
+          "shippingCost": 100
+        }
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn test_internal_dependencies() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/v1/internal_dependency"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+          "data": {
+            "a": 42,
+            "b": 108,
+          }
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/internal_dependency/c"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+          "data": 150
+        })))
+        .mount(&mock_server)
+        .await;
+
+    // @sourceField on Query.internal_dependency
+    // @sourceField on TestInternalDependency.c
+    let response = execute(&mock_server.uri(), "query { internal_dependencies { c } }").await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new()
+                .method("GET")
+                .path("/v1/internal_dependency")
+                .build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/internal_dependency/c")
+                .query("a=42&b=108")
+                .build(),
+        ],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "internal_dependencies": {
+          "c": 150
+        }
+      }
     }
     "###);
 }

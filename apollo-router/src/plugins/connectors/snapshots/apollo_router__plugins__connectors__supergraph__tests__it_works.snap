@@ -7,6 +7,8 @@ schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://spec
   mutation: Mutation
 }
 
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR | FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
 directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
@@ -21,13 +23,11 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-directive @join__directive(graphs: [join__Graph!]!, name: String!, args: join__DirectiveArguments!) repeatable on SCHEMA | OBJECT | FIELD_DEFINITION | INTERFACE
+scalar join__DirectiveArguments
 
-scalar join__FieldSet @specifiedBy(url: "https://just-avoiding-validation-warnings")
+scalar join__FieldSet
 
-scalar link__Import @specifiedBy(url: "https://just-avoiding-validation-warnings")
-
-scalar join__DirectiveArguments @specifiedBy(url: "https://just-avoiding-validation-warnings")
+scalar link__Import
 
 enum link__Purpose {
   """
@@ -47,16 +47,19 @@ type EntityAcrossBoth @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0, key: "a b
   e: String @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_E_0)
 }
 
-scalar _Any @specifiedBy(url: "https://whatever") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) @join__type(graph: CONNECTOR_HELLO_1) @join__type(graph: CONNECTOR_HELLO_WORLD_1) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_7)
+scalar _Any @specifiedBy(url: "https://whatever") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) @join__type(graph: CONNECTOR_HELLO_1) @join__type(graph: CONNECTOR_HELLO_WORLD_1) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_8) @join__type(graph: CONNECTOR_TESTINTERNALDEPENDENCY_C_9) @join__type(graph: CONNECTOR_TESTREQUIRES_SHIPPINGCOST_10)
 
-type Query @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) @join__type(graph: CONNECTOR_HELLO_1) @join__type(graph: CONNECTOR_HELLO_WORLD_1) @join__type(graph: CONNECTOR_QUERY_HELLO_3) @join__type(graph: CONNECTOR_QUERY_INTERFACES_5) @join__type(graph: CONNECTOR_QUERY_UNIONS_6) @join__type(graph: CONNECTOR_QUERY_WITHARGUMENTS_4) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_7) {
+type Query @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) @join__type(graph: CONNECTOR_HELLO_1) @join__type(graph: CONNECTOR_HELLO_WORLD_1) @join__type(graph: CONNECTOR_QUERY_HELLO_3) @join__type(graph: CONNECTOR_QUERY_INTERFACES_5) @join__type(graph: CONNECTOR_QUERY_INTERNAL_DEPENDENCIES_7) @join__type(graph: CONNECTOR_QUERY_UNIONS_6) @join__type(graph: CONNECTOR_QUERY_WITHARGUMENTS_4) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_8) @join__type(graph: CONNECTOR_TESTINTERNALDEPENDENCY_C_9) @join__type(graph: CONNECTOR_TESTREQUIRES_SHIPPINGCOST_10) {
   _EntityAcrossBoth_finder(representations: [_Any!]!): [EntityAcrossBoth!]! @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_E_0)
   _Hello_finder(representations: [_Any!]!): [Hello!]! @join__field(graph: CONNECTOR_HELLO_1) @join__field(graph: CONNECTOR_HELLO_WORLD_1)
   hello: Hello @join__field(graph: CONNECTOR_QUERY_HELLO_3)
   interfaces: [TestingInterface] @join__field(graph: CONNECTOR_QUERY_INTERFACES_5)
+  internal_dependencies: TestInternalDependency @join__field(graph: CONNECTOR_QUERY_INTERNAL_DEPENDENCIES_7)
   unions: [TestingUnion] @join__field(graph: CONNECTOR_QUERY_UNIONS_6)
   withArguments(value: String, done: Boolean, enum: InputEnum): String @join__field(graph: CONNECTOR_QUERY_WITHARGUMENTS_4)
-  _TestingInterfaceObject_finder(representations: [_Any!]!): [TestingInterfaceObject!]! @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_7)
+  _TestingInterfaceObject_finder(representations: [_Any!]!): [TestingInterfaceObject!]! @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_8)
+  _TestInternalDependency_finder(representations: [_Any!]!): [TestInternalDependency!]! @join__field(graph: CONNECTOR_TESTINTERNALDEPENDENCY_C_9)
+  _TestRequires_finder(representations: [_Any!]!): [TestRequires!]! @join__field(graph: CONNECTOR_TESTREQUIRES_SHIPPINGCOST_10)
 }
 
 type Hello @join__type(graph: CONNECTOR_HELLO_1, key: "id") @join__type(graph: CONNECTOR_HELLO_WORLD_1, key: "id") @join__type(graph: CONNECTOR_QUERY_HELLO_3) {
@@ -129,6 +132,12 @@ type NIb implements NestedInterface @join__implements(graph: CONNECTOR_QUERY_INT
   b: String @join__field(graph: CONNECTOR_QUERY_INTERFACES_5)
 }
 
+type TestInternalDependency @join__type(graph: CONNECTOR_QUERY_INTERNAL_DEPENDENCIES_7) @join__type(graph: CONNECTOR_TESTINTERNALDEPENDENCY_C_9, key: "a b") {
+  a: Int @join__field(graph: CONNECTOR_QUERY_INTERNAL_DEPENDENCIES_7) @join__field(graph: CONNECTOR_TESTINTERNALDEPENDENCY_C_9)
+  b: Int @join__field(graph: CONNECTOR_QUERY_INTERNAL_DEPENDENCIES_7) @join__field(graph: CONNECTOR_TESTINTERNALDEPENDENCY_C_9)
+  c: Int @join__field(graph: CONNECTOR_TESTINTERNALDEPENDENCY_C_9)
+}
+
 union TestingUnion @join__type(graph: CONNECTOR_QUERY_UNIONS_6) @join__unionMember(graph: CONNECTOR_QUERY_UNIONS_6, member: "UnionA") @join__unionMember(graph: CONNECTOR_QUERY_UNIONS_6, member: "UnionB") = UnionA | UnionB
 
 type UnionA @join__type(graph: CONNECTOR_QUERY_UNIONS_6) {
@@ -155,10 +164,15 @@ enum InputEnum @join__type(graph: CONNECTOR_QUERY_WITHARGUMENTS_4) {
   Z @join__enumValue(graph: CONNECTOR_QUERY_WITHARGUMENTS_4)
 }
 
-interface TestingInterfaceObject @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2, key: "id", isInterfaceObject: true) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_7, key: "id", isInterfaceObject: true) {
+interface TestingInterfaceObject @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2, key: "id", isInterfaceObject: true) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_8, key: "id", isInterfaceObject: true) {
   c: String @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2)
-  id: ID! @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_7)
-  d: String @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_7)
+  id: ID! @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_8)
+  d: String @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_8)
+}
+
+type TestRequires @join__type(graph: CONNECTOR_TESTREQUIRES_SHIPPINGCOST_10, key: "weight") {
+  shippingCost: Int @join__field(graph: CONNECTOR_TESTREQUIRES_SHIPPINGCOST_10)
+  weight: Int @join__field(graph: CONNECTOR_TESTREQUIRES_SHIPPINGCOST_10)
 }
 
 enum join__Graph {
@@ -169,9 +183,12 @@ enum join__Graph {
   CONNECTOR_MUTATION_MUTATION_2 @join__graph(name: "CONNECTOR_MUTATION_MUTATION_2", url: "http://unused")
   CONNECTOR_QUERY_HELLO_3 @join__graph(name: "CONNECTOR_QUERY_HELLO_3", url: "http://unused")
   CONNECTOR_QUERY_INTERFACES_5 @join__graph(name: "CONNECTOR_QUERY_INTERFACES_5", url: "http://unused")
+  CONNECTOR_QUERY_INTERNAL_DEPENDENCIES_7 @join__graph(name: "CONNECTOR_QUERY_INTERNAL_DEPENDENCIES_7", url: "http://unused")
   CONNECTOR_QUERY_UNIONS_6 @join__graph(name: "CONNECTOR_QUERY_UNIONS_6", url: "http://unused")
   CONNECTOR_QUERY_WITHARGUMENTS_4 @join__graph(name: "CONNECTOR_QUERY_WITHARGUMENTS_4", url: "http://unused")
   CONNECTOR_TESTINGINTERFACEOBJECT_2 @join__graph(name: "CONNECTOR_TESTINGINTERFACEOBJECT_2", url: "http://unused")
-  CONNECTOR_TESTINGINTERFACEOBJECT_D_7 @join__graph(name: "CONNECTOR_TESTINGINTERFACEOBJECT_D_7", url: "http://unused")
+  CONNECTOR_TESTINGINTERFACEOBJECT_D_8 @join__graph(name: "CONNECTOR_TESTINGINTERFACEOBJECT_D_8", url: "http://unused")
+  CONNECTOR_TESTINTERNALDEPENDENCY_C_9 @join__graph(name: "CONNECTOR_TESTINTERNALDEPENDENCY_C_9", url: "http://unused")
+  CONNECTOR_TESTREQUIRES_SHIPPINGCOST_10 @join__graph(name: "CONNECTOR_TESTREQUIRES_SHIPPINGCOST_10", url: "http://unused")
 }
 

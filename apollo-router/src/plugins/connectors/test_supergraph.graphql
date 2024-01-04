@@ -12,20 +12,11 @@ schema
   @join__directive(
     graphs: [KITCHEN_SINK]
     name: "sourceAPI"
-    args: { name: "a", http: { baseURL: "http://localhost:8080/v1" } }
+    args: { name: "a", http: { baseURL: "http://localhost:8080/v1/" } }
   ) {
   query: Query
   mutation: Mutation
 }
-
-directive @join__directive(
-  graphs: [join__Graph!]
-  name: String!
-  args: join__DirectiveArguments
-) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
-
-scalar join__DirectiveArguments
-  @specifiedBy(url: "http://just-to-avoid-valiadation-warnings")
 
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
@@ -51,7 +42,7 @@ directive @join__type(
   key: join__FieldSet
   extension: Boolean! = false
   resolvable: Boolean! = true
-  isInterfaceObject: Boolean = false
+  isInterfaceObject: Boolean! = false
 ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
 
 directive @join__unionMember(
@@ -67,8 +58,8 @@ directive @link(
 ) repeatable on SCHEMA
 
 type EntityAcrossBoth
-  @join__type(graph: NORMAL, key: "a b")
   @join__type(graph: KITCHEN_SINK, key: "a b")
+  @join__type(graph: NORMAL, key: "a b")
   @join__directive(
     graphs: [KITCHEN_SINK]
     name: "sourceType"
@@ -86,6 +77,7 @@ type EntityAcrossBoth
     @join__field(graph: NORMAL)
   d: String @join__field(graph: KITCHEN_SINK)
   e: String
+    @join__field(graph: KITCHEN_SINK)
     @join__directive(
       graphs: [KITCHEN_SINK]
       name: "sourceField"
@@ -259,16 +251,16 @@ enum OutputEnum @join__type(graph: KITCHEN_SINK) @join__type(graph: NORMAL) {
   D @join__enumValue(graph: NORMAL)
 }
 
-type Query @join__type(graph: NORMAL) @join__type(graph: KITCHEN_SINK) {
+type Query @join__type(graph: KITCHEN_SINK) @join__type(graph: NORMAL) {
   hello: Hello
-    @join__field(graph: NORMAL)
+    @join__field(graph: KITCHEN_SINK)
     @join__directive(
       graphs: [KITCHEN_SINK]
       name: "sourceField"
       args: { api: "a", http: { GET: "/hello" }, selection: ".data { id }" }
     )
   withArguments(value: String, done: Boolean, enum: InputEnum): String
-    @join__field(graph: NORMAL)
+    @join__field(graph: KITCHEN_SINK)
     @join__directive(
       graphs: [KITCHEN_SINK]
       name: "sourceField"
@@ -292,6 +284,7 @@ type Query @join__type(graph: NORMAL) @join__type(graph: KITCHEN_SINK) {
       }
     )
   unions: [TestingUnion]
+    @join__field(graph: KITCHEN_SINK)
     @join__directive(
       graphs: [KITCHEN_SINK]
       name: "sourceField"
@@ -312,8 +305,8 @@ interface TestingInterface @join__type(graph: KITCHEN_SINK) {
 }
 
 interface TestingInterfaceObject
-  @join__type(graph: NORMAL, key: "id")
   @join__type(graph: KITCHEN_SINK, key: "id", isInterfaceObject: true)
+  @join__type(graph: NORMAL, key: "id")
   @join__directive(
     graphs: [KITCHEN_SINK]
     name: "sourceType"
@@ -328,6 +321,7 @@ interface TestingInterfaceObject
     @join__field(graph: NORMAL)
   c: String @join__field(graph: KITCHEN_SINK)
   d: String
+    @join__field(graph: KITCHEN_SINK)
     @join__directive(
       graphs: [KITCHEN_SINK]
       name: "sourceField"
@@ -363,3 +357,12 @@ type World @join__type(graph: KITCHEN_SINK) {
   field: String
   nested: Nested
 }
+
+directive @join__directive(
+  graphs: [join__Graph!]!
+  name: String!
+  args: join__DirectiveArguments!
+) repeatable on SCHEMA | OBJECT | FIELD_DEFINITION | INTERFACE
+
+scalar join__DirectiveArguments
+  @specifiedBy(url: "https://just-avoiding-validation-warnings")

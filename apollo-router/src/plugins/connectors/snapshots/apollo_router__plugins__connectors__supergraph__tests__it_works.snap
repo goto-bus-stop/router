@@ -7,8 +7,6 @@ schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://spec
   mutation: Mutation
 }
 
-directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
-
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
 directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
@@ -17,17 +15,19 @@ directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 
 directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
 
-directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
 
 directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-scalar join__DirectiveArguments @specifiedBy(url: "http://just-to-avoid-valiadation-warnings")
+directive @join__directive(graphs: [join__Graph!]!, name: String!, args: join__DirectiveArguments!) repeatable on SCHEMA | OBJECT | FIELD_DEFINITION | INTERFACE
 
 scalar join__FieldSet @specifiedBy(url: "https://just-avoiding-validation-warnings")
 
 scalar link__Import @specifiedBy(url: "https://just-avoiding-validation-warnings")
+
+scalar join__DirectiveArguments @specifiedBy(url: "https://just-avoiding-validation-warnings")
 
 enum link__Purpose {
   """

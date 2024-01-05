@@ -7,6 +7,7 @@ schema
     args: {
       url: "https://specs.apollo.dev/source/v0.1"
       import: ["@sourceAPI", "@sourceType", "@sourceField"]
+      for: "EXECUTION"
     }
   )
   @join__directive(
@@ -17,6 +18,12 @@ schema
   query: Query
   mutation: Mutation
 }
+
+directive @join__directive(
+  graphs: [join__Graph!]
+  name: String!
+  args: join__DirectiveArguments
+) repeatable on SCHEMA | OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR | FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
@@ -112,6 +119,34 @@ type Hello
   enum: OutputEnum
 }
 
+input HTTPHeaderMapping @join__type(graph: KITCHEN_SINK) {
+  name: String!
+  as: String
+  value: String
+}
+
+input HTTPSourceAPI @join__type(graph: KITCHEN_SINK) {
+  baseURL: String!
+  headers: [HTTPHeaderMapping!]
+}
+
+input HTTPSourceField @join__type(graph: KITCHEN_SINK) {
+  GET: source__URLPathTemplate
+  POST: source__URLPathTemplate
+  PUT: source__URLPathTemplate
+  PATCH: source__URLPathTemplate
+  DELETE: source__URLPathTemplate
+  body: source__JSONSelection
+  headers: [HTTPHeaderMapping!]
+}
+
+input HTTPSourceType @join__type(graph: KITCHEN_SINK) {
+  GET: source__URLPathTemplate
+  POST: source__URLPathTemplate
+  headers: [HTTPHeaderMapping!]
+  body: source__JSONSelection
+}
+
 type Ia implements TestingInterface
   @join__implements(graph: KITCHEN_SINK, interface: "TestingInterface")
   @join__type(graph: KITCHEN_SINK) {
@@ -151,22 +186,28 @@ type IOb implements TestingInterfaceObject
   d: String @join__field
 }
 
+scalar join__DirectiveArguments
+
 scalar join__FieldSet
-  @specifiedBy(url: "https://just-avoiding-validation-warnings")
 
 enum join__Graph {
   KITCHEN_SINK @join__graph(name: "kitchen-sink", url: "http://localhost:8080/")
   NORMAL @join__graph(name: "normal", url: "http://localhost:8081/")
 }
 
+input KeyTypeMap @join__type(graph: KITCHEN_SINK) {
+  key: String!
+  typeMap: source__JSON
+}
+
 scalar link__Import
-  @specifiedBy(url: "https://just-avoiding-validation-warnings")
 
 enum link__Purpose {
   """
   `SECURITY` features provide metadata necessary to securely resolve fields.
   """
   SECURITY
+
   """
   `EXECUTION` features provide metadata necessary for operation execution.
   """
@@ -182,12 +223,7 @@ type Mutation @join__type(graph: KITCHEN_SINK) {
         api: "a"
         http: {
           POST: "/mutation"
-          body: """
-          nums: .input.nums
-          values: .input.values {
-            num
-          }
-          """
+          body: "nums: .input.nums\nvalues: .input.values {\n  num\n}"
         }
         selection: ".data { success }"
       }
@@ -294,10 +330,28 @@ type Query @join__type(graph: KITCHEN_SINK) @join__type(graph: NORMAL) {
         selection: ".data { z y nested { x w } }"
       }
     )
+  internal_dependencies: TestInternalDependency
+    @join__field(graph: KITCHEN_SINK)
+    @join__directive(
+      graphs: [KITCHEN_SINK]
+      name: "sourceField"
+      args: {
+        api: "a"
+        http: { GET: "/internal_dependency" }
+        selection: ".data {\n  a\n  b\n}"
+      }
+    )
   fieldBackedByRealResolver: TypeWithResolver @join__field(graph: NORMAL)
   startJoin: EntityAcrossBoth @join__field(graph: NORMAL)
   interfaceObject: [TestingInterfaceObject] @join__field(graph: NORMAL)
+  requires: TestRequires @join__field(graph: NORMAL)
 }
+
+scalar source__JSON @join__type(graph: KITCHEN_SINK)
+
+scalar source__JSONSelection @join__type(graph: KITCHEN_SINK)
+
+scalar source__URLPathTemplate @join__type(graph: KITCHEN_SINK)
 
 interface TestingInterface @join__type(graph: KITCHEN_SINK) {
   id: ID!
@@ -340,6 +394,41 @@ union TestingUnion
     UnionA
   | UnionB
 
+type TestInternalDependency @join__type(graph: KITCHEN_SINK) {
+  a: Int
+  b: Int
+  c: Int
+    @join__directive(
+      graphs: [KITCHEN_SINK]
+      name: "sourceField"
+      args: {
+        api: "a"
+        http: { GET: "/internal_dependency/c?a={a!}&b={b!}" }
+        selection: ".data"
+      }
+    )
+}
+
+type TestRequires
+  @join__type(graph: KITCHEN_SINK, key: "id")
+  @join__type(graph: NORMAL, key: "id") {
+  id: ID!
+  weight: Int
+    @join__field(graph: KITCHEN_SINK, external: true)
+    @join__field(graph: NORMAL)
+  shippingCost: Int
+    @join__field(graph: KITCHEN_SINK, requires: "weight")
+    @join__directive(
+      graphs: [KITCHEN_SINK]
+      name: "sourceField"
+      args: {
+        api: "a"
+        http: { GET: "/shipping?weight={weight!}" }
+        selection: ".data"
+      }
+    )
+}
+
 type TypeWithResolver @join__type(graph: NORMAL, key: "id") {
   id: ID!
 }
@@ -357,12 +446,3 @@ type World @join__type(graph: KITCHEN_SINK) {
   field: String
   nested: Nested
 }
-
-directive @join__directive(
-  graphs: [join__Graph!]!
-  name: String!
-  args: join__DirectiveArguments!
-) repeatable on SCHEMA | OBJECT | FIELD_DEFINITION | INTERFACE
-
-scalar join__DirectiveArguments
-  @specifiedBy(url: "https://just-avoiding-validation-warnings")

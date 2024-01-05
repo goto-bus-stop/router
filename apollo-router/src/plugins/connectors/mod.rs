@@ -14,3 +14,22 @@ mod url_path_parser;
 
 #[cfg(test)]
 mod tests;
+
+pub(crate) type Connectors = (
+    std::sync::Arc<apollo_compiler::validation::Valid<apollo_compiler::Schema>>,
+    std::collections::HashMap<String, Connector>,
+);
+
+pub(crate) fn connectors_from_schema(
+    schema: &apollo_compiler::Schema,
+) -> Result<Option<Connectors>, tower::BoxError> {
+    let connectors = Connector::from_schema(schema)?;
+
+    if connectors.is_empty() {
+        Ok(None)
+    } else {
+        let supergraph = generate_connector_supergraph(schema, &connectors)?;
+
+        Ok(Some((std::sync::Arc::new(supergraph), connectors)))
+    }
+}

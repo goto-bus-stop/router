@@ -22,7 +22,6 @@ use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
-use crate::plugins::connectors::generate_connector_supergraph;
 use crate::plugins::connectors::subgraph_connector::SubgraphConnector;
 use crate::plugins::connectors::Connector;
 use crate::plugins::subscription::Subscription;
@@ -161,19 +160,27 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             }
         };
 
-        let spec_schema = apollo_compiler::Schema::parse(schema.as_str(), "outer.graphql")
-            .map_err(|_| "could not parse schema")?;
+        let schema_changed = previous_router
+            .map(|router| router.supergraph_creator.schema().raw_sdl.as_ref() == &schema)
+            .unwrap_or_default();
 
-        let connectors = Arc::from(Connector::from_schema(&spec_schema)?);
-        let connector_subgraphs = if !connectors.is_empty() {
-            let connector_schema = generate_connector_supergraph(&spec_schema, &connectors)?;
+        let config_changed = previous_router
+            .map(|router| router.supergraph_creator.config() == configuration)
+            .unwrap_or_default();
 
-            // todo: that's a lot of reparsing isnt it? :D
-            let connector_schema = Arc::new(Schema::parse(
-                &connector_schema.to_string(),
-                &configuration,
-            )?);
+        if config_changed {
+            configuration
+                .notify
+                .broadcast_configuration(Arc::downgrade(&configuration));
+        }
 
+        let schema = bridge_query_planner.schema();
+        if schema_changed {
+            configuration.notify.broadcast_schema(schema.clone());
+        }
+
+        // handle connectors
+        let connector_subgraphs = if let Some((connector_schema, connectors)) = &schema.connectors {
             let mut aggregated_connectors: HashMap<String, HashMap<String, &Connector>> =
                 HashMap::new();
             for (name, connector) in connectors.iter() {
@@ -196,25 +203,6 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         } else {
             Default::default()
         };
-
-        let schema_changed = previous_router
-            .map(|router| router.supergraph_creator.schema().raw_sdl.as_ref() == &schema)
-            .unwrap_or_default();
-
-        let config_changed = previous_router
-            .map(|router| router.supergraph_creator.config() == configuration)
-            .unwrap_or_default();
-
-        if config_changed {
-            configuration
-                .notify
-                .broadcast_configuration(Arc::downgrade(&configuration));
-        }
-
-        let schema = bridge_query_planner.schema();
-        if schema_changed {
-            configuration.notify.broadcast_schema(schema.clone());
-        }
 
         // do the actual supergraph
 

@@ -541,6 +541,8 @@ pub(crate) enum SchemaError {
     Validate(ValidationErrors),
     /// Api error(s): {0}
     Api(String),
+    /// Connector error(s): {0}
+    Connector(String),
 }
 
 #[derive(Error, Display, Debug, Clone, Serialize, Eq, PartialEq)]

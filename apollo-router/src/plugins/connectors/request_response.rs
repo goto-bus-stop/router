@@ -23,6 +23,7 @@ const ENTITIES: &str = "_entities";
 #[derive(Debug)]
 pub(crate) struct ResponseParams {
     key: ResponseKey,
+    source_api_name: Arc<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -84,7 +85,10 @@ fn request_params_to_requests(
                 ConnectorTransport::HttpJson(ref transport) => transport.make_request(inputs)?,
             };
 
-            let response_params = ResponseParams { key: response_key };
+            let response_params = ResponseParams {
+                key: response_key,
+                source_api_name: connector.transport.source_api_name(),
+            };
 
             Ok((request, response_params))
         })
@@ -407,6 +411,12 @@ pub(super) async fn handle_responses(
             .extensions
             .get::<ResponseParams>()
             .ok_or_else(|| MissingResponseParams)?;
+
+        tracing::info!(
+            monotonic_counter.apollo.router.operations.source.rest = 1u64,
+            rest.response.api = %*response_params.source_api_name,
+            rest.response.status_code = parts.status.as_u16(),
+        );
 
         if parts.status.is_success() {
             let json_data: Value =
@@ -987,6 +997,7 @@ mod tests {
                             "String",
                         ),
                     },
+                    source_api_name: "API",
                 },
             ),
         ]
@@ -1000,6 +1011,7 @@ mod tests {
                     "String",
                 ),
             },
+            source_api_name: "API",
         }
         "###);
     }
@@ -1015,6 +1027,8 @@ mod tests {
                 headers: vec![],
             }),
         };
+
+        let source_api_name = Arc::new("API".to_string());
 
         let directive = SourceField {
             graph: "B".to_string(),
@@ -1042,6 +1056,7 @@ mod tests {
                     name: "hello".to_string(),
                     typename: super::ResponseTypeName::Concrete("String".to_string()),
                 },
+                source_api_name: Arc::clone(&source_api_name),
             })
             .body(hyper::Body::from(r#"{"data":"world"}"#))
             .expect("response builder");
@@ -1052,6 +1067,7 @@ mod tests {
                     name: "hello2".to_string(),
                     typename: super::ResponseTypeName::Concrete("String".to_string()),
                 },
+                source_api_name: Arc::clone(&source_api_name),
             })
             .body(hyper::Body::from(r#"{"data":"world"}"#))
             .expect("response builder");

@@ -61,6 +61,14 @@ pub(super) enum ConnectorTransport {
     HttpJson(HttpJsonTransport),
 }
 
+impl ConnectorTransport {
+    pub(super) fn source_api_name(&self) -> Arc<String> {
+        match self {
+            Self::HttpJson(transport) => Arc::clone(&transport.source_api_name),
+        }
+    }
+}
+
 /// The list of the subgraph names that should use the inner query planner
 /// instead of making a normal subgraph request.
 pub(crate) fn connector_subgraph_names(connectors: &HashMap<String, Connector>) -> HashSet<String> {

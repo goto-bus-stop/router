@@ -1,13 +1,15 @@
 {
-  "name": "rest-ip",
+  "name": "rest-weather",
   "version": "1.1.21",
   "description": "",
-  "main": "ip.js",
+  "main": "weather.js",
   "scripts": {
-    "start": "node ip.js"
+    "start": "node weather.js"
   },
   "dependencies": {
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "express-rate-limit": "^5.5.1"
   },
   "keywords": [],
   "author": "",

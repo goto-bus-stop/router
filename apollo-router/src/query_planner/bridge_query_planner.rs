@@ -33,8 +33,6 @@ use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::plugins::connectors::connector_subgraph_names;
-use crate::plugins::connectors::generate_connector_supergraph;
-use crate::plugins::connectors::Connector;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
@@ -156,8 +154,8 @@ impl BridgeQueryPlanner {
 
                 if api_schema.schema != new_api_schema {
                     tracing::warn!(
-                        monotonic_counter.apollo.router.api_schema = 1u64,
-                        generation.result = "failed",
+                        monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
+                        generation.is_matched = false,
                         "API schema generation mismatch: apollo-federation and router-bridge write different schema"
                     );
 
@@ -190,8 +188,8 @@ impl BridgeQueryPlanner {
                     );
                 } else {
                     tracing::warn!(
-                        monotonic_counter.apollo.router.api_schema = 1u64,
-                        generation.result = VALIDATION_MATCH,
+                        monotonic_counter.apollo.router.lifecycle.api_schema = 1u64,
+                        generation.is_matched = true,
                     );
                 }
                 api_schema.schema
@@ -201,53 +199,56 @@ impl BridgeQueryPlanner {
 
         let schema = Arc::new(schema.with_api_schema(api_schema));
 
-        let connectors = Arc::from(Connector::from_schema(&schema.definitions).unwrap());
-        let mut subgraph_planners = HashMap::new();
-        let connector_urls = connectors
-            .iter()
-            .map(|(name, connector)| (name.clone(), connector.to_string()))
-            .collect::<HashMap<_, _>>();
-
-        if !connectors.is_empty() {
-            let connector_subgraph_names = connector_subgraph_names(&connectors);
-            let connector_schema =
-                generate_connector_supergraph(&schema.definitions, &connectors).unwrap();
+        let (subgraph_planners, connector_urls) = if let Some((connector_schema, connectors)) =
+            &schema.connectors
+        {
+            let connector_subgraph_names = connector_subgraph_names(connectors);
             let connector_schema_s = connector_schema.serialize().to_string();
 
-            for name in connector_subgraph_names {
-                let subgraph_planner = Arc::new(
-                    planner
-                        .update(
-                            connector_schema_s.clone(),
-                            QueryPlannerConfig {
-                                incremental_delivery: Some(IncrementalDeliverySupport {
-                                    enable_defer: Some(configuration.supergraph.defer_support),
-                                }),
-                                graphql_validation: matches!(
-                                    configuration.experimental_graphql_validation_mode,
-                                    GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
-                                ),
-                                reuse_query_fragments: configuration
+            let mut subgraph_planners = HashMap::new();
+
+            let connector_urls = connectors
+                .iter()
+                .map(|(name, connector)| (name.clone(), connector.to_string()))
+                .collect::<HashMap<_, _>>();
+
+            let subgraph_planner = Arc::new(
+                planner
+                    .update(
+                        connector_schema_s.clone(),
+                        QueryPlannerConfig {
+                            incremental_delivery: Some(IncrementalDeliverySupport {
+                                enable_defer: Some(configuration.supergraph.defer_support),
+                            }),
+                            graphql_validation: matches!(
+                                configuration.experimental_graphql_validation_mode,
+                                GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
+                            ),
+                            reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
+                            debug: Some(QueryPlannerDebugConfig {
+                                bypass_planner_for_single_subgraph: None,
+                                max_evaluated_plans: configuration
                                     .supergraph
-                                    .reuse_query_fragments,
-                                debug: Some(QueryPlannerDebugConfig {
-                                    bypass_planner_for_single_subgraph: None,
-                                    max_evaluated_plans: configuration
-                                        .supergraph
-                                        .query_planning
-                                        .experimental_plans_limit
-                                        .or(Some(10000)),
-                                    paths_limit: configuration
-                                        .supergraph
-                                        .query_planning
-                                        .experimental_paths_limit,
-                                }),
-                            },
-                        )
-                        .await?,
-                );
-                subgraph_planners.insert(name, subgraph_planner);
+                                    .query_planning
+                                    .experimental_plans_limit
+                                    .or(Some(10000)),
+                                paths_limit: configuration
+                                    .supergraph
+                                    .query_planning
+                                    .experimental_paths_limit,
+                            }),
+                        },
+                    )
+                    .await?,
+            );
+
+            for name in connector_subgraph_names {
+                subgraph_planners.insert(name, subgraph_planner.clone());
             }
+
+            (subgraph_planners, connector_urls)
+        } else {
+            (Default::default(), Default::default())
         };
 
         let subgraph_schema_strings = planner.subgraphs().await?;
@@ -320,54 +321,56 @@ impl BridgeQueryPlanner {
 
         let schema = Arc::new(Schema::parse(&schema, &configuration)?.with_api_schema(api_schema));
 
-        let connectors = Arc::from(Connector::from_schema(&schema.definitions).unwrap());
-        let mut subgraph_planners = HashMap::new();
-        let connector_urls = connectors
-            .iter()
-            .map(|(name, connector)| (name.clone(), connector.to_string()))
-            .collect::<HashMap<_, _>>();
-        if !connectors.is_empty() {
-            let connector_subgraph_names = connector_subgraph_names(&connectors);
-            let connector_schema =
-                generate_connector_supergraph(&schema.definitions, &connectors).unwrap();
+        let (subgraph_planners, connector_urls) = if let Some((connector_schema, connectors)) =
+            &schema.connectors
+        {
+            let connector_subgraph_names = connector_subgraph_names(connectors);
             let connector_schema_s = connector_schema.serialize().to_string();
 
-            for name in connector_subgraph_names {
-                println!("creating subgraph planner '{name}' for schema:\n{connector_schema_s}");
+            let mut subgraph_planners = HashMap::new();
 
-                let subgraph_planner = Arc::new(
-                    planner
-                        .update(
-                            connector_schema_s.clone(),
-                            QueryPlannerConfig {
-                                incremental_delivery: Some(IncrementalDeliverySupport {
-                                    enable_defer: Some(configuration.supergraph.defer_support),
-                                }),
-                                graphql_validation: matches!(
-                                    configuration.experimental_graphql_validation_mode,
-                                    GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
-                                ),
-                                reuse_query_fragments: configuration
+            let connector_urls = connectors
+                .iter()
+                .map(|(name, connector)| (name.clone(), connector.to_string()))
+                .collect::<HashMap<_, _>>();
+
+            let subgraph_planner = Arc::new(
+                planner
+                    .update(
+                        connector_schema_s.clone(),
+                        QueryPlannerConfig {
+                            incremental_delivery: Some(IncrementalDeliverySupport {
+                                enable_defer: Some(configuration.supergraph.defer_support),
+                            }),
+                            graphql_validation: matches!(
+                                configuration.experimental_graphql_validation_mode,
+                                GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
+                            ),
+                            reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
+                            debug: Some(QueryPlannerDebugConfig {
+                                bypass_planner_for_single_subgraph: None,
+                                max_evaluated_plans: configuration
                                     .supergraph
-                                    .reuse_query_fragments,
-                                debug: Some(QueryPlannerDebugConfig {
-                                    bypass_planner_for_single_subgraph: None,
-                                    max_evaluated_plans: configuration
-                                        .supergraph
-                                        .query_planning
-                                        .experimental_plans_limit
-                                        .or(Some(10000)),
-                                    paths_limit: configuration
-                                        .supergraph
-                                        .query_planning
-                                        .experimental_paths_limit,
-                                }),
-                            },
-                        )
-                        .await?,
-                );
-                subgraph_planners.insert(name, subgraph_planner);
+                                    .query_planning
+                                    .experimental_plans_limit
+                                    .or(Some(10000)),
+                                paths_limit: configuration
+                                    .supergraph
+                                    .query_planning
+                                    .experimental_paths_limit,
+                            }),
+                        },
+                    )
+                    .await?,
+            );
+
+            for name in connector_subgraph_names {
+                subgraph_planners.insert(name, subgraph_planner.clone());
             }
+
+            (subgraph_planners, connector_urls)
+        } else {
+            (Default::default(), Default::default())
         };
 
         let subgraph_schema_strings = planner.subgraphs().await?;
@@ -1175,7 +1178,7 @@ mod tests {
         s!(r#"query Q($s1:Boolean!) { me {
             username
             name {
-                ... @defer(label: "A") { 
+                ... @defer(label: "A") {
                     first
                     last @skip(if: $s1)
                 }

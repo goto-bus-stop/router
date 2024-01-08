@@ -8,6 +8,7 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
 use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::schema::Name;
+use apollo_compiler::validation::Valid;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use itertools::Itertools;
@@ -32,7 +33,7 @@ use super::join_spec_helpers::make_any_scalar;
 pub(crate) fn generate_connector_supergraph(
     schema: &Schema,
     connectors: &HashMap<String, Connector>,
-) -> Result<Schema, ConnectorSupergraphError> {
+) -> Result<Valid<Schema>, ConnectorSupergraphError> {
     let mut new_schema = Schema::new();
     copy_definitions(schema, &mut new_schema);
 
@@ -64,7 +65,7 @@ pub(crate) fn generate_connector_supergraph(
         join_graph_enum(&connector_graph_names),
     );
 
-    Ok(new_schema)
+    new_schema.validate().map_err(InvalidInnerSupergraph)
 }
 
 /// Generate a list of changes to apply to the new schame
@@ -906,6 +907,9 @@ pub(crate) enum ConnectorSupergraphError {
 
     /// Invalid GraphQL name
     InvalidName(#[from] apollo_compiler::ast::InvalidNameError),
+
+    /// Invalid inner supergraph: {0}
+    InvalidInnerSupergraph(apollo_compiler::validation::WithErrors<apollo_compiler::Schema>),
 }
 use ConnectorSupergraphError::*;
 
@@ -941,6 +945,7 @@ mod tests {
     use std::sync::Arc;
 
     use apollo_compiler::Schema;
+    use insta::assert_debug_snapshot;
     use insta::assert_snapshot;
     use itertools::Itertools;
 
@@ -965,28 +970,33 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(
+        assert_snapshot!(inner.serialize().to_string());
+
+        assert_debug_snapshot!(
             result
                 .subgraph_definition_and_names
                 .values()
                 .sorted()
                 .cloned()
                 .collect::<Vec<_>>(),
-            vec![
-                "CONNECTOR_ENTITYACROSSBOTH_0".to_string(),
-                "CONNECTOR_ENTITYACROSSBOTH_E_0".to_string(),
-                "CONNECTOR_HELLO_1".to_string(),
-                "CONNECTOR_HELLO_WORLD_1".to_string(),
-                "CONNECTOR_MUTATION_MUTATION_2".to_string(),
-                "CONNECTOR_QUERY_HELLO_3".to_string(),
-                "CONNECTOR_QUERY_INTERFACES_5".to_string(),
-                "CONNECTOR_QUERY_UNIONS_6".to_string(),
-                "CONNECTOR_QUERY_WITHARGUMENTS_4".to_string(),
-                "CONNECTOR_TESTINGINTERFACEOBJECT_2".to_string(),
-                "CONNECTOR_TESTINGINTERFACEOBJECT_D_7".to_string()
-            ]
+            @r###"
+        [
+            "CONNECTOR_ENTITYACROSSBOTH_0",
+            "CONNECTOR_ENTITYACROSSBOTH_E_0",
+            "CONNECTOR_HELLO_1",
+            "CONNECTOR_HELLO_WORLD_1",
+            "CONNECTOR_MUTATION_MUTATION_2",
+            "CONNECTOR_QUERY_HELLO_3",
+            "CONNECTOR_QUERY_INTERFACES_5",
+            "CONNECTOR_QUERY_INTERNAL_DEPENDENCIES_7",
+            "CONNECTOR_QUERY_UNIONS_6",
+            "CONNECTOR_QUERY_WITHARGUMENTS_4",
+            "CONNECTOR_TESTINGINTERFACEOBJECT_2",
+            "CONNECTOR_TESTINGINTERFACEOBJECT_D_8",
+            "CONNECTOR_TESTINTERNALDEPENDENCY_C_9",
+            "CONNECTOR_TESTREQUIRES_SHIPPINGCOST_10",
+        ]
+        "###
         );
-
-        assert_snapshot!(inner.serialize().to_string());
     }
 }

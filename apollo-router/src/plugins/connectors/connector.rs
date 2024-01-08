@@ -9,6 +9,7 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
 use tower::BoxError;
 
+use super::directives::graph_enum_map;
 use super::directives::SourceAPI;
 use super::directives::SourceField;
 use super::directives::SourceType;
@@ -166,6 +167,12 @@ impl Connector {
 
     /// Generate a map of connectors with unique names
     pub(crate) fn from_schema(schema: &Schema) -> Result<HashMap<String, Self>, BoxError> {
+        // NOTE: crate::spec::Schema::parse might be called with an API schema, which doesn't have a join__Graph
+        // TODO: we can extract this map once and pass it to the ::from_schema functions instead of generating it for each connector type
+        if graph_enum_map(schema).is_none() {
+            return Ok(Default::default());
+        }
+
         let apis = SourceAPI::from_schema(schema)?;
         let types = SourceType::from_schema(schema)?;
         let fields = SourceField::from_schema(schema)?;

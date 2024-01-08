@@ -18,6 +18,8 @@ use crate::configuration::GraphQLValidationMode;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
 use crate::error::ValidationErrors;
+use crate::plugins::connectors::connectors_from_schema;
+use crate::plugins::connectors::Connectors;
 use crate::query_planner::OperationKind;
 use crate::Configuration;
 
@@ -34,6 +36,10 @@ pub(crate) struct Schema {
     pub(crate) schema_id: Option<String>,
     #[allow(dead_code)]
     pub(crate) subgraph_definition_and_names: HashMap<String, String>,
+
+    /// If the schema contains connectors, we'll extract them and the inner
+    /// supergraph schema here for use in the router factory and query planner.
+    pub(crate) connectors: Option<Connectors>,
 }
 
 #[cfg(test)]
@@ -140,6 +146,9 @@ impl Schema {
 
         let implementers_map = definitions.implementers_map();
 
+        let connectors = connectors_from_schema(&definitions)
+            .map_err(|e| SchemaError::Connector(format!("Failed to create connectors: {}", e)))?;
+
         Ok(Schema {
             raw_sdl: Arc::new(sdl.to_owned()),
             definitions,
@@ -149,6 +158,7 @@ impl Schema {
             api_schema: None,
             schema_id,
             subgraph_definition_and_names,
+            connectors,
         })
     }
 
@@ -326,7 +336,7 @@ mod tests {
             type Baz {
               me: String
             }
-            
+
             union UnionType2 = Foo | Bar
             "#,
             );

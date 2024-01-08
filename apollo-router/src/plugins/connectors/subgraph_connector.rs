@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
 
+use apollo_compiler::validation::Valid;
+use apollo_compiler::Schema;
 use futures::future::BoxFuture;
 use hyper::client::HttpConnector;
 use hyper_rustls::ConfigBuilderExt;
@@ -16,7 +18,6 @@ use crate::services::trust_dns_connector::new_async_http_connector;
 use crate::services::trust_dns_connector::AsyncHyperResolver;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
-use crate::spec::Schema;
 
 static CONNECTOR_HTTP_REQUEST: &str = "connector http request";
 
@@ -27,7 +28,7 @@ pub(crate) struct SubgraphConnector {
 
 impl SubgraphConnector {
     pub(crate) fn for_schema(
-        schema: Arc<Schema>,
+        schema: Arc<Valid<Schema>>,
         connectors: HashMap<String, &Connector>,
     ) -> Result<Self, BoxError> {
         let http_connectors = connectors
@@ -73,13 +74,13 @@ impl tower::Service<SubgraphRequest> for SubgraphConnector {
 
 #[derive(Clone)]
 pub(crate) struct HTTPConnector {
-    schema: Arc<Schema>,
+    schema: Arc<Valid<Schema>>,
     connector: Connector,
     client: hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>>,
 }
 
 impl HTTPConnector {
-    pub(crate) fn new(schema: Arc<Schema>, connector: Connector) -> Result<Self, BoxError> {
+    pub(crate) fn new(schema: Arc<Valid<Schema>>, connector: Connector) -> Result<Self, BoxError> {
         let mut http_connector = new_async_http_connector()?;
         http_connector.set_nodelay(true);
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
@@ -116,7 +117,7 @@ impl HTTPConnector {
         let client = self.client.clone();
 
         let subgraph_name = request.subgraph_name.clone();
-        let requests = connector.create_requests(request, Arc::from(schema.definitions.clone()))?;
+        let requests = connector.create_requests(request, schema.clone())?;
 
         let http_request_span = tracing::info_span!(
             CONNECTOR_HTTP_REQUEST,

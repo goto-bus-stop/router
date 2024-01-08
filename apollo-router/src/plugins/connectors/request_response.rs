@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use apollo_compiler::executable::Selection;
@@ -23,7 +24,7 @@ const ENTITIES: &str = "_entities";
 #[derive(Debug)]
 pub(crate) struct ResponseParams {
     key: ResponseKey,
-    source_api_name: Arc<String>,
+    source_api_name: Cow<'static, str>,
 }
 
 #[derive(Clone, Debug)]
@@ -87,7 +88,7 @@ fn request_params_to_requests(
 
             let response_params = ResponseParams {
                 key: response_key,
-                source_api_name: connector.transport.source_api_name(),
+                source_api_name: connector.transport.source_api_name().clone(),
             };
 
             Ok((request, response_params))
@@ -412,10 +413,12 @@ pub(super) async fn handle_responses(
             .get::<ResponseParams>()
             .ok_or_else(|| MissingResponseParams)?;
 
-        tracing::info!(
-            monotonic_counter.apollo.router.operations.source.rest = 1u64,
-            rest.response.api = %*response_params.source_api_name,
-            rest.response.status_code = parts.status.as_u16(),
+        u64_counter!(
+            "apollo.router.operations.source.rest",
+            "rest source api calls",
+            1,
+            rest.response.api = response_params.source_api_name.clone(),
+            rest.response.status_code = parts.status.as_u16() as i64
         );
 
         if parts.status.is_success() {
@@ -522,6 +525,7 @@ fn inject_typename(data: &mut Value, typename: &str) {
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
     use std::sync::Arc;
 
     use apollo_compiler::name;
@@ -1028,7 +1032,7 @@ mod tests {
             }),
         };
 
-        let source_api_name = Arc::new("API".to_string());
+        let source_api_name = "API";
 
         let directive = SourceField {
             graph: "B".to_string(),
@@ -1056,7 +1060,7 @@ mod tests {
                     name: "hello".to_string(),
                     typename: super::ResponseTypeName::Concrete("String".to_string()),
                 },
-                source_api_name: Arc::clone(&source_api_name),
+                source_api_name: Cow::from(source_api_name),
             })
             .body(hyper::Body::from(r#"{"data":"world"}"#))
             .expect("response builder");
@@ -1067,7 +1071,7 @@ mod tests {
                     name: "hello2".to_string(),
                     typename: super::ResponseTypeName::Concrete("String".to_string()),
                 },
-                source_api_name: Arc::clone(&source_api_name),
+                source_api_name: Cow::from(source_api_name),
             })
             .body(hyper::Body::from(r#"{"data":"world"}"#))
             .expect("response builder");

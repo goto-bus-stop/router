@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Display;
@@ -63,9 +64,9 @@ pub(super) enum ConnectorTransport {
 }
 
 impl ConnectorTransport {
-    pub(super) fn source_api_name(&self) -> Arc<String> {
+    pub(super) fn source_api_name(&self) -> Cow<'static, str> {
         match self {
-            Self::HttpJson(transport) => Arc::clone(&transport.source_api_name),
+            Self::HttpJson(transport) => transport.source_api_name.clone(),
         }
     }
 }

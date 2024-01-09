@@ -29,3 +29,6 @@ include_subgraph_errors:
 plugins:
   experimental.expose_query_plan: true
 experimental_graphql_validation_mode: both
+
+# override_subgraph_url:
+#   ipinfo: http://127.0.0.1:1234

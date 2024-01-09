@@ -237,6 +237,16 @@ impl Connector {
                 .into()
             })
     }
+
+    pub(crate) fn api_name(&self) -> &str {
+        &self.api
+    }
+
+    pub(crate) fn override_base_url(&mut self, url: url::Url) {
+        match &mut self.transport {
+            ConnectorTransport::HttpJson(transport) => transport.base_uri = url,
+        }
+    }
 }
 
 impl Display for Connector {

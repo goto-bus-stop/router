@@ -29,7 +29,7 @@ pub(crate) struct SubgraphConnector {
 impl SubgraphConnector {
     pub(crate) fn for_schema(
         schema: Arc<Valid<Schema>>,
-        connectors: HashMap<String, &Connector>,
+        connectors: HashMap<String, Connector>,
     ) -> Result<Self, BoxError> {
         let http_connectors = connectors
             .into_iter()

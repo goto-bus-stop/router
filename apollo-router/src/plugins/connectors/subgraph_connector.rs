@@ -181,6 +181,7 @@ mod tests {
     use mime::APPLICATION_JSON;
     use tower::ServiceExt;
 
+    use crate::metrics::FutureMetricsExt;
     use crate::router_factory::YamlRouterFactory;
     use crate::services::new_service::ServiceFactory;
     use crate::services::supergraph;
@@ -286,16 +287,28 @@ mod tests {
             .unwrap()
             .try_into()
             .unwrap();
-        let response = service
-            .oneshot(request)
-            .await
-            .unwrap()
-            .next_response()
-            .await
-            .unwrap()
-            .unwrap();
-        let response: serde_json::Value = serde_json::from_slice(&response).unwrap();
 
-        insta::assert_json_snapshot!(response);
+        async {
+            let response = service
+                .oneshot(request)
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap()
+                .unwrap();
+            let response: serde_json::Value = serde_json::from_slice(&response).unwrap();
+
+            insta::assert_json_snapshot!(response);
+
+            assert_counter!(
+                "apollo.router.operations.source.rest",
+                1,
+                "rest.response.api" = "ipinfo",
+                "rest.response.status_code" = 200
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }

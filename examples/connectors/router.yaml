@@ -24,12 +24,6 @@ sandbox:
   enabled: true
 homepage:
   enabled: false
-include_subgraph_errors:
-  all: true # Propagate errors from all subraphs
-plugins:
-  experimental.expose_query_plan: true
-experimental_graphql_validation_mode: both
-
 preview_connectors:
   subgraphs:
     network: # network is the subgraph name where source directives were defined
@@ -37,4 +31,10 @@ preview_connectors:
         override_url: "http://localhost:4002"
       weather:
         override_url: "http://localhost:4003"
-        
+
+include_subgraph_errors:
+  all: true # Propagate errors from all subgraphs
+plugins:
+  experimental.expose_query_plan: true
+experimental_graphql_validation_mode: both
+

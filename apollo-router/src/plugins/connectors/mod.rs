@@ -7,6 +7,7 @@ mod selection_parser;
 pub(crate) mod subgraph_connector;
 mod supergraph;
 pub(crate) use supergraph::generate_connector_supergraph;
+pub(crate) mod configuration;
 mod http_json_transport;
 mod request_inputs;
 mod request_response;

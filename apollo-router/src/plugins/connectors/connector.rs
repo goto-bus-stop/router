@@ -28,7 +28,7 @@ pub(crate) struct Connector {
     /// Internal name used to construct "subgraphs" in the inner supergraph
     pub(super) name: String,
     /// The api name, as defined in the `sourceAPI` directive
-    api: String,
+    pub(super) api: String,
     pub(crate) origin_subgraph: String,
     pub(super) kind: ConnectorKind,
     pub(super) transport: ConnectorTransport,
@@ -236,10 +236,6 @@ impl Connector {
                 )
                 .into()
             })
-    }
-
-    pub(crate) fn api_name(&self) -> &str {
-        &self.api
     }
 
     pub(crate) fn override_base_url(&mut self, url: url::Url) {

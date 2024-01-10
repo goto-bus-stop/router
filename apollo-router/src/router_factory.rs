@@ -181,27 +181,11 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
 
         // handle connectors
         let connector_subgraphs = if let Some((connector_schema, connectors)) = &schema.connectors {
-            let mut aggregated_connectors: HashMap<String, HashMap<String, Connector>> =
+            let mut aggregated_connectors: HashMap<String, HashMap<String, &Connector>> =
                 HashMap::new();
-            let override_url_map = configuration
-                .apollo_plugins
-                .plugins
-                .iter()
-                .find(|(s, _)| s.as_str() == "override_subgraph_url")
-                .and_then(|v| v.1.as_object());
 
             for (name, connector) in connectors.iter() {
                 let subgraph_name = connector.origin_subgraph.clone();
-                let mut connector = connector.clone();
-                if let Some(url) = override_url_map
-                    .as_ref()
-                    .and_then(|obj| obj.get(connector.api_name()).and_then(|v| v.as_str()))
-                {
-                    // the URL has already been parsed during config deserialization, but let's avoid an unwrap anyway
-                    if let Some(url) = url::Url::parse(url).ok() {
-                        connector.override_base_url(url);
-                    }
-                }
 
                 aggregated_connectors
                     .entry(subgraph_name)
@@ -210,10 +194,12 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             }
             let mut subgraph_connectors = HashMap::new();
             for (name, connectors_map) in aggregated_connectors.into_iter() {
-                subgraph_connectors.insert(
-                    name,
-                    SubgraphConnector::for_schema(connector_schema.clone(), connectors_map)?,
-                );
+                let connector = SubgraphConnector::for_schema(
+                    connector_schema.clone(),
+                    configuration.preview_connectors.subgraphs.get(&name),
+                    connectors_map,
+                )?;
+                subgraph_connectors.insert(name, connector);
             }
 
             subgraph_connectors

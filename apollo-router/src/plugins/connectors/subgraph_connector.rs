@@ -12,6 +12,7 @@ use tower::BoxError;
 use tracing::Instrument;
 use tracing::Span;
 
+use super::configuration::SourceApiConfiguration;
 use super::Connector;
 use crate::plugins::telemetry::OTEL_STATUS_CODE;
 use crate::services::trust_dns_connector::new_async_http_connector;
@@ -29,13 +30,18 @@ pub(crate) struct SubgraphConnector {
 impl SubgraphConnector {
     pub(crate) fn for_schema(
         schema: Arc<Valid<Schema>>,
-        connectors: HashMap<String, Connector>,
+        configuration: Option<&HashMap<String, SourceApiConfiguration>>,
+        connectors: HashMap<String, &Connector>,
     ) -> Result<Self, BoxError> {
         let http_connectors = connectors
             .into_iter()
             .map(|(name, connector)| {
-                HTTPConnector::new(schema.clone(), connector.clone())
-                    .map(|connector| (name, connector))
+                HTTPConnector::new(
+                    schema.clone(),
+                    connector.clone(),
+                    configuration.and_then(|c| c.get(&name)),
+                )
+                .map(|connector| (name, connector))
             })
             .collect::<Result<HashMap<_, _>, _>>()?;
         Ok(Self { http_connectors })
@@ -80,7 +86,11 @@ pub(crate) struct HTTPConnector {
 }
 
 impl HTTPConnector {
-    pub(crate) fn new(schema: Arc<Valid<Schema>>, connector: Connector) -> Result<Self, BoxError> {
+    pub(crate) fn new(
+        schema: Arc<Valid<Schema>>,
+        mut connector: Connector,
+        configuration: Option<&SourceApiConfiguration>,
+    ) -> Result<Self, BoxError> {
         let mut http_connector = new_async_http_connector()?;
         http_connector.set_nodelay(true);
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
@@ -99,6 +109,10 @@ impl HTTPConnector {
             .wrap_connector(http_connector);
         //TODO: add decompression
         let client = hyper::Client::builder().build(http_connector);
+
+        if let Some(url) = configuration.and_then(|c| c.override_url.clone()) {
+            connector.override_base_url(url);
+        }
 
         Ok(Self {
             schema,

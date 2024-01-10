@@ -1,16 +1,22 @@
+use core::ops::ControlFlow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use http::HeaderValue;
+use serde_json_bytes::json;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 
 use crate::graphql;
+use crate::layers::ServiceBuilderExt;
 use crate::plugin::test::MockSubgraph;
 use crate::services::router::ClientRequestAccepts;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::services::ExecutionRequest;
+use crate::services::ExecutionResponse;
 use crate::spec::Schema;
 use crate::test_harness::MockedSubgraphs;
 use crate::Configuration;
@@ -2988,4 +2994,186 @@ async fn fragment_reuse() {
         .unwrap();
 
     insta::assert_json_snapshot!(response);
+}
+
+#[tokio::test]
+async fn connector_service_name() {
+    const SCHEMA: &str = r#"schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  @link(
+    url: "https://specs.apollo.dev/source/v0.1"
+    import: ["@sourceAPI", "@sourceType", "@sourceField"]
+  )
+  @join__directive(
+    graphs: [NETWORK]
+    name: "sourceAPI"
+    args: { name: "ipinfo", http: { baseURL: "https://ip.demo.starstuff.dev" } }
+  )
+  {
+    query: Query
+  }
+
+  directive @join__implements(
+    graph: join__Graph!
+    interface: String!
+  ) repeatable on OBJECT | INTERFACE
+
+  directive @join__directive(
+    graphs: [join__Graph!]
+    name: String!
+    args: join__DirectiveArguments
+  ) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+  scalar join__DirectiveArguments
+    @specifiedBy(url: "http://just-to-avoid-valiadation-warnings")
+
+  enum link__Purpose {
+    """
+    `SECURITY` features provide metadata necessary to securely resolve fields.
+    """
+    SECURITY
+
+    """
+    `EXECUTION` features provide metadata necessary for operation execution.
+    """
+    EXECUTION
+  }
+
+  scalar join__FieldSet
+    @specifiedBy(url: "http://just-to-avoid-valiadation-warnings")
+
+  directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+  directive @join__field(
+    graph: join__Graph
+    requires: join__FieldSet
+    provides: join__FieldSet
+    type: String
+    external: Boolean
+    override: String
+    usedOverridden: Boolean
+    directives: join__FieldSet
+  ) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+  directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+  directive @join__type(
+    graph: join__Graph!
+    key: join__FieldSet
+    extension: Boolean! = false
+    resolvable: Boolean! = true
+    isInterfaceObject: Boolean! = false
+    directives: join__FieldSet
+  ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+  directive @link(
+    url: String
+    as: String
+    for: link__Purpose
+    import: [link__Import]
+  ) repeatable on SCHEMA
+
+  scalar link__Import
+    @specifiedBy(url: "http://just-to-avoid-valiadation-warnings")
+
+  enum join__Graph {
+    NETWORK @join__graph(name: "network", url: "http://network-subgraph")
+  }
+
+  type Query
+    @join__type(graph: NETWORK) {
+    serverNetworkInfo: IP
+      @join__field(graph: NETWORK)
+      @join__directive(
+        graphs: [NETWORK]
+        name: "sourceField"
+        args: {
+          api: "ipinfo"
+          http: { GET: "/json" }
+          selection: "ip hostname city region country loc org postal timezone readme"
+        }
+      )
+  }
+
+  type IP
+    @join__type(
+      graph: NETWORK
+      key: "ip"
+      directives: [
+        {
+          name: "sourceType"
+          args: {
+            api: "ipinfo"
+            http: { GET: "/json" }
+            selection: "ip hostname city region country loc org postal timezone readme"
+          }
+        }
+      ]
+    ) {
+    ip: ID!
+    hostname: String
+    city: String
+    region: String
+    country: String
+    loc: String
+    org: String
+    postal: String
+    timezone: String
+    readme: String
+  }
+"#;
+
+    let expected_service_name = "network.ipinfo: GET /json";
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .execution_hook(move |service| {
+            ServiceBuilder::new()
+                .checkpoint(move |req: ExecutionRequest| {
+                    // check the connector service name
+                    assert_eq!(
+                        expected_service_name,
+                        req.query_plan.root.service_usage().next().unwrap()
+                    );
+
+                    Ok(ControlFlow::Break(
+                        ExecutionResponse::fake_builder()
+                            .context(req.context)
+                            .data(json! {{"hello": "world"}})
+                            .build()
+                            .unwrap(),
+                    ))
+                })
+                .service(service)
+                .boxed()
+        })
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(
+            r#"query TestServerNetworkInfo {
+              serverNetworkInfo {
+                hostname
+                ip
+                loc
+                org
+              }
+            }"#,
+        )
+        .build()
+        .unwrap();
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    assert_eq!(json! {{"hello": "world"}}, response.data.unwrap());
 }

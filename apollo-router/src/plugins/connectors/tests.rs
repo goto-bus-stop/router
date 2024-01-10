@@ -536,7 +536,7 @@ async fn basic_errors() {
         {
           "message": "http error: 404 Not Found",
           "extensions": {
-            "connector": "a: GET /hello",
+            "connector": "kitchen-sink.a: GET /hello",
             "code": "404"
           }
         }

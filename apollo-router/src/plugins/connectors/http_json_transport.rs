@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use apollo_compiler::ast::Selection as GraphQLSelection;
 use displaydoc::Display;
 use serde_json_bytes::Value;
@@ -21,7 +23,7 @@ pub(super) struct HttpJsonTransport {
     pub(super) method: http::Method,
     #[allow(dead_code)]
     pub(super) headers: Vec<HttpHeader>,
-
+    pub(super) source_api_name: Cow<'static, str>,
     pub(super) path_template: URLPathTemplate,
     pub(super) response_mapper: JSONSelection,
     pub(super) body_mapper: Option<JSONSelection>,
@@ -51,6 +53,7 @@ impl HttpJsonTransport {
             path_template: http.path_template.clone(),
             response_mapper: directive.selection.clone(),
             body_mapper: http.body.clone(),
+            source_api_name: Cow::from(api.name.clone()),
         })
     }
 
@@ -77,6 +80,7 @@ impl HttpJsonTransport {
             path_template: http.path_template.clone(),
             response_mapper: directive.selection.clone(),
             body_mapper: http.body.clone(),
+            source_api_name: Cow::from(api.name.clone()),
         })
     }
 

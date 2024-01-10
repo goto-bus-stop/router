@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Display;
@@ -60,6 +61,14 @@ pub(super) enum ConnectorKind {
 #[derive(Clone, Debug)]
 pub(super) enum ConnectorTransport {
     HttpJson(HttpJsonTransport),
+}
+
+impl ConnectorTransport {
+    pub(super) fn source_api_name(&self) -> Cow<'static, str> {
+        match self {
+            Self::HttpJson(transport) => transport.source_api_name.clone(),
+        }
+    }
 }
 
 /// The list of the subgraph names that should use the inner query planner

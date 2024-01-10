@@ -10,10 +10,7 @@ use url::Url;
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Connectors {
     /// Per subgraph configuration
-    pub(crate) subgraphs: HashMap<
-        String,
-        HashMap<String, SourceApiConfiguration>,
-    >,
+    pub(crate) subgraphs: HashMap<String, HashMap<String, SourceApiConfiguration>>,
 }
 
 /// Configuration for a connector subgraph

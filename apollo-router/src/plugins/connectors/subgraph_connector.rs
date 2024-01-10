@@ -39,7 +39,7 @@ impl SubgraphConnector {
                 HTTPConnector::new(
                     schema.clone(),
                     connector.clone(),
-                    configuration.and_then(|c| c.get(&name)),
+                    configuration.and_then(|c| c.get(&connector.api)),
                 )
                 .map(|connector| (name, connector))
             })

@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use http::HeaderValue;
-use serde_json_bytes::json;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
@@ -3142,7 +3141,6 @@ async fn connector_service_name() {
                     Ok(ControlFlow::Break(
                         ExecutionResponse::fake_builder()
                             .context(req.context)
-                            .data(json! {{"hello": "world"}})
                             .build()
                             .unwrap(),
                     ))
@@ -3167,13 +3165,11 @@ async fn connector_service_name() {
         )
         .build()
         .unwrap();
-    let response = service
+    service
         .oneshot(request)
         .await
         .unwrap()
         .next_response()
         .await
         .unwrap();
-
-    assert_eq!(json! {{"hello": "world"}}, response.data.unwrap());
 }

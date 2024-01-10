@@ -251,7 +251,11 @@ impl Connector {
 impl Display for Connector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let ConnectorTransport::HttpJson(tr) = &self.transport;
-        write!(f, "{}: {} {}", self.api, tr.method, tr.path_template)
+        write!(
+            f,
+            "{}.{}: {} {}",
+            self.origin_subgraph, self.api, tr.method, tr.path_template
+        )
     }
 }
 

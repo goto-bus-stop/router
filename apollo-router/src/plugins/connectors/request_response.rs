@@ -7,11 +7,14 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Schema;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
+use tower::BoxError;
 
 use super::connector::ConnectorKind;
 use super::connector::ConnectorTransport;
 use super::http_json_transport::HttpJsonTransportError;
 use super::request_inputs::RequestInputs;
+use super::response_formatting::execute;
+use super::response_formatting::JsonMap;
 use super::Connector;
 use crate::json_ext::Object;
 use crate::services::SubgraphRequest;
@@ -132,6 +135,9 @@ pub(super) enum HandleResponseError {
 
     /// Merge error: {0}
     MergeError(String),
+
+    /// ResponseFormattingError
+    ResponseFormattingError,
 }
 
 // --- ROOT FIELDS -------------------------------------------------------------
@@ -399,11 +405,21 @@ fn entities_with_fields_from_request(
 // --- RESPONSES ---------------------------------------------------------------
 
 pub(super) async fn handle_responses(
+    schema: &Valid<Schema>,
+    document: Option<String>,
     context: Context,
     connector: &Connector,
     responses: Vec<http::Response<hyper::Body>>,
 ) -> Result<SubgraphResponse, HandleResponseError> {
     use HandleResponseError::*;
+
+    // If the query plan fetch used the "magic finder" field, we'll stick the
+    // response data under that key so we can apply the GraphQL selection
+    // set to handle aliases and type names.
+    let (document, magic_response_key) =
+        handle_magic_finder(document, connector, schema).map_err(|_| ResponseFormattingError)?;
+    let original_magic_response_key = magic_response_key.clone();
+    let response_key = magic_response_key.unwrap_or(ENTITIES.into());
 
     let mut data = serde_json_bytes::Map::new();
     let mut errors = Vec::new();
@@ -459,7 +475,9 @@ pub(super) async fn handle_responses(
                         inject_typename(&mut res_data, typename);
                     }
 
-                    let entities = data.entry(ENTITIES).or_insert(Value::Array(vec![]));
+                    let entities = data
+                        .entry(response_key.clone())
+                        .or_insert(Value::Array(vec![]));
                     entities
                         .as_array_mut()
                         .ok_or_else(|| MergeError("entities is not an array".into()))?
@@ -474,7 +492,7 @@ pub(super) async fn handle_responses(
                     ref typename,
                 } => {
                     let entities = data
-                        .entry(ENTITIES)
+                        .entry(response_key.clone())
                         .or_insert(Value::Array(vec![]))
                         .as_array_mut()
                         .ok_or_else(|| MergeError("entities is not an array".into()))?;
@@ -506,6 +524,18 @@ pub(super) async fn handle_responses(
         }
     }
 
+    // Apply the GraphQL operation's selection set to the result to handle
+    // aliases and type names.
+    let mut data = format_response(schema, &document, data);
+
+    // Before we return the response, we ensure that the entity data is under
+    // the `_entities` key. The execution service knows how to merge that data
+    // correctly (it doesn't know anything about "magic finder" fields).
+    if let Some(response_key) = original_magic_response_key {
+        let entities = data.remove(&response_key).ok_or(ResponseFormattingError)?;
+        data.insert(ENTITIES, entities);
+    }
+
     let response = SubgraphResponse::builder()
         .data(Value::Object(data))
         .errors(errors)
@@ -515,6 +545,54 @@ pub(super) async fn handle_responses(
         .build();
 
     Ok(response)
+}
+
+/// Special handling for "magic_finder" fields:
+///
+/// The "inner" supergraph doesn't expose an `_entities` field. Instead we inject
+/// fields like `_EntityName_finder` to query plan against. This
+/// transformation happens in [`FetchNode::generate_connector_plan`].
+///
+/// In order to format the response according to the incoming client
+/// operation, we need the operation to be valid against the inner supergraph.
+/// This code does a simple string replacement if necessary and passes the
+/// response key to the response formatting code.
+fn handle_magic_finder(
+    document: Option<String>,
+    connector: &Connector,
+    schema: &Valid<Schema>,
+) -> Result<(Valid<ExecutableDocument>, Option<ByteString>), BoxError> {
+    let mut document = document.ok_or("missing document")?;
+    let mut magic_response_key = None;
+
+    if let Some(finder_field_name) = connector.finder_field_name() {
+        if document.contains("_entities") {
+            document = document.replace("_entities", finder_field_name.as_str());
+            magic_response_key = Some(finder_field_name);
+        } else if document.contains(finder_field_name.as_str()) {
+            magic_response_key = Some(finder_field_name);
+        }
+    }
+
+    let document = ExecutableDocument::parse_and_validate(schema, document, "document.graphql")
+        .map_err(|_| "failed to parse document")?;
+
+    Ok((document, magic_response_key))
+}
+
+fn format_response(
+    schema: &Valid<Schema>,
+    document: &Valid<ExecutableDocument>,
+    data: JsonMap,
+) -> JsonMap {
+    let mut diagnostics = vec![];
+    let result = execute(schema, document, diagnostics.as_mut(), data);
+    if !diagnostics.is_empty() {
+        for diagnostic in diagnostics {
+            tracing::debug!("{:?}", diagnostic);
+        }
+    }
+    result
 }
 
 fn inject_typename(data: &mut Value, typename: &str) {
@@ -1079,10 +1157,25 @@ mod tests {
             .body(hyper::Body::from(r#"{"data":"world"}"#))
             .expect("response builder");
 
-        let res =
-            super::handle_responses(Context::default(), &connector, vec![response1, response2])
-                .await
-                .unwrap();
+        let schema = Schema::parse_and_validate(
+            "
+            type Query {
+                hello: String
+            }
+            ",
+            "schema.graphql",
+        )
+        .unwrap();
+
+        let res = super::handle_responses(
+            &schema,
+            Some("{hello hello2: hello}".to_string()),
+            Context::default(),
+            &connector,
+            vec![response1, response2],
+        )
+        .await
+        .unwrap();
 
         assert_debug_snapshot!(res.response.body(), @r###"
         Response {

@@ -257,6 +257,34 @@ mod mock_subgraph {
                     })),
             )
     }
+
+    pub(super) fn interface_object() -> Mock {
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_json(serde_json::json!({
+              "query": "{interfaceObject{__typename id ...on IOa{__typename id a}...on IOb{__typename id b}}}"
+            })))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .set_body_json(serde_json::json!({
+                      "data": {
+                        "interfaceObject": [
+                          {
+                            "__typename": "IOa",
+                            "id": "a-1",
+                            "a": "a1",
+                          },
+                          {
+                            "__typename": "IOb",
+                            "id": "b-2",
+                            "b": "b102",
+                          },
+                        ]
+                      }
+                    })),
+            )
+    }
 }
 
 #[tokio::test]
@@ -459,7 +487,7 @@ async fn test_entity_join() {
 }
 
 #[tokio::test]
-async fn aliases_on_connector_fields() {
+async fn test_aliases_on_connector_fields() {
     let mock_server = MockServer::start().await;
     mock_api::mount_all(&mock_server).await;
     mock_subgraph::start_join().mount(&mock_server).await;
@@ -517,6 +545,282 @@ async fn aliases_on_connector_fields() {
           "alias3": "e",
           "alias4": "e"
         }
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn test_response_formatting_aliases() {
+    let mock_server = MockServer::start().await;
+    mock_api::mount_all(&mock_server).await;
+    mock_subgraph::start_join().mount(&mock_server).await;
+
+    // @sourceField on Query
+    // @sourceField on Hello.world
+    // @sourceType on Hello
+    let response = execute(
+        &mock_server.uri(),
+        r#"
+        query {
+          hello {
+            a: id
+            b: field
+            c: world {
+              d: field
+              e: nested {
+                f: field
+              }
+            }
+          }
+        }
+        "#,
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new().method("GET").path("/v1/hello").build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/hello/42/world")
+                .build(),
+            Matcher::new().method("GET").path("/v1/hello/42").build(),
+        ],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "hello": {
+          "a": 42,
+          "b": "hello",
+          "c": {
+            "d": "world",
+            "e": {
+              "f": "hi"
+            }
+          }
+        }
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn test_interface_object() {
+    let mock_server = MockServer::start().await;
+    mock_api::mount_all(&mock_server).await;
+    mock_subgraph::interface_object().mount(&mock_server).await;
+
+    // @sourceType on TestingInterfaceObject
+    // @sourceField on TestingInterfaceObject.d
+    let response = execute(
+        &mock_server.uri(),
+        r#"
+        query {
+          interfaceObject {
+            __typename
+            id
+            ... on IOa {
+              __typename
+              a
+              c
+              d
+            }
+            ... on IOb {
+              __typename
+              b
+              c
+              d
+            }
+          }
+        }
+        "#,
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new()
+                .method("POST")
+                .path("/graphql")
+                .body(serde_json::json!({
+                  "query": "{interfaceObject{__typename id ...on IOa{__typename id a}...on IOb{__typename id b}}}"
+                }))
+                .build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/interface-object/a-1")
+                .build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/interface-object/b-2")
+                .build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/interface-object/a-1/d")
+                .build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/interface-object/b-2/d")
+                .build(),
+        ],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "interfaceObject": [
+          {
+            "__typename": "IOa",
+            "id": "a-1",
+            "a": "a1",
+            "c": "c: 1",
+            "d": "d: 1"
+          },
+          {
+            "__typename": "IOb",
+            "id": "b-2",
+            "b": "b102",
+            "c": "c: 1",
+            "d": "d: 1"
+          }
+        ]
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn test_interfaces() {
+    let mock_server = MockServer::start().await;
+    mock_api::mount_all(&mock_server).await;
+    mock_subgraph::interface_object().mount(&mock_server).await;
+
+    // @sourceField on Query.interfaces
+    let response = execute(
+        &mock_server.uri(),
+        r#"
+        query {
+          interfaces {
+              __typename
+              id
+              ... on Ia {
+                a
+              }
+              ... on Ib {
+                b
+              }
+              nested {
+                __typename
+                id
+                ... on NIa {
+                  a
+                }
+                ... on NIb {
+                  b
+                }
+              }
+            }
+        }
+        "#,
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new().method("GET").path("/v1/interfaces").build()],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "interfaces": [
+          {
+            "__typename": "Ia",
+            "id": "i1",
+            "a": "a1",
+            "nested": {
+              "__typename": "NIa",
+              "id": "ni1",
+              "a": "na1"
+            }
+          },
+          {
+            "__typename": "Ib",
+            "id": "i2",
+            "b": "b2",
+            "nested": {
+              "__typename": "NIb",
+              "id": "ni2",
+              "b": "nb2"
+            }
+          }
+        ]
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn test_unions() {
+    let mock_server = MockServer::start().await;
+    mock_api::mount_all(&mock_server).await;
+    mock_subgraph::interface_object().mount(&mock_server).await;
+
+    // @sourceField on Query.unions
+    let response = execute(
+        &mock_server.uri(),
+        r#"
+        query {
+          unions {
+            __typename
+            ... on UnionA {
+              z
+              nested {
+                __typename
+                ... on NestedUnionC {
+                  x
+                }
+                ... on NestedUnionD {
+                  w
+                }
+              }
+            }
+            ... on UnionB {
+              y
+            }
+          }
+        }
+        "#,
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new().method("GET").path("/v1/unions").build()],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "unions": [
+          {
+            "__typename": "UnionA",
+            "z": "a1",
+            "nested": {
+              "__typename": "NestedUnionC",
+              "x": "na1"
+            }
+          },
+          {
+            "__typename": "UnionB",
+            "y": "b2"
+          }
+        ]
       }
     }
     "###);

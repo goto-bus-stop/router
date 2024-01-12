@@ -10,6 +10,7 @@ pub(crate) use supergraph::generate_connector_supergraph;
 mod http_json_transport;
 mod request_inputs;
 mod request_response;
+mod response_formatting;
 mod url_path_parser;
 
 #[cfg(test)]

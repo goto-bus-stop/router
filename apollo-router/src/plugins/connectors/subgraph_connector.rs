@@ -12,6 +12,8 @@ use tower::BoxError;
 use tracing::Instrument;
 use tracing::Span;
 
+use super::request_response::handle_responses;
+use super::request_response::make_requests;
 use super::Connector;
 use crate::plugins::telemetry::OTEL_STATUS_CODE;
 use crate::services::trust_dns_connector::new_async_http_connector;
@@ -117,7 +119,16 @@ impl HTTPConnector {
         let client = self.client.clone();
 
         let subgraph_name = request.subgraph_name.clone();
-        let requests = connector.create_requests(request, schema.clone())?;
+        let document = request.subgraph_request.body().query.clone();
+
+        let requests =
+            make_requests(request, &connector, schema.clone()).map_err(|e| -> BoxError {
+                format!(
+                    "Failed to create requests for connector `{}`: {}",
+                    connector.name, e
+                )
+                .into()
+            })?;
 
         let http_request_span = tracing::info_span!(
             CONNECTOR_HTTP_REQUEST,
@@ -158,7 +169,15 @@ impl HTTPConnector {
             Err(e) => return Err(BoxError::from(e)),
         };
 
-        let subgraph_response = connector.map_http_responses(responses, context).await?;
+        let subgraph_response = handle_responses(&schema, document, context, &connector, responses)
+            .await
+            .map_err(|e| -> BoxError {
+                format!(
+                    "Failed to map responses for connector `{}`: {}",
+                    connector.name, e
+                )
+                .into()
+            })?;
 
         Ok(subgraph_response)
     }
@@ -193,7 +212,7 @@ mod tests {
             request: http::Request<Body>,
         ) -> Result<http::Response<String>, Infallible> {
             /*
-                        type IP
+            type IP
               @join__type(graph: NETWORK, key: "ip")
               @sourceType(
                 graph: "network"
@@ -212,7 +231,7 @@ mod tests {
               timezone: String
               readme: String
             }
-                         */
+            */
 
             let res = if request.method() == Method::GET
             /*&& request.uri().path() == "/json"*/

@@ -14,6 +14,21 @@ schema
     graphs: [KITCHEN_SINK]
     name: "sourceAPI"
     args: { name: "a", http: { baseURL: "http://localhost:8080/v1/" } }
+  )
+  @join__directive(
+    graphs: [KITCHEN_SINK]
+    name: "sourceAPI"
+    args: {
+      name: "with_headers"
+      http: {
+        baseURL: "http://localhost:8080/v1/"
+        headers: [
+          { name: "x-propagate" }
+          { name: "x-insert", value: "inserted" }
+          { name: "x-rename", as: "x-new-name" }
+        ]
+      }
+    }
   ) {
   query: Query
   mutation: Mutation
@@ -294,6 +309,17 @@ type Query @join__type(graph: KITCHEN_SINK) @join__type(graph: NORMAL) {
       graphs: [KITCHEN_SINK]
       name: "sourceField"
       args: { api: "a", http: { GET: "/hello" }, selection: ".data { id }" }
+    )
+  helloWithHeaders: Hello
+    @join__field(graph: KITCHEN_SINK)
+    @join__directive(
+      graphs: [KITCHEN_SINK]
+      name: "sourceField"
+      args: {
+        api: "with_headers"
+        http: { GET: "/hello" }
+        selection: ".data { id }"
+      }
     )
   withArguments(value: String, done: Boolean, enum: InputEnum): String
     @join__field(graph: KITCHEN_SINK)

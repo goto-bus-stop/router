@@ -718,6 +718,82 @@ async fn test_simple_header_propagation() {
     "###);
 }
 
+#[tokio::test]
+async fn test_directive_header_propagation() {
+    let mock_server = MockServer::start().await;
+    mock_api::mount_all(&mock_server).await;
+
+    // @sourceField on Query.helloWithHeaders (from the "with_headers" sourceAPI)
+    // @sourceType on Hello
+    let response = execute(
+        &mock_server.uri(),
+        "query { helloWithHeaders { id field enum } }",
+        Some(serde_json::json!({
+          "include_subgraph_errors": { "all": true },
+          "headers": {
+            "subgraphs": {
+              "kitchen-sink": {
+                "request": [
+                  {
+                    "insert": {
+                      "name": "x-propagate",
+                      "value": "propagated"
+                    }
+                  },
+                  {
+                    "insert": {
+                      "name": "x-rename",
+                      "value": "renamed"
+                    }
+                  },
+                  {
+                    "insert": {
+                      "name": "x-ignore",
+                      "value": "ignored"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        })),
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new()
+                .method("GET")
+                .path("/v1/hello")
+                .header("x-propagate".into(), "propagated".parse().unwrap())
+                .header("x-new-name".into(), "renamed".parse().unwrap())
+                .header("x-insert".into(), "inserted".parse().unwrap())
+                .build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/hello/42")
+                // these are the passthrough headers because this connector uses the "a" api
+                .header("x-propagate".into(), "propagated".parse().unwrap())
+                .header("x-rename".into(), "renamed".parse().unwrap())
+                .header("x-ignore".into(), "ignored".parse().unwrap())
+                .build(),
+        ],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "helloWithHeaders": {
+          "id": 42,
+          "field": "hello",
+          "enum": "A"
+        }
+      }
+    }
+    "###);
+}
+
 const SCHEMA: &str = include_str!("./test_supergraph.graphql");
 
 async fn execute(uri: &str, query: &str, config: Option<serde_json::Value>) -> serde_json::Value {

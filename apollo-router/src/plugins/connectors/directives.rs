@@ -349,7 +349,6 @@ impl HTTPSourceAPI {
 #[derive(Clone, Debug, Serialize)]
 pub(super) struct HTTPHeaderMapping {
     pub(crate) name: String,
-    //TODO: how to translate?
     pub(crate) r#as: Option<String>,
     pub(crate) value: Option<String>,
 }

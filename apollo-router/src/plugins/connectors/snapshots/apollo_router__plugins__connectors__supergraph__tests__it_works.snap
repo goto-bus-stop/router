@@ -47,33 +47,48 @@ type EntityAcrossBoth @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0, key: "a b
   e: String @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_E_0)
 }
 
-scalar _Any @specifiedBy(url: "https://whatever") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) @join__type(graph: CONNECTOR_HELLO_1) @join__type(graph: CONNECTOR_HELLO_WORLD_1) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_9) @join__type(graph: CONNECTOR_TESTINTERNALDEPENDENCY_C_10) @join__type(graph: CONNECTOR_TESTREQUIRES_SHIPPINGCOST_11)
+scalar _Any @specifiedBy(url: "https://whatever") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) @join__type(graph: CONNECTOR_ENTITYINTERFACE_1) @join__type(graph: CONNECTOR_HELLO_2) @join__type(graph: CONNECTOR_HELLO_WORLD_1) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_3) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_9) @join__type(graph: CONNECTOR_TESTINTERNALDEPENDENCY_C_10) @join__type(graph: CONNECTOR_TESTREQUIRES_SHIPPINGCOST_11)
 
-type Query @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) @join__type(graph: CONNECTOR_HELLO_1) @join__type(graph: CONNECTOR_HELLO_WORLD_1) @join__type(graph: CONNECTOR_QUERY_HELLOWITHHEADERS_4) @join__type(graph: CONNECTOR_QUERY_HELLO_3) @join__type(graph: CONNECTOR_QUERY_INTERFACES_6) @join__type(graph: CONNECTOR_QUERY_INTERNAL_DEPENDENCIES_8) @join__type(graph: CONNECTOR_QUERY_UNIONS_7) @join__type(graph: CONNECTOR_QUERY_WITHARGUMENTS_5) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_9) @join__type(graph: CONNECTOR_TESTINTERNALDEPENDENCY_C_10) @join__type(graph: CONNECTOR_TESTREQUIRES_SHIPPINGCOST_11) {
+type Query @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) @join__type(graph: CONNECTOR_ENTITYINTERFACE_1) @join__type(graph: CONNECTOR_HELLO_2) @join__type(graph: CONNECTOR_HELLO_WORLD_1) @join__type(graph: CONNECTOR_QUERY_HELLOWITHHEADERS_4) @join__type(graph: CONNECTOR_QUERY_HELLO_3) @join__type(graph: CONNECTOR_QUERY_INTERFACES_6) @join__type(graph: CONNECTOR_QUERY_INTERNAL_DEPENDENCIES_8) @join__type(graph: CONNECTOR_QUERY_UNIONS_7) @join__type(graph: CONNECTOR_QUERY_WITHARGUMENTS_5) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_3) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_9) @join__type(graph: CONNECTOR_TESTINTERNALDEPENDENCY_C_10) @join__type(graph: CONNECTOR_TESTREQUIRES_SHIPPINGCOST_11) {
   _EntityAcrossBoth_finder(representations: [_Any!]!): [EntityAcrossBoth!]! @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_E_0)
-  _Hello_finder(representations: [_Any!]!): [Hello!]! @join__field(graph: CONNECTOR_HELLO_1) @join__field(graph: CONNECTOR_HELLO_WORLD_1)
+  _EntityInterface_finder(representations: [_Any!]!): [EntityInterface!]! @join__field(graph: CONNECTOR_ENTITYINTERFACE_1)
+  _Hello_finder(representations: [_Any!]!): [Hello!]! @join__field(graph: CONNECTOR_HELLO_2) @join__field(graph: CONNECTOR_HELLO_WORLD_1)
   helloWithHeaders: Hello @join__field(graph: CONNECTOR_QUERY_HELLOWITHHEADERS_4)
   hello: Hello @join__field(graph: CONNECTOR_QUERY_HELLO_3)
   interfaces: [TestingInterface] @join__field(graph: CONNECTOR_QUERY_INTERFACES_6)
   internal_dependencies: TestInternalDependency @join__field(graph: CONNECTOR_QUERY_INTERNAL_DEPENDENCIES_8)
   unions: [TestingUnion] @join__field(graph: CONNECTOR_QUERY_UNIONS_7)
   withArguments(value: String, done: Boolean, enum: InputEnum): String @join__field(graph: CONNECTOR_QUERY_WITHARGUMENTS_5)
-  _TestingInterfaceObject_finder(representations: [_Any!]!): [TestingInterfaceObject!]! @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_9)
+  _TestingInterfaceObject_finder(representations: [_Any!]!): [TestingInterfaceObject!]! @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_3) @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_9)
   _TestInternalDependency_finder(representations: [_Any!]!): [TestInternalDependency!]! @join__field(graph: CONNECTOR_TESTINTERNALDEPENDENCY_C_10)
   _TestRequires_finder(representations: [_Any!]!): [TestRequires!]! @join__field(graph: CONNECTOR_TESTREQUIRES_SHIPPINGCOST_11)
 }
 
-type Hello @join__type(graph: CONNECTOR_HELLO_1, key: "id") @join__type(graph: CONNECTOR_HELLO_WORLD_1, key: "id") @join__type(graph: CONNECTOR_QUERY_HELLOWITHHEADERS_4) @join__type(graph: CONNECTOR_QUERY_HELLO_3) {
-  id: ID! @join__field(graph: CONNECTOR_HELLO_1) @join__field(graph: CONNECTOR_HELLO_WORLD_1) @join__field(graph: CONNECTOR_QUERY_HELLOWITHHEADERS_4) @join__field(graph: CONNECTOR_QUERY_HELLO_3)
-  field: String @join__field(graph: CONNECTOR_HELLO_1)
-  enum: OutputEnum @join__field(graph: CONNECTOR_HELLO_1)
+interface EntityInterface @join__type(graph: CONNECTOR_ENTITYINTERFACE_1, key: "id") {
+  id: ID! @join__field(graph: CONNECTOR_ENTITYINTERFACE_1)
+}
+
+type EIa implements EntityInterface @join__implements(graph: CONNECTOR_ENTITYINTERFACE_1, interface: "EntityInterface") @join__type(graph: CONNECTOR_ENTITYINTERFACE_1, key: "id") {
+  id: ID! @join__field(graph: CONNECTOR_ENTITYINTERFACE_1)
+  a: String @join__field(graph: CONNECTOR_ENTITYINTERFACE_1)
+}
+
+type EIb implements EntityInterface @join__implements(graph: CONNECTOR_ENTITYINTERFACE_1, interface: "EntityInterface") @join__type(graph: CONNECTOR_ENTITYINTERFACE_1, key: "id") {
+  id: ID! @join__field(graph: CONNECTOR_ENTITYINTERFACE_1)
+  b: String @join__field(graph: CONNECTOR_ENTITYINTERFACE_1)
+}
+
+type Hello @join__type(graph: CONNECTOR_HELLO_2, key: "id") @join__type(graph: CONNECTOR_HELLO_WORLD_1, key: "id") @join__type(graph: CONNECTOR_QUERY_HELLOWITHHEADERS_4) @join__type(graph: CONNECTOR_QUERY_HELLO_3) {
+  id: ID! @join__field(graph: CONNECTOR_HELLO_2) @join__field(graph: CONNECTOR_HELLO_WORLD_1) @join__field(graph: CONNECTOR_QUERY_HELLOWITHHEADERS_4) @join__field(graph: CONNECTOR_QUERY_HELLO_3)
+  field: String @join__field(graph: CONNECTOR_HELLO_2)
+  enum: OutputEnum @join__field(graph: CONNECTOR_HELLO_2)
   world: World @join__field(graph: CONNECTOR_HELLO_WORLD_1)
 }
 
-enum OutputEnum @join__type(graph: CONNECTOR_HELLO_1) {
-  A @join__enumValue(graph: CONNECTOR_HELLO_1)
-  B @join__enumValue(graph: CONNECTOR_HELLO_1)
-  C @join__enumValue(graph: CONNECTOR_HELLO_1)
+enum OutputEnum @join__type(graph: CONNECTOR_HELLO_2) {
+  A @join__enumValue(graph: CONNECTOR_HELLO_2)
+  B @join__enumValue(graph: CONNECTOR_HELLO_2)
+  C @join__enumValue(graph: CONNECTOR_HELLO_2)
 }
 
 type World @join__type(graph: CONNECTOR_HELLO_WORLD_1) {
@@ -107,13 +122,13 @@ interface TestingInterface @join__type(graph: CONNECTOR_QUERY_INTERFACES_6) {
   nested: NestedInterface @join__field(graph: CONNECTOR_QUERY_INTERFACES_6)
 }
 
-type Ia implements TestingInterface @join__implements(graph: CONNECTOR_QUERY_INTERFACES_6, interface: "TestingInterface") @join__implements(graph: CONNECTOR_QUERY_INTERFACES_6, interface: "TestingInterface") @join__type(graph: CONNECTOR_QUERY_INTERFACES_6) @join__implements(graph: CONNECTOR_QUERY_INTERFACES_6, interface: "TestingInterface") {
+type Ia implements TestingInterface @join__implements(graph: CONNECTOR_QUERY_INTERFACES_6, interface: "TestingInterface") @join__type(graph: CONNECTOR_QUERY_INTERFACES_6) {
   id: ID! @join__field(graph: CONNECTOR_QUERY_INTERFACES_6)
   a: String @join__field(graph: CONNECTOR_QUERY_INTERFACES_6)
   nested: NestedInterface @join__field(graph: CONNECTOR_QUERY_INTERFACES_6)
 }
 
-type Ib implements TestingInterface @join__implements(graph: CONNECTOR_QUERY_INTERFACES_6, interface: "TestingInterface") @join__implements(graph: CONNECTOR_QUERY_INTERFACES_6, interface: "TestingInterface") @join__type(graph: CONNECTOR_QUERY_INTERFACES_6) @join__implements(graph: CONNECTOR_QUERY_INTERFACES_6, interface: "TestingInterface") {
+type Ib implements TestingInterface @join__implements(graph: CONNECTOR_QUERY_INTERFACES_6, interface: "TestingInterface") @join__type(graph: CONNECTOR_QUERY_INTERFACES_6) {
   id: ID! @join__field(graph: CONNECTOR_QUERY_INTERFACES_6)
   b: String @join__field(graph: CONNECTOR_QUERY_INTERFACES_6)
   nested: NestedInterface @join__field(graph: CONNECTOR_QUERY_INTERFACES_6)
@@ -123,12 +138,12 @@ interface NestedInterface @join__type(graph: CONNECTOR_QUERY_INTERFACES_6) {
   id: ID! @join__field(graph: CONNECTOR_QUERY_INTERFACES_6)
 }
 
-type NIa implements NestedInterface @join__implements(graph: CONNECTOR_QUERY_INTERFACES_6, interface: "NestedInterface") @join__implements(graph: CONNECTOR_QUERY_INTERFACES_6, interface: "NestedInterface") @join__implements(graph: CONNECTOR_QUERY_INTERFACES_6, interface: "NestedInterface") @join__implements(graph: CONNECTOR_QUERY_INTERFACES_6, interface: "NestedInterface") @join__implements(graph: CONNECTOR_QUERY_INTERFACES_6, interface: "NestedInterface") @join__type(graph: CONNECTOR_QUERY_INTERFACES_6) @join__implements(graph: CONNECTOR_QUERY_INTERFACES_6, interface: "NestedInterface") {
+type NIa implements NestedInterface @join__implements(graph: CONNECTOR_QUERY_INTERFACES_6, interface: "NestedInterface") @join__type(graph: CONNECTOR_QUERY_INTERFACES_6) {
   id: ID! @join__field(graph: CONNECTOR_QUERY_INTERFACES_6)
   a: String @join__field(graph: CONNECTOR_QUERY_INTERFACES_6)
 }
 
-type NIb implements NestedInterface @join__implements(graph: CONNECTOR_QUERY_INTERFACES_6, interface: "NestedInterface") @join__implements(graph: CONNECTOR_QUERY_INTERFACES_6, interface: "NestedInterface") @join__implements(graph: CONNECTOR_QUERY_INTERFACES_6, interface: "NestedInterface") @join__implements(graph: CONNECTOR_QUERY_INTERFACES_6, interface: "NestedInterface") @join__implements(graph: CONNECTOR_QUERY_INTERFACES_6, interface: "NestedInterface") @join__type(graph: CONNECTOR_QUERY_INTERFACES_6) @join__implements(graph: CONNECTOR_QUERY_INTERFACES_6, interface: "NestedInterface") {
+type NIb implements NestedInterface @join__implements(graph: CONNECTOR_QUERY_INTERFACES_6, interface: "NestedInterface") @join__type(graph: CONNECTOR_QUERY_INTERFACES_6) {
   id: ID! @join__field(graph: CONNECTOR_QUERY_INTERFACES_6)
   b: String @join__field(graph: CONNECTOR_QUERY_INTERFACES_6)
 }
@@ -165,9 +180,9 @@ enum InputEnum @join__type(graph: CONNECTOR_QUERY_WITHARGUMENTS_5) {
   Z @join__enumValue(graph: CONNECTOR_QUERY_WITHARGUMENTS_5)
 }
 
-interface TestingInterfaceObject @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2, key: "id", isInterfaceObject: true) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_9, key: "id", isInterfaceObject: true) {
-  c: String @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2)
-  id: ID! @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_2) @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_9)
+interface TestingInterfaceObject @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_3, key: "id", isInterfaceObject: true) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_9, key: "id", isInterfaceObject: true) {
+  c: String @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_3)
+  id: ID! @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_3) @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_9)
   d: String @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_9)
 }
 
@@ -179,7 +194,8 @@ type TestRequires @join__type(graph: CONNECTOR_TESTREQUIRES_SHIPPINGCOST_11, key
 enum join__Graph {
   CONNECTOR_ENTITYACROSSBOTH_0 @join__graph(name: "CONNECTOR_ENTITYACROSSBOTH_0", url: "http://unused")
   CONNECTOR_ENTITYACROSSBOTH_E_0 @join__graph(name: "CONNECTOR_ENTITYACROSSBOTH_E_0", url: "http://unused")
-  CONNECTOR_HELLO_1 @join__graph(name: "CONNECTOR_HELLO_1", url: "http://unused")
+  CONNECTOR_ENTITYINTERFACE_1 @join__graph(name: "CONNECTOR_ENTITYINTERFACE_1", url: "http://unused")
+  CONNECTOR_HELLO_2 @join__graph(name: "CONNECTOR_HELLO_2", url: "http://unused")
   CONNECTOR_HELLO_WORLD_1 @join__graph(name: "CONNECTOR_HELLO_WORLD_1", url: "http://unused")
   CONNECTOR_MUTATION_MUTATION_2 @join__graph(name: "CONNECTOR_MUTATION_MUTATION_2", url: "http://unused")
   CONNECTOR_QUERY_HELLOWITHHEADERS_4 @join__graph(name: "CONNECTOR_QUERY_HELLOWITHHEADERS_4", url: "http://unused")
@@ -188,7 +204,7 @@ enum join__Graph {
   CONNECTOR_QUERY_INTERNAL_DEPENDENCIES_8 @join__graph(name: "CONNECTOR_QUERY_INTERNAL_DEPENDENCIES_8", url: "http://unused")
   CONNECTOR_QUERY_UNIONS_7 @join__graph(name: "CONNECTOR_QUERY_UNIONS_7", url: "http://unused")
   CONNECTOR_QUERY_WITHARGUMENTS_5 @join__graph(name: "CONNECTOR_QUERY_WITHARGUMENTS_5", url: "http://unused")
-  CONNECTOR_TESTINGINTERFACEOBJECT_2 @join__graph(name: "CONNECTOR_TESTINGINTERFACEOBJECT_2", url: "http://unused")
+  CONNECTOR_TESTINGINTERFACEOBJECT_3 @join__graph(name: "CONNECTOR_TESTINGINTERFACEOBJECT_3", url: "http://unused")
   CONNECTOR_TESTINGINTERFACEOBJECT_D_9 @join__graph(name: "CONNECTOR_TESTINGINTERFACEOBJECT_D_9", url: "http://unused")
   CONNECTOR_TESTINTERNALDEPENDENCY_C_10 @join__graph(name: "CONNECTOR_TESTINTERNALDEPENDENCY_C_10", url: "http://unused")
   CONNECTOR_TESTREQUIRES_SHIPPINGCOST_11 @join__graph(name: "CONNECTOR_TESTREQUIRES_SHIPPINGCOST_11", url: "http://unused")

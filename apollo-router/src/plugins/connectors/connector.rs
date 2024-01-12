@@ -9,6 +9,7 @@ use apollo_compiler::Schema;
 use tower::BoxError;
 
 use super::directives::graph_enum_map;
+use super::directives::KeyTypeMap;
 use super::directives::SourceAPI;
 use super::directives::SourceField;
 use super::directives::SourceType;
@@ -27,6 +28,7 @@ pub(crate) struct Connector {
     pub(super) transport: ConnectorTransport,
     pub(super) output_selection: Vec<GraphQLSelection>,
     pub(super) input_selection: Vec<GraphQLSelection>,
+    pub(super) key_type_map: Option<KeyTypeMap>,
 }
 
 #[derive(Clone, Debug)]
@@ -107,6 +109,7 @@ impl Connector {
             transport,
             output_selection,
             input_selection,
+            key_type_map: directive.key_type_map,
         })
     }
 
@@ -155,6 +158,7 @@ impl Connector {
             transport,
             output_selection,
             input_selection,
+            key_type_map: None,
         })
     }
 

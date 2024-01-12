@@ -79,6 +79,22 @@ directive @link(
   import: [link__Import]
 ) repeatable on SCHEMA
 
+type EIa implements EntityInterface
+  @join__implements(graph: KITCHEN_SINK, interface: "EntityInterface")
+  @join__type(graph: KITCHEN_SINK, key: "id") {
+  id: ID!
+  a: String
+  c: String @join__field
+}
+
+type EIb implements EntityInterface
+  @join__implements(graph: KITCHEN_SINK, interface: "EntityInterface")
+  @join__type(graph: KITCHEN_SINK, key: "id") {
+  id: ID!
+  b: String
+  c: String @join__field
+}
+
 type EntityAcrossBoth
   @join__type(graph: KITCHEN_SINK, key: "a b")
   @join__type(graph: NORMAL, key: "a b")
@@ -105,6 +121,23 @@ type EntityAcrossBoth
       name: "sourceField"
       args: { api: "a", http: { GET: "/entity/{a}/{b}/e" }, selection: ".data" }
     )
+  c: String @join__field(graph: NORMAL)
+}
+
+interface EntityInterface
+  @join__type(graph: KITCHEN_SINK, key: "id")
+  @join__type(graph: NORMAL, key: "id", isInterfaceObject: true)
+  @join__directive(
+    graphs: [KITCHEN_SINK]
+    name: "sourceType"
+    args: {
+      api: "a"
+      http: { GET: "/entity-interface/{id}" }
+      selection: ".data {\n  id\n  kind\n  a\n  b\n}"
+      keyTypeMap: { key: "kind", typeMap: { EIa: "a", EIb: "b" } }
+    }
+  ) {
+  id: ID!
   c: String @join__field(graph: NORMAL)
 }
 
@@ -371,6 +404,7 @@ type Query @join__type(graph: KITCHEN_SINK) @join__type(graph: NORMAL) {
   startJoin: EntityAcrossBoth @join__field(graph: NORMAL)
   interfaceObject: [TestingInterfaceObject] @join__field(graph: NORMAL)
   requires: TestRequires @join__field(graph: NORMAL)
+  entityInterface: [EntityInterface] @join__field(graph: NORMAL)
 }
 
 scalar source__JSON @join__type(graph: KITCHEN_SINK)

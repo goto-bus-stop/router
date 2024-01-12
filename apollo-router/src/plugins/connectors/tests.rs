@@ -140,6 +140,30 @@ mod mock_api {
             })))
     }
 
+    pub(super) fn entity_interface_a() -> Mock {
+        Mock::given(method("GET"))
+            .and(path_template("/v1/entity-interface/a-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+              "data": {
+                "id": "a-1",
+                "kind": "a",
+                "a": "a1"
+              }
+            })))
+    }
+
+    pub(super) fn entity_interface_b() -> Mock {
+        Mock::given(method("GET"))
+            .and(path_template("/v1/entity-interface/b-2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+              "data": {
+                "id": "b-2",
+                "kind": "b",
+                "b": "b2"
+              }
+            })))
+    }
+
     pub(super) fn interfaces() -> Mock {
         Mock::given(method("GET"))
             .and(path("/v1/interfaces"))
@@ -202,6 +226,8 @@ mod mock_api {
             entity_e(),
             interface_object_id(),
             interface_object_id_d(),
+            entity_interface_a(),
+            entity_interface_b(),
             interfaces(),
             unions(),
             shipping(),
@@ -279,6 +305,34 @@ mod mock_subgraph {
                             "__typename": "IOb",
                             "id": "b-2",
                             "b": "b102",
+                          },
+                        ]
+                      }
+                    })),
+            )
+    }
+
+    pub(super) fn entity_interface() -> Mock {
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_json(serde_json::json!({
+              "query": "{entityInterface{__typename id c}}"
+            })))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .set_body_json(serde_json::json!({
+                      "data": {
+                        "entityInterface": [
+                          {
+                            "__typename": "EntityInterface",
+                            "id": "a-1",
+                            "c": "c-a1",
+                          },
+                          {
+                            "__typename": "EntityInterface",
+                            "id": "b-2",
+                            "c": "c-b2",
                           },
                         ]
                       }
@@ -575,6 +629,7 @@ async fn test_response_formatting_aliases() {
           }
         }
         "#,
+        None,
     )
     .await;
 
@@ -638,6 +693,7 @@ async fn test_interface_object() {
           }
         }
         "#,
+        None,
     )
     .await;
 
@@ -695,6 +751,77 @@ async fn test_interface_object() {
 }
 
 #[tokio::test]
+async fn test_entity_interface() {
+    let mock_server = MockServer::start().await;
+    mock_api::mount_all(&mock_server).await;
+    mock_subgraph::entity_interface().mount(&mock_server).await;
+
+    // @sourceType on EntityInterface
+    let response = execute(
+        &mock_server.uri(),
+        r#"
+        query {
+          entityInterface {
+            __typename
+            id
+            ... on EIa {
+              a
+            }
+            ... on EIb {
+              b
+            }
+            c
+          }
+        }
+        "#,
+        None,
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new()
+                .method("POST")
+                .path("/graphql")
+                .body(serde_json::json!({
+                  "query": "{entityInterface{__typename id c}}"
+                }))
+                .build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/entity-interface/a-1")
+                .build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/entity-interface/b-2")
+                .build(),
+        ],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "entityInterface": [
+          {
+            "__typename": "EIa",
+            "id": "a-1",
+            "a": "a1",
+            "c": "c-a1"
+          },
+          {
+            "__typename": "EIb",
+            "id": "b-2",
+            "b": "b2",
+            "c": "c-b2"
+          }
+        ]
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
 async fn test_interfaces() {
     let mock_server = MockServer::start().await;
     mock_api::mount_all(&mock_server).await;
@@ -727,6 +854,7 @@ async fn test_interfaces() {
             }
         }
         "#,
+        None,
     )
     .await;
 
@@ -796,6 +924,7 @@ async fn test_unions() {
           }
         }
         "#,
+        None,
     )
     .await;
 

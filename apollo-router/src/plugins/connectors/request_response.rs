@@ -11,6 +11,7 @@ use tower::BoxError;
 
 use super::connector::ConnectorKind;
 use super::connector::ConnectorTransport;
+use super::directives::KeyTypeMap;
 use super::http_json_transport::HttpJsonTransportError;
 use super::request_inputs::RequestInputs;
 use super::response_formatting::execute;
@@ -460,7 +461,7 @@ pub(super) async fn handle_responses(
                     ref typename,
                 } => {
                     if let ResponseTypeName::Concrete(typename) = typename {
-                        inject_typename(&mut res_data, typename);
+                        inject_typename(&mut res_data, typename, &None);
                     }
 
                     data.insert(name.clone(), res_data);
@@ -472,7 +473,7 @@ pub(super) async fn handle_responses(
                     ref typename,
                 } => {
                     if let ResponseTypeName::Concrete(typename) = typename {
-                        inject_typename(&mut res_data, typename);
+                        inject_typename(&mut res_data, typename, &connector.key_type_map);
                     }
 
                     let entities = data
@@ -595,12 +596,30 @@ fn format_response(
     result
 }
 
-fn inject_typename(data: &mut Value, typename: &str) {
+fn inject_typename(data: &mut Value, typename: &str, key_type_map: &Option<KeyTypeMap>) {
     if let Value::Object(data) = data {
-        data.insert(
-            ByteString::from("__typename"),
-            Value::String(ByteString::from(typename)),
-        );
+        if let Some(key_type_map) = key_type_map {
+            let key = ByteString::from(key_type_map.key.clone());
+            let discriminator = data
+                .get(&key)
+                .and_then(|val| val.as_str())
+                .map(|val| val.to_string())
+                .unwrap_or_default();
+
+            for (typename, value) in key_type_map.type_map.iter() {
+                if value == &discriminator {
+                    data.insert(
+                        ByteString::from("__typename"),
+                        Value::String(ByteString::from(typename.as_str())),
+                    );
+                }
+            }
+        } else {
+            data.insert(
+                ByteString::from("__typename"),
+                Value::String(ByteString::from(typename)),
+            );
+        }
     }
 }
 

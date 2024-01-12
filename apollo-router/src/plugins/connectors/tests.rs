@@ -266,7 +266,12 @@ async fn test_root_field_plus_entity() {
 
     // @sourceField on Query.hello
     // @sourceType on Hello
-    let response = execute(&mock_server.uri(), "query { hello { id field enum } }").await;
+    let response = execute(
+        &mock_server.uri(),
+        "query { hello { id field enum } }",
+        None,
+    )
+    .await;
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
@@ -299,6 +304,7 @@ async fn test_root_field_plus_entity_field() {
     let response = execute(
         &mock_server.uri(),
         "query { hello { __typename id world { __typename field nested { __typename field }} } }",
+        None,
     )
     .await;
 
@@ -342,6 +348,7 @@ async fn test_query_parameters() {
     let response = execute(
         &mock_server.uri(),
         "query { withArguments(done: true, value: \"bye\", enum: Y) }",
+        None,
     )
     .await;
 
@@ -372,6 +379,7 @@ async fn test_mutation_inputs() {
     let response = execute(
         &mock_server.uri(),
         "mutation { mutation(input: { nums: [1,2,3], values: [{ num: 42 }]}) { success } }",
+        None,
     )
     .await;
 
@@ -410,7 +418,12 @@ async fn test_entity_join() {
     // Query.startJoin from subgraph
     // @sourceType on EntityAcrossBoth
     // @sourceField on EntityAcrossBoth.e
-    let response = execute(&mock_server.uri(), "query { startJoin { a b c d e } }").await;
+    let response = execute(
+        &mock_server.uri(),
+        "query { startJoin { a b c d e } }",
+        None,
+    )
+    .await;
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
@@ -461,6 +474,7 @@ async fn aliases_on_connector_fields() {
           startJoin { a b c alias3: e alias4: e }
         }
         "#,
+        None,
     )
     .await;
 
@@ -520,7 +534,7 @@ async fn basic_errors() {
         .await;
 
     // @sourceField on Query
-    let response = execute(&mock_server.uri(), "{ hello { id } }").await;
+    let response = execute(&mock_server.uri(), "{ hello { id } }", None).await;
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
@@ -552,7 +566,12 @@ async fn test_requires() {
     mock_subgraph::test_requires().mount(&mock_server).await;
 
     // @sourceField on TestRequires.shippingCost
-    let response = execute(&mock_server.uri(), "query { requires { shippingCost } }").await;
+    let response = execute(
+        &mock_server.uri(),
+        "query { requires { shippingCost } }",
+        None,
+    )
+    .await;
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
@@ -607,7 +626,12 @@ async fn test_internal_dependencies() {
 
     // @sourceField on Query.internal_dependency
     // @sourceField on TestInternalDependency.c
-    let response = execute(&mock_server.uri(), "query { internal_dependencies { c } }").await;
+    let response = execute(
+        &mock_server.uri(),
+        "query { internal_dependencies { c } }",
+        None,
+    )
+    .await;
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
@@ -635,9 +659,68 @@ async fn test_internal_dependencies() {
     "###);
 }
 
+#[tokio::test]
+async fn test_simple_header_propagation() {
+    let mock_server = MockServer::start().await;
+    mock_api::mount_all(&mock_server).await;
+
+    // @sourceField on Query.hello
+    // @sourceType on Hello
+    let response = execute(
+        &mock_server.uri(),
+        "query { hello { id field enum } }",
+        Some(serde_json::json!({
+          "include_subgraph_errors": { "all": true },
+          "headers": {
+            "subgraphs": {
+              "kitchen-sink": {
+                "request": [
+                  {
+                    "insert": {
+                      "name": "x-api-key",
+                      "value": "abcd1234"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        })),
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new()
+                .method("GET")
+                .path("/v1/hello")
+                .header("x-api-key".into(), "abcd1234".parse().unwrap())
+                .build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/hello/42")
+                .header("x-api-key".into(), "abcd1234".parse().unwrap())
+                .build(),
+        ],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "hello": {
+          "id": 42,
+          "field": "hello",
+          "enum": "A"
+        }
+      }
+    }
+    "###);
+}
+
 const SCHEMA: &str = include_str!("./test_supergraph.graphql");
 
-async fn execute(uri: &str, query: &str) -> serde_json::Value {
+async fn execute(uri: &str, query: &str, config: Option<serde_json::Value>) -> serde_json::Value {
     let schema = SCHEMA.replace("http://localhost:8080", uri);
     let schema = schema.replace(
         "http://localhost:8081/",
@@ -647,14 +730,13 @@ async fn execute(uri: &str, query: &str) -> serde_json::Value {
     // we cannot use Testharness because the subgraph connectors are actually extracted in YamlRouterFactory
     let mut factory = YamlRouterFactory;
 
+    let config = config.unwrap_or(serde_json::json!({
+        "include_subgraph_errors": { "all": true }
+    }));
+
     let router_creator = factory
         .create(
-            Arc::new(
-                serde_json::from_value(serde_json::json!({
-                    "include_subgraph_errors": { "all": true }
-                }))
-                .unwrap(),
-            ),
+            Arc::new(serde_json::from_value(config).unwrap()),
             schema,
             None,
             None,
@@ -683,13 +765,21 @@ async fn execute(uri: &str, query: &str) -> serde_json::Value {
 }
 
 mod req_asserts {
+    use std::collections::HashMap;
+    use std::collections::HashSet;
+
+    use itertools::Itertools;
+    use wiremock::http::HeaderName;
+    use wiremock::http::HeaderValue;
+    use wiremock::http::HeaderValues;
+
     #[derive(Clone)]
     pub(super) struct Matcher {
         method: Option<String>,
         path: Option<String>,
         query: Option<String>,
         body: Option<serde_json::Value>,
-        // TODO headers
+        headers: HashMap<HeaderName, HeaderValues>,
     }
 
     impl Matcher {
@@ -699,6 +789,7 @@ mod req_asserts {
                 path: None,
                 query: None,
                 body: None,
+                headers: Default::default(),
             }
         }
 
@@ -719,6 +810,12 @@ mod req_asserts {
 
         pub(super) fn body(&mut self, body: serde_json::Value) -> &mut Self {
             self.body = Some(body);
+            self
+        }
+
+        pub(super) fn header(&mut self, name: HeaderName, value: HeaderValue) -> &mut Self {
+            let values = self.headers.entry(name).or_insert(Vec::new().into());
+            values.append(&mut Vec::from([value]).into());
             self
         }
 
@@ -767,6 +864,29 @@ mod req_asserts {
                     "[Request {}]: incorrect body",
                     index,
                 )
+            }
+
+            for (name, expected) in self.headers.iter() {
+                match request.headers.get(name) {
+                    Some(actual) => {
+                        let expected: HashSet<String> =
+                            expected.iter().map(|v| v.as_str().to_owned()).collect();
+                        let actual: HashSet<String> =
+                            actual.iter().map(|v| v.as_str().to_owned()).collect();
+                        assert_eq!(
+                            expected,
+                            actual,
+                            "[Request {}]: expected header {} to be [{}], was [{}]",
+                            index,
+                            name,
+                            expected.iter().join(", "),
+                            actual.iter().join(", ")
+                        );
+                    }
+                    None => {
+                        panic!("[Request {}]: expected header {}, was missing", index, name);
+                    }
+                }
             }
         }
     }

@@ -2,6 +2,18 @@ use std::borrow::Cow;
 
 use apollo_compiler::ast::Selection as GraphQLSelection;
 use displaydoc::Display;
+use http::header::CONNECTION;
+use http::header::CONTENT_LENGTH;
+use http::header::CONTENT_TYPE;
+use http::header::HOST;
+use http::header::PROXY_AUTHENTICATE;
+use http::header::PROXY_AUTHORIZATION;
+use http::header::TE;
+use http::header::TRAILER;
+use http::header::TRANSFER_ENCODING;
+use http::header::UPGRADE;
+use http::HeaderName;
+use lazy_static::lazy_static;
 use serde_json_bytes::Value;
 use thiserror::Error;
 use url::Url;
@@ -16,6 +28,30 @@ use super::join_spec_helpers::selection_set_to_string;
 use super::selection_parser::ApplyTo;
 use super::selection_parser::Selection as JSONSelection;
 use super::url_path_parser::URLPathTemplate;
+use crate::services::SubgraphRequest;
+
+// Copied from plugins::headers
+lazy_static! {
+    // Headers from https://datatracker.ietf.org/doc/html/rfc2616#section-13.5.1
+    // These are not propagated by default using a regex match as they will not make sense for the
+    // second hop.
+    // In addition because our requests are not regular proxy requests content-type, content-length
+    // and host are also in the exclude list.
+    static ref RESERVED_HEADERS: Vec<HeaderName> = [
+        CONNECTION,
+        PROXY_AUTHENTICATE,
+        PROXY_AUTHORIZATION,
+        TE,
+        TRAILER,
+        TRANSFER_ENCODING,
+        UPGRADE,
+        CONTENT_LENGTH,
+        CONTENT_TYPE,
+        HOST,
+        HeaderName::from_static("keep-alive")
+    ]
+    .into();
+}
 
 #[derive(Clone, Debug)]
 pub(super) struct HttpJsonTransport {
@@ -87,6 +123,7 @@ impl HttpJsonTransport {
     pub(super) fn make_request(
         &self,
         inputs: Value,
+        original_request: &SubgraphRequest,
     ) -> Result<http::Request<hyper::Body>, HttpJsonTransportError> {
         let body = if let Some(ref sel) = self.body_mapper {
             let (body, _todo) = sel.apply_to(&inputs);
@@ -97,14 +134,18 @@ impl HttpJsonTransport {
             hyper::Body::empty()
         };
 
-        let request = http::Request::builder()
+        let mut request = http::Request::builder()
             .method(self.method.clone())
             .uri(self.make_uri(&inputs)?.as_str())
             .header("content-type", "application/json")
             .body(body)
             .map_err(HttpJsonTransportError::InvalidNewRequest)?;
 
-        // TODO: Add headers
+        for (name, value) in original_request.subgraph_request.headers().iter() {
+            if !RESERVED_HEADERS.contains(name) {
+                request.headers_mut().append(name, value.clone());
+            }
+        }
 
         Ok(request)
     }

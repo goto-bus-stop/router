@@ -60,15 +60,15 @@ pub(super) fn make_requests(
     match connector.kind {
         ConnectorKind::RootField { .. } => {
             let parts = root_fields(&request, schema)?;
-            Ok(request_params_to_requests(connector, parts)?)
+            Ok(request_params_to_requests(connector, parts, &request)?)
         }
         ConnectorKind::Entity { .. } => {
             let parts = entities_from_request(&request, schema)?;
-            Ok(request_params_to_requests(connector, parts)?)
+            Ok(request_params_to_requests(connector, parts, &request)?)
         }
         ConnectorKind::EntityField { .. } => {
             let parts = entities_with_fields_from_request(&request, schema, connector)?;
-            Ok(request_params_to_requests(connector, parts)?)
+            Ok(request_params_to_requests(connector, parts, &request)?)
         }
     }
 }
@@ -76,6 +76,7 @@ pub(super) fn make_requests(
 fn request_params_to_requests(
     connector: &Connector,
     from_request: Vec<(ResponseKey, RequestInputs)>,
+    original_request: &SubgraphRequest,
 ) -> Result<Vec<(http::Request<hyper::Body>, ResponseParams)>, MakeRequestError> {
     from_request
         .into_iter()
@@ -83,7 +84,9 @@ fn request_params_to_requests(
             let inputs = inputs.merge();
 
             let request = match connector.transport {
-                ConnectorTransport::HttpJson(ref transport) => transport.make_request(inputs)?,
+                ConnectorTransport::HttpJson(ref transport) => {
+                    transport.make_request(inputs, original_request)?
+                }
             };
 
             let response_params = ResponseParams {

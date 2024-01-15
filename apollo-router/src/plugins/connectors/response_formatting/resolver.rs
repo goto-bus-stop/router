@@ -5,6 +5,7 @@ use apollo_compiler::schema::Name;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
 use itertools::Itertools;
+use serde_json_bytes::Value;
 
 use super::JsonMap;
 use super::JsonValue;
@@ -28,15 +29,15 @@ pub(super) fn resolve_field(object_value: &JsonMap, info: ResolverInfo) -> Optio
     }
 }
 
-// TODO: pass in the keyTypeMap discriminator config and use that before the
-// heuristic matcher.
 pub(super) fn type_name<'a>(
     object: &'a JsonMap,
     schema: &'a Valid<Schema>,
     ty: &'a ExtendedType,
 ) -> Option<String> {
-    if let Some(typename) = object.get("__typename") {
-        return Some(typename.as_str().unwrap_or_default().to_string());
+    if let Some(Value::String(typename)) = object.get("__typename") {
+        if schema.get_object(typename.as_str()).is_some() {
+            return Some(typename.as_str().to_string());
+        }
     }
 
     match_possible_type(schema, ty, object)

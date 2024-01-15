@@ -31,11 +31,15 @@ pub(super) fn copy_definitions(schema: &Schema, new_schema: &mut Schema) {
             schema_definition.directives.push(directive.clone());
         });
 
-    // join__ directive definitions
+    // @join__ directive definitions
+    // @link
+    // @inaccessible
     schema
         .directive_definitions
         .iter()
-        .filter(|(name, _)| name.to_string().starts_with("join__") || *name == "link")
+        .filter(|(name, _)| {
+            name.to_string().starts_with("join__") || *name == "link" || *name == "inaccessible"
+        })
         .for_each(|(name, d)| {
             new_schema
                 .directive_definitions

@@ -1,6 +1,7 @@
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY)
   @join__directive(
     graphs: [KITCHEN_SINK]
     name: "link"
@@ -33,6 +34,8 @@ schema
   query: Query
   mutation: Mutation
 }
+
+directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
 directive @join__directive(
   graphs: [join__Graph!]
@@ -165,6 +168,17 @@ type Hello
       }
     )
   enum: OutputEnum
+  relatedId: ID! @inaccessible
+  related: Related
+    @join__directive(
+      graphs: [KITCHEN_SINK]
+      name: "sourceField"
+      args: {
+        api: "a"
+        http: { GET: "/related/{relatedId}" }
+        selection: ".data { id field }"
+      }
+    )
 }
 
 input HTTPHeaderMapping @join__type(graph: KITCHEN_SINK) {
@@ -336,24 +350,6 @@ enum OutputEnum @join__type(graph: KITCHEN_SINK) @join__type(graph: NORMAL) {
 }
 
 type Query @join__type(graph: KITCHEN_SINK) @join__type(graph: NORMAL) {
-  hello: Hello
-    @join__field(graph: KITCHEN_SINK)
-    @join__directive(
-      graphs: [KITCHEN_SINK]
-      name: "sourceField"
-      args: { api: "a", http: { GET: "/hello" }, selection: ".data { id }" }
-    )
-  helloWithHeaders: Hello
-    @join__field(graph: KITCHEN_SINK)
-    @join__directive(
-      graphs: [KITCHEN_SINK]
-      name: "sourceField"
-      args: {
-        api: "with_headers"
-        http: { GET: "/hello" }
-        selection: ".data { id }"
-      }
-    )
   withArguments(value: String, done: Boolean, enum: InputEnum): String
     @join__field(graph: KITCHEN_SINK)
     @join__directive(
@@ -365,6 +361,35 @@ type Query @join__type(graph: KITCHEN_SINK) @join__type(graph: NORMAL) {
           GET: "/with-arguments?value={value}&done={done}&enum_value={enum}"
         }
         selection: ".data"
+      }
+    )
+  hello: Hello
+    @join__field(graph: KITCHEN_SINK)
+    @join__directive(
+      graphs: [KITCHEN_SINK]
+      name: "sourceField"
+      args: { api: "a", http: { GET: "/hello" }, selection: ".data { id }" }
+    )
+  hellos: [Hello]
+    @join__field(graph: KITCHEN_SINK)
+    @join__directive(
+      graphs: [KITCHEN_SINK]
+      name: "sourceField"
+      args: {
+        api: "a"
+        http: { GET: "/hellos" }
+        selection: ".data { id relatedId }"
+      }
+    )
+  helloWithHeaders: Hello
+    @join__field(graph: KITCHEN_SINK)
+    @join__directive(
+      graphs: [KITCHEN_SINK]
+      name: "sourceField"
+      args: {
+        api: "with_headers"
+        http: { GET: "/hello" }
+        selection: ".data { id }"
       }
     )
   interfaces: [TestingInterface]
@@ -405,6 +430,11 @@ type Query @join__type(graph: KITCHEN_SINK) @join__type(graph: NORMAL) {
   interfaceObject: [TestingInterfaceObject] @join__field(graph: NORMAL)
   requires: TestRequires @join__field(graph: NORMAL)
   entityInterface: [EntityInterface] @join__field(graph: NORMAL)
+}
+
+type Related @join__type(graph: KITCHEN_SINK) {
+  id: ID!
+  field: String
 }
 
 scalar source__JSON @join__type(graph: KITCHEN_SINK)

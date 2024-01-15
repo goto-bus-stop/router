@@ -833,25 +833,25 @@ async fn test_interfaces() {
         r#"
         query {
           interfaces {
+            __typename
+            id
+            ... on Ia {
+              a
+            }
+            ... on Ib {
+              b
+            }
+            nested {
               __typename
               id
-              ... on Ia {
+              ... on NIa {
                 a
               }
-              ... on Ib {
+              ... on NIb {
                 b
               }
-              nested {
-                __typename
-                id
-                ... on NIa {
-                  a
-                }
-                ... on NIb {
-                  b
-                }
-              }
             }
+          }
         }
         "#,
         None,
@@ -1227,6 +1227,99 @@ async fn test_directive_header_propagation() {
     "###);
 }
 
+#[tokio::test]
+async fn test_request_deduping() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/hellos"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+          "data": [{
+            "id": 1,
+            "relatedId": 123
+          }, {
+            "id": 2,
+            "relatedId": 234
+          }, {
+            "id": 3,
+            "relatedId": 234
+          },
+          {
+            "id": 4,
+            "relatedId": 123
+          }]
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/related/123"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+          "data": {"id": 123, "field": "related 1"}
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/related/234"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+          "data": {"id": 234, "field": "related 2"}
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let response = execute(
+        &mock_server.uri(),
+        "query { hellos { id related { id field } } }",
+        None,
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new().method("GET").path("/v1/hellos").build(),
+            // Only two not four!
+            Matcher::new().method("GET").path("/v1/related/123").build(),
+            Matcher::new().method("GET").path("/v1/related/234").build(),
+        ],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "hellos": [
+          {
+            "id": 1,
+            "related": {
+              "id": 123,
+              "field": "related 1"
+            }
+          },
+          {
+            "id": 2,
+            "related": {
+              "id": 234,
+              "field": "related 2"
+            }
+          },
+          {
+            "id": 3,
+            "related": {
+              "id": 234,
+              "field": "related 2"
+            }
+          },
+          {
+            "id": 4,
+            "related": {
+              "id": 123,
+              "field": "related 1"
+            }
+          }
+        ]
+      }
+    }
+    "###);
+}
+
 const SCHEMA: &str = include_str!("./test_supergraph.graphql");
 
 async fn execute(uri: &str, query: &str, config: Option<serde_json::Value>) -> serde_json::Value {
@@ -1401,6 +1494,13 @@ mod req_asserts {
     }
 
     pub(super) fn matches(received: &[wiremock::Request], matchers: Vec<Matcher>) {
+        assert_eq!(
+            received.len(),
+            matchers.len(),
+            "Expected {} requests, recorded {}",
+            matchers.len(),
+            received.len()
+        );
         for (i, (request, matcher)) in received.iter().zip(matchers.iter()).enumerate() {
             matcher.matches(request, i);
         }

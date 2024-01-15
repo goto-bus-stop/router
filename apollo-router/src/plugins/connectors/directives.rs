@@ -11,6 +11,7 @@ use apollo_compiler::schema::Name;
 use apollo_compiler::schema::Value;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
+use http::Method;
 use indexmap::IndexMap;
 use serde::Serialize;
 
@@ -871,74 +872,78 @@ pub(super) struct HTTPSource {
 
 impl HTTPSource {
     fn from_argument(argument: &Node<Value>) -> Result<Self, ConnectorDirectiveError> {
-        let argument = argument
-            .as_object()
-            .ok_or_else(|| {
-                ConnectorDirectiveError::InvalidTypeForAttribute(
-                    "object".to_string(),
-                    HTTP_ARGUMENT_NAME.to_string(),
-                )
-            })?
-            .iter()
-            .map(|(name, value)| (name, value))
-            .collect::<HashMap<_, _>>();
+        let argument = argument.as_object().ok_or_else(|| {
+            ConnectorDirectiveError::InvalidTypeForAttribute(
+                "object".to_string(),
+                HTTP_ARGUMENT_NAME.to_string(),
+            )
+        })?;
 
-        fn parse_template(
-            value: &Node<Value>,
-            name: &str,
-        ) -> Result<URLPathTemplate, ConnectorDirectiveError> {
-            URLPathTemplate::parse(value.as_str().ok_or_else(|| {
-                ConnectorDirectiveError::InvalidTypeForAttribute(
-                    name.to_string(),
-                    "String".to_string(),
-                )
-            })?)
-            .map_err(|e| ConnectorDirectiveError::ParseError(name.to_string(), e))
-        }
-
-        let (path_template, method) = if let Some(get) = argument.get(&name!("GET")) {
-            (parse_template(get, "GET")?, http::Method::GET)
-        } else if let Some(post) = argument.get(&name!("POST")) {
-            (parse_template(post, "POST")?, http::Method::POST)
-        } else if let Some(patch) = argument.get(&name!("PATCH")) {
-            (parse_template(patch, "PATCH")?, http::Method::PATCH)
-        } else if let Some(put) = argument.get(&name!("PUT")) {
-            (parse_template(put, "PUT")?, http::Method::PUT)
-        } else if let Some(delete) = argument.get(&name!("DELETE")) {
-            (parse_template(delete, "DELETE")?, http::Method::DELETE)
-        } else {
-            return Err(ConnectorDirectiveError::RequiresExactlyOne(
-                "GET, PATCH, POST, PUT, DELETE".to_string(),
-                "HTTPSourceField".to_string(),
-            ));
-        };
-
-        let headers = argument
-            .get(&name!("headers"))
-            .map(|v| HTTPHeaderMapping::from_header_arguments(v))
-            .transpose()?
-            .unwrap_or_default();
-
-        let body = argument
-            .get(&name!("body"))
-            .map(|v| {
-                let v = v.as_str().ok_or_else(|| {
-                    ConnectorDirectiveError::InvalidTypeForAttribute(
-                        "string".to_string(),
-                        "body".to_string(),
-                    )
-                })?;
-
-                Ok(JSONSelection::parse(v)
-                    .map_err(|_| {
-                        ConnectorDirectiveError::ParseError(
-                            "Failed to parse selection".to_string(),
+        let mut headers = Default::default();
+        let mut body = Default::default();
+        let mut path_template_and_method: Option<(URLPathTemplate, Method)> = Default::default();
+        for (name, value) in argument {
+            match name.as_str() {
+                "headers" => {
+                    headers = HTTPHeaderMapping::from_header_arguments(value)?;
+                }
+                "body" => {
+                    let v = value.as_str().ok_or_else(|| {
+                        ConnectorDirectiveError::InvalidTypeForAttribute(
+                            "string".to_string(),
                             "body".to_string(),
                         )
-                    })?
-                    .1)
-            })
-            .transpose()?;
+                    })?;
+                    body = Some(
+                        JSONSelection::parse(v)
+                            .map_err(|_| {
+                                ConnectorDirectiveError::ParseError(
+                                    "Failed to parse selection".to_string(),
+                                    "body".to_string(),
+                                )
+                            })?
+                            .1,
+                    )
+                }
+                // there should only be one more argument, the method.
+                _ => {
+                    if path_template_and_method.is_some() {
+                        Err(ConnectorDirectiveError::RequiresExactlyOne(
+                            "GET, PATCH, POST, PUT, DELETE".to_string(),
+                            "HTTPSourceField".to_string(),
+                        ))?;
+                    }
+                    path_template_and_method = Some(
+                        http::Method::from_bytes(name.as_bytes())
+                            .map_err(|_| {
+                                ConnectorDirectiveError::UnknownAttributeForType(
+                                    "HTTPSourceField".to_string(),
+                                    name.to_string(),
+                                )
+                            })
+                            .and_then(|method| {
+                                URLPathTemplate::parse(value.as_str().ok_or_else(|| {
+                                    ConnectorDirectiveError::InvalidTypeForAttribute(
+                                        method.to_string(),
+                                        "String".to_string(),
+                                    )
+                                })?)
+                                .map(|t| (t, method.clone()))
+                                .map_err(|e| {
+                                    ConnectorDirectiveError::ParseError(method.to_string(), e)
+                                })
+                            })?,
+                    )
+                }
+            }
+        }
+
+        let (path_template, method) = path_template_and_method.ok_or_else(|| {
+            ConnectorDirectiveError::RequiresExactlyOne(
+                "GET, PATCH, POST, PUT, DELETE".to_string(),
+                "HTTPSourceField".to_string(),
+            )
+        })?;
 
         Ok(Self {
             path_template,

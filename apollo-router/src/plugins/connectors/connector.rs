@@ -15,6 +15,7 @@ use super::directives::SourceAPI;
 use super::directives::SourceField;
 use super::directives::SourceType;
 use super::http_json_transport::HttpJsonTransport;
+use crate::error::ConnectorDirectiveError;
 
 /// A connector wraps the API and type/field connector metadata and has
 /// a unique name used to construct a "subgraph" in the inner supergraph
@@ -80,7 +81,7 @@ impl Connector {
         name: String,
         api: SourceAPI,
         directive: SourceType,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<Self, ConnectorDirectiveError> {
         let (input_selection, key, transport) = if let Some(http) = &directive.http {
             let (input_selection, key_string) =
                 HttpJsonTransport::input_selection_from_http_source(http);
@@ -91,7 +92,7 @@ impl Connector {
 
             (input_selection, key_string, transport)
         } else {
-            return Err("Only HTTP sources are supported".into());
+            return Err(ConnectorDirectiveError::UknownSourceAPIKind);
         };
 
         let output_selection = directive.selection.clone().into();
@@ -118,18 +119,19 @@ impl Connector {
         name: String,
         api: SourceAPI,
         directive: SourceField,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<Self, ConnectorDirectiveError> {
         let (input_selection, key, transport) = if let Some(http) = &directive.http {
             let (input_selection, key_string) =
                 HttpJsonTransport::input_selection_from_http_source(http);
 
-            let transport = ConnectorTransport::HttpJson(HttpJsonTransport::from_source_field(
-                &api, &directive,
-            )?);
+            let transport = ConnectorTransport::HttpJson(
+                HttpJsonTransport::from_source_field(&api, &directive)
+                    .map_err(std::convert::Into::into)?,
+            );
 
             (input_selection, key_string, transport)
         } else {
-            return Err("Only HTTP sources are supported".into());
+            return Err(ConnectorDirectiveError::UknownSourceAPIKind);
         };
 
         let output_selection = directive.selection.clone().into();
@@ -171,49 +173,9 @@ impl Connector {
             return Ok(Default::default());
         }
 
-        let source = Source::new(schema)?;
-        let apis = source.apis();
-        let types = source.types();
-        let fields = source.fields();
-
-        if apis.is_empty() || (types.is_empty() && fields.is_empty()) {
-            return Ok(Default::default());
-        }
-
-        let default_api = apis
-            .values()
-            .find(|api| api.is_default())
-            .unwrap_or(apis.values().next().ok_or("No APIs defined")?);
-
-        let mut connectors = HashMap::new();
-
-        // todo: remove clones come on jeremy
-        for (i, directive) in types.iter().enumerate() {
-            let connector_name = format!("CONNECTOR_{}_{}", directive.type_name, i).to_uppercase();
-            let api = apis.get(&directive.api_name()).unwrap_or(default_api);
-
-            connectors.insert(
-                connector_name.clone(),
-                Connector::new_from_source_type(connector_name, api.clone(), directive.clone())?,
-            );
-        }
-
-        for (i, directive) in fields.iter().enumerate() {
-            let connector_name = format!(
-                "CONNECTOR_{}_{}_{}",
-                directive.parent_type_name, directive.field_name, i
-            )
-            .to_uppercase();
-
-            let api = apis.get(&directive.api_name()).unwrap_or(default_api);
-            // todo: remove clones come on jeremy
-            connectors.insert(
-                connector_name.clone(),
-                Connector::new_from_source_field(connector_name, api.clone(), directive.clone())?,
-            );
-        }
-
-        Ok(connectors)
+        Source::new(schema)?
+            .connectors()
+            .map_err(std::convert::Into::into)
     }
 
     pub(super) fn finder_field_name(&self) -> Option<serde_json_bytes::ByteString> {

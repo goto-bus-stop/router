@@ -545,7 +545,7 @@ pub(crate) enum SchemaError {
     Connector(String),
 }
 
-#[derive(Error, Display, Debug, Clone, Serialize, Eq, PartialEq)]
+#[derive(Error, Display, Debug, Clone, Eq, PartialEq)]
 pub(crate) enum ConnectorDirectiveError {
     /// Attribute '{1}' is missing for type '{0}'
     MissingAttributeForType(String, String),
@@ -559,6 +559,20 @@ pub(crate) enum ConnectorDirectiveError {
     RequiresExactlyOne(String, String),
     /// Invalid join directive: '{0}'
     InvalidJoinDirective(String),
+    /// No source API defined
+    NoSourceAPIDefined,
+    /// Only HTTP sources are supported
+    UknownSourceAPIKind,
+    /// HTTP parameters missing
+    MissingHttp,
+    /// Invalid Base URI on API
+    InvalidBaseUri(url::ParseError),
+    /// Invalid Path for directive
+    InvalidPath(url::ParseError),
+    /// Invalid HTTP header mapping
+    InvalidHeaderMapping,
+    /// Could not generate path from inputs
+    PathGenerationError(String),
 }
 
 /// Collection of schema validation errors.

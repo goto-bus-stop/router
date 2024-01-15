@@ -17,6 +17,7 @@ use serde::Serialize;
 
 use super::selection_parser::Selection as JSONSelection;
 use super::url_path_parser::URLPathTemplate;
+use super::Connector;
 use crate::error::ConnectorDirectiveError;
 
 const SOURCE_API_DIRECTIVE_NAME: &str = "sourceAPI";
@@ -33,6 +34,7 @@ const JOIN_GRAPH_DIRECTIVE_NAME: &str = "join__graph";
 
 // --- @join__* ----------------------------------------------------------------
 
+// TODO: I don't think this should be pub(super), demeter at play here.
 pub(super) fn graph_enum_map(schema: &apollo_compiler::Schema) -> Option<HashMap<String, String>> {
     schema.get_enum(JOIN_GRAPH_ENUM_NAME).map(|e| {
         e.values
@@ -245,6 +247,52 @@ impl Source {
     pub(super) fn fields(&self) -> Arc<Vec<SourceField>> {
         Arc::clone(&self.fields)
     }
+
+    pub(super) fn default_api(&self) -> Result<&SourceAPI, ConnectorDirectiveError> {
+        self.apis
+            .values()
+            .find(|api| api.is_default())
+            .or_else(|| self.apis.values().next())
+            .ok_or(ConnectorDirectiveError::NoSourceAPIDefined)
+    }
+
+    pub(super) fn connectors(&self) -> Result<HashMap<String, Connector>, ConnectorDirectiveError> {
+        if self.apis.is_empty() || (self.types.is_empty() && self.fields.is_empty()) {
+            return Ok(Default::default());
+        }
+
+        let default_api = self.default_api()?;
+
+        let mut connectors = HashMap::new();
+
+        // todo: remove clones come on jeremy
+        for (i, directive) in self.types.iter().enumerate() {
+            let connector_name = format!("CONNECTOR_{}_{}", directive.type_name, i).to_uppercase();
+            let api = self.apis.get(&directive.api_name()).unwrap_or(default_api);
+
+            connectors.insert(
+                connector_name.clone(),
+                Connector::new_from_source_type(connector_name, api.clone(), directive.clone())?,
+            );
+        }
+
+        for (i, directive) in self.fields.iter().enumerate() {
+            let connector_name = format!(
+                "CONNECTOR_{}_{}_{}",
+                directive.parent_type_name, directive.field_name, i
+            )
+            .to_uppercase();
+
+            let api = self.apis.get(&directive.api_name()).unwrap_or(default_api);
+            // todo: remove clones come on jeremy
+            connectors.insert(
+                connector_name.clone(),
+                Connector::new_from_source_field(connector_name, api.clone(), directive.clone())?,
+            );
+        }
+
+        Ok(connectors)
+    }
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -262,7 +310,7 @@ impl SourceAPI {
             .unwrap_or_default()
     }
 
-    pub(super) fn from_schema_and_graph_names(
+    fn from_schema_and_graph_names(
         schema: &Schema,
         graph_names: &HashMap<String, String>,
     ) -> Result<HashMap<String, Self>, ConnectorDirectiveError> {
@@ -307,7 +355,7 @@ impl SourceAPI {
         Ok(result)
     }
 
-    pub(super) fn from_schema_directive(
+    fn from_schema_directive(
         graph: &str,
         directive_name: &str,
         args: &HashMap<Name, Node<apollo_compiler::ast::Value>>,
@@ -478,7 +526,7 @@ pub(super) struct SourceType {
 }
 
 impl SourceType {
-    pub(super) fn from_schema_and_graph_names(
+    fn from_schema_and_graph_names(
         schema: &Schema,
         graph_names: &HashMap<String, String>,
     ) -> Result<Vec<Self>, ConnectorDirectiveError> {

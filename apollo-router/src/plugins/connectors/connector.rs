@@ -10,6 +10,7 @@ use tower::BoxError;
 
 use super::directives::graph_enum_map;
 use super::directives::KeyTypeMap;
+use super::directives::Source;
 use super::directives::SourceAPI;
 use super::directives::SourceField;
 use super::directives::SourceType;
@@ -80,7 +81,7 @@ impl Connector {
         api: SourceAPI,
         directive: SourceType,
     ) -> Result<Self, BoxError> {
-        let (input_selection, key, transport) = if let Some(ref http) = directive.http {
+        let (input_selection, key, transport) = if let Some(http) = &directive.http {
             let (input_selection, key_string) =
                 HttpJsonTransport::input_selection_from_http_source(http);
 
@@ -118,7 +119,7 @@ impl Connector {
         api: SourceAPI,
         directive: SourceField,
     ) -> Result<Self, BoxError> {
-        let (input_selection, key, transport) = if let Some(ref http) = directive.http {
+        let (input_selection, key, transport) = if let Some(http) = &directive.http {
             let (input_selection, key_string) =
                 HttpJsonTransport::input_selection_from_http_source(http);
 
@@ -170,9 +171,10 @@ impl Connector {
             return Ok(Default::default());
         }
 
-        let apis = SourceAPI::from_schema(schema)?;
-        let types = SourceType::from_schema(schema)?;
-        let fields = SourceField::from_schema(schema)?;
+        let source = Source::new(schema)?;
+        let apis = source.apis();
+        let types = source.types();
+        let fields = source.fields();
 
         if apis.is_empty() || (types.is_empty() && fields.is_empty()) {
             return Ok(Default::default());
@@ -185,17 +187,18 @@ impl Connector {
 
         let mut connectors = HashMap::new();
 
-        for (i, directive) in types.into_iter().enumerate() {
+        // todo: remove clones come on jeremy
+        for (i, directive) in types.iter().enumerate() {
             let connector_name = format!("CONNECTOR_{}_{}", directive.type_name, i).to_uppercase();
             let api = apis.get(&directive.api_name()).unwrap_or(default_api);
 
             connectors.insert(
                 connector_name.clone(),
-                Connector::new_from_source_type(connector_name, api.clone(), directive)?,
+                Connector::new_from_source_type(connector_name, api.clone(), directive.clone())?,
             );
         }
 
-        for (i, directive) in fields.into_iter().enumerate() {
+        for (i, directive) in fields.iter().enumerate() {
             let connector_name = format!(
                 "CONNECTOR_{}_{}_{}",
                 directive.parent_type_name, directive.field_name, i
@@ -203,10 +206,10 @@ impl Connector {
             .to_uppercase();
 
             let api = apis.get(&directive.api_name()).unwrap_or(default_api);
-
+            // todo: remove clones come on jeremy
             connectors.insert(
                 connector_name.clone(),
-                Connector::new_from_source_field(connector_name, api.clone(), directive)?,
+                Connector::new_from_source_field(connector_name, api.clone(), directive.clone())?,
             );
         }
 

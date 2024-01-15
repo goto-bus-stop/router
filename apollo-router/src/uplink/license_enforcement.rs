@@ -247,6 +247,10 @@ impl LicenseEnforcementReport {
                 .name("@requiresScopes")
                 .url("https://specs.apollo.dev/requiresScopes/v0.1")
                 .build(),
+            SchemaRestriction::builder()
+                .name("@sourceAPI")
+                .url("https://specs.apollo.dev/source/v0.1")
+                .build(),
         ]
     }
 }

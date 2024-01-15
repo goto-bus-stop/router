@@ -80,6 +80,7 @@ impl HttpJsonTransport {
             .as_ref()
             .ok_or(HttpJsonTransportError::MissingHttp)?;
 
+        // TODO: refactor clones
         Ok(Self {
             base_uri: api_http
                 .base_url

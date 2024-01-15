@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
@@ -21,6 +22,7 @@ const SOURCE_API_DIRECTIVE_NAME: &str = "sourceAPI";
 const HTTP_ARGUMENT_NAME: &str = "http";
 const SOURCE_TYPE_DIRECTIVE_NAME: &str = "sourceType";
 const SOURCE_FIELD_DIRECTIVE_NAME: &str = "sourceField";
+const SOURCE_DIRECTIVE_URL: &str = "https://specs.apollo.dev/source/v0.1";
 
 const JOIN_DIRECTIVE_DIRECTIVE_NAME: &str = "join__directive";
 const JOIN_TYPE_DIRECTIVE_NAME: &str = "join__type";
@@ -199,7 +201,82 @@ impl TryFrom<&Node<apollo_compiler::ast::Value>> for DirectiveAsObject {
 
 // --- @sourceAPI --------------------------------------------------------------
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
+pub(super) struct Source {
+    types: Arc<Vec<SourceType>>,
+    fields: Arc<Vec<SourceField>>,
+    apis: Arc<HashMap<String, SourceAPI>>,
+}
+
+impl Source {
+    pub(super) fn new(schema: &Schema) -> Result<Self, ConnectorDirectiveError> {
+        let apis = Arc::new(SourceAPI::from_schema(schema)?);
+        let types = Arc::new(SourceType::from_schema(schema)?);
+        let fields = Arc::new(SourceField::from_schema(schema)?);
+
+        Ok(Self {
+            apis,
+            fields,
+            types,
+        })
+        // let graph_names = graph_enum_map(schema).ok_or_else(|| {
+        //     ConnectorDirectiveError::InvalidJoinDirective("Missing join__Graph enum".to_string())
+        // })?;
+
+        // // TODO: extract self::apis() or something
+        // let mut apis = HashMap::new();
+
+        // let joins =
+        //     JoinedDirective::from_schema_directive_list(&schema.schema_definition.directives)?;
+
+        // let mut source_apis = vec![];
+
+        // let source_api_directive_name = crate::spec::Schema::directive_name(
+        //     schema,
+        //     SOURCE_DIRECTIVE_URL,
+        //     SOURCE_API_DIRECTIVE_NAME,
+        // )
+        // .unwrap_or_else(|| SOURCE_API_DIRECTIVE_NAME.to_string());
+
+        // for joined in joins.iter() {
+        //     if joined.directive.name == source_api_directive_name {
+        //         source_apis.extend(
+        //             joined
+        //                 .graphs
+        //                 .iter()
+        //                 .map(|graph| (graph, &joined.directive.args))
+        //                 .collect::<Vec<_>>(),
+        //         );
+        //     }
+        // }
+
+        // for (graph, args) in source_apis {
+        //     let graph_name = graph_names.get(graph).ok_or_else(|| {
+        //         ConnectorDirectiveError::InvalidJoinDirective(
+        //             format!("Missing graph {} in join__Graph enum", graph).to_string(),
+        //         )
+        //     })?;
+        //     let source_api = Self::from_schema_directive(graph_name, args)?;
+        //     let name = format!("{}_{}", source_api.graph, source_api.name);
+        //     apis.insert(name, source_api);
+        // }
+
+        // Ok(result)
+    }
+
+    pub(super) fn apis(&self) -> Arc<HashMap<String, SourceAPI>> {
+        Arc::clone(&self.apis)
+    }
+
+    pub(super) fn types(&self) -> Arc<Vec<SourceType>> {
+        Arc::clone(&self.types)
+    }
+    pub(super) fn fields(&self) -> Arc<Vec<SourceField>> {
+        Arc::clone(&self.fields)
+    }
+}
+
+#[derive(Debug, Serialize, Clone)]
 pub(super) struct SourceAPI {
     pub(crate) graph: String,
     pub(crate) name: String,
@@ -227,8 +304,16 @@ impl SourceAPI {
             JoinedDirective::from_schema_directive_list(&schema.schema_definition.directives)?;
 
         let mut source_apis = vec![];
+
+        let source_api_directive_name = crate::spec::Schema::directive_name(
+            schema,
+            SOURCE_DIRECTIVE_URL,
+            SOURCE_API_DIRECTIVE_NAME,
+        )
+        .unwrap_or_else(|| SOURCE_API_DIRECTIVE_NAME.to_string());
+
         for joined in joins.iter() {
-            if joined.directive.name == SOURCE_API_DIRECTIVE_NAME {
+            if joined.directive.name == source_api_directive_name {
                 source_apis.extend(
                     joined
                         .graphs
@@ -245,7 +330,8 @@ impl SourceAPI {
                     format!("Missing graph {} in join__Graph enum", graph).to_string(),
                 )
             })?;
-            let source_api = Self::from_schema_directive(graph_name, args)?;
+            let source_api =
+                Self::from_schema_directive(graph_name, source_api_directive_name.as_ref(), args)?;
             let name = format!("{}_{}", source_api.graph, source_api.name);
             result.insert(name, source_api);
         }
@@ -255,6 +341,7 @@ impl SourceAPI {
 
     pub(super) fn from_schema_directive(
         graph: &str,
+        directive_name: &str,
         args: &HashMap<Name, Node<apollo_compiler::ast::Value>>,
     ) -> Result<Self, ConnectorDirectiveError> {
         let name = args
@@ -262,14 +349,14 @@ impl SourceAPI {
             .ok_or_else(|| {
                 ConnectorDirectiveError::MissingAttributeForType(
                     "name".to_string(),
-                    SOURCE_API_DIRECTIVE_NAME.to_string(),
+                    directive_name.to_string(),
                 )
             })?
             .as_str()
             .ok_or_else(|| {
                 ConnectorDirectiveError::MissingAttributeForType(
                     "name".to_string(),
-                    SOURCE_API_DIRECTIVE_NAME.to_string(),
+                    directive_name.to_string(),
                 )
             })?
             .to_string();
@@ -411,7 +498,7 @@ impl HTTPHeaderMapping {
 
 // --- @sourceType -------------------------------------------------------------
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub(super) struct SourceType {
     pub(super) graph: String,
     pub(super) type_name: Name,
@@ -430,13 +517,20 @@ impl SourceType {
 
         let mut result: Vec<Self> = Vec::new();
 
+        let source_type_directive_name = crate::spec::Schema::directive_name(
+            schema,
+            SOURCE_DIRECTIVE_URL,
+            SOURCE_TYPE_DIRECTIVE_NAME,
+        )
+        .unwrap_or_else(|| SOURCE_TYPE_DIRECTIVE_NAME.to_string());
+
         for (type_name, ty) in &schema.types {
             let is_interface_object_map = Self::get_is_interface_object_map(ty);
             let joins = JoinedDirective::from_schema_directive_list(ty.directives())?;
             let source_types = joins
                 .iter()
                 .flat_map(|joined| {
-                    if joined.directive.name == SOURCE_TYPE_DIRECTIVE_NAME {
+                    if joined.directive.name == source_type_directive_name {
                         joined
                             .graphs
                             .iter()
@@ -462,6 +556,7 @@ impl SourceType {
                             let is_interface_object =
                                 is_interface_object_map.get(graph).copied().unwrap_or(false);
                             Self::from_directive(
+                                source_type_directive_name.as_ref(),
                                 graph_name.clone(),
                                 type_name.clone(),
                                 args,
@@ -495,6 +590,7 @@ impl SourceType {
     }
 
     fn from_directive(
+        source_type_directive_name: &str,
         graph: String,
         type_name: Name,
         directive: &HashMap<Name, Node<apollo_compiler::ast::Value>>,
@@ -505,7 +601,7 @@ impl SourceType {
             .ok_or_else(|| {
                 ConnectorDirectiveError::MissingAttributeForType(
                     "api".to_string(),
-                    SOURCE_TYPE_DIRECTIVE_NAME.to_string(),
+                    source_type_directive_name.to_string(),
                 )
             })?
             .as_str()
@@ -522,7 +618,7 @@ impl SourceType {
             .ok_or_else(|| {
                 ConnectorDirectiveError::MissingAttributeForType(
                     "selection".to_string(),
-                    SOURCE_TYPE_DIRECTIVE_NAME.to_string(),
+                    source_type_directive_name.to_string(),
                 )
             })?
             .as_str()
@@ -568,7 +664,7 @@ impl SourceType {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub(super) struct KeyTypeMap {
     pub(super) key: String,
     // Dictionary mapping possible __typename strings to values of the JSON
@@ -614,7 +710,7 @@ impl KeyTypeMap {
 
 // --- @sourceField ------------------------------------------------------------
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub(super) struct SourceField {
     pub(super) graph: String,
     pub(super) parent_type_name: Name,
@@ -632,9 +728,20 @@ impl SourceField {
             ConnectorDirectiveError::InvalidJoinDirective("Missing join__Graph enum".to_string())
         })?;
 
+        let source_field_directive_name = crate::spec::Schema::directive_name(
+            schema,
+            SOURCE_DIRECTIVE_URL,
+            SOURCE_FIELD_DIRECTIVE_NAME,
+        )
+        .unwrap_or_else(|| SOURCE_FIELD_DIRECTIVE_NAME.to_string());
+
         let mut source_fields = vec![];
         for (_, ty) in schema.types.iter() {
-            source_fields.extend(Self::from_type(&graph_names, ty)?);
+            source_fields.extend(Self::from_type(
+                &graph_names,
+                ty,
+                source_field_directive_name.as_ref(),
+            )?);
         }
         Ok(source_fields)
     }
@@ -642,10 +749,15 @@ impl SourceField {
     fn from_type(
         graph_names: &HashMap<String, String>,
         ty: &ExtendedType,
+        source_field_directive_name: &str,
     ) -> Result<Vec<Self>, ConnectorDirectiveError> {
         Ok(match ty {
-            ExtendedType::Object(obj) => Self::from_fields(graph_names, ty, &obj.fields)?,
-            ExtendedType::Interface(obj) => Self::from_fields(graph_names, ty, &obj.fields)?,
+            ExtendedType::Object(obj) => {
+                Self::from_fields(graph_names, ty, &obj.fields, source_field_directive_name)?
+            }
+            ExtendedType::Interface(obj) => {
+                Self::from_fields(graph_names, ty, &obj.fields, source_field_directive_name)?
+            }
             _ => vec![],
         })
     }
@@ -654,6 +766,7 @@ impl SourceField {
         graph_names: &HashMap<String, String>,
         parent_type: &ExtendedType,
         fields: &IndexMap<Name, Component<FieldDefinition>>,
+        source_field_directive_name: &str,
     ) -> Result<Vec<Self>, ConnectorDirectiveError> {
         let mut result: Vec<Self> = vec![];
 
@@ -667,7 +780,7 @@ impl SourceField {
             let source_fields = joins
                 .iter()
                 .flat_map(|joined| {
-                    if joined.directive.name == SOURCE_FIELD_DIRECTIVE_NAME {
+                    if joined.directive.name == source_field_directive_name {
                         joined
                             .graphs
                             .iter()
@@ -693,6 +806,7 @@ impl SourceField {
                             is_interface_object_map.get(graph).copied().unwrap_or(false);
 
                         Self::from_directive(
+                            source_field_directive_name,
                             graph_name.clone(),
                             parent_type_name.clone(),
                             field_name.clone(),
@@ -709,6 +823,7 @@ impl SourceField {
     }
 
     fn from_directive(
+        source_field_directive_name: &str,
         graph: String,
         parent_type_name: Name,
         field_name: Name,
@@ -721,7 +836,7 @@ impl SourceField {
             .ok_or_else(|| {
                 ConnectorDirectiveError::MissingAttributeForType(
                     "api".to_string(),
-                    SOURCE_FIELD_DIRECTIVE_NAME.to_string(),
+                    source_field_directive_name.to_string(),
                 )
             })?
             .as_str()
@@ -738,7 +853,7 @@ impl SourceField {
             .ok_or_else(|| {
                 ConnectorDirectiveError::MissingAttributeForType(
                     "selection".to_string(),
-                    SOURCE_FIELD_DIRECTIVE_NAME.to_string(),
+                    source_field_directive_name.to_string(),
                 )
             })?
             .as_str()
@@ -780,7 +895,7 @@ impl SourceField {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub(super) struct HTTPSource {
     pub(super) path_template: URLPathTemplate,
     #[serde(with = "http_serde::method")]

@@ -210,58 +210,28 @@ pub(super) struct Source {
 
 impl Source {
     pub(super) fn new(schema: &Schema) -> Result<Self, ConnectorDirectiveError> {
-        let apis = Arc::new(SourceAPI::from_schema(schema)?);
-        let types = Arc::new(SourceType::from_schema(schema)?);
-        let fields = Arc::new(SourceField::from_schema(schema)?);
+        let graph_names = graph_enum_map(schema).ok_or_else(|| {
+            ConnectorDirectiveError::InvalidJoinDirective("Missing join__Graph enum".to_string())
+        })?;
+
+        let apis = Arc::new(SourceAPI::from_schema_and_graph_names(
+            schema,
+            &graph_names,
+        )?);
+        let types = Arc::new(SourceType::from_schema_and_graph_names(
+            schema,
+            &graph_names,
+        )?);
+        let fields = Arc::new(SourceField::from_schema_and_graph_names(
+            schema,
+            &graph_names,
+        )?);
 
         Ok(Self {
             apis,
             fields,
             types,
         })
-        // let graph_names = graph_enum_map(schema).ok_or_else(|| {
-        //     ConnectorDirectiveError::InvalidJoinDirective("Missing join__Graph enum".to_string())
-        // })?;
-
-        // // TODO: extract self::apis() or something
-        // let mut apis = HashMap::new();
-
-        // let joins =
-        //     JoinedDirective::from_schema_directive_list(&schema.schema_definition.directives)?;
-
-        // let mut source_apis = vec![];
-
-        // let source_api_directive_name = crate::spec::Schema::directive_name(
-        //     schema,
-        //     SOURCE_DIRECTIVE_URL,
-        //     SOURCE_API_DIRECTIVE_NAME,
-        // )
-        // .unwrap_or_else(|| SOURCE_API_DIRECTIVE_NAME.to_string());
-
-        // for joined in joins.iter() {
-        //     if joined.directive.name == source_api_directive_name {
-        //         source_apis.extend(
-        //             joined
-        //                 .graphs
-        //                 .iter()
-        //                 .map(|graph| (graph, &joined.directive.args))
-        //                 .collect::<Vec<_>>(),
-        //         );
-        //     }
-        // }
-
-        // for (graph, args) in source_apis {
-        //     let graph_name = graph_names.get(graph).ok_or_else(|| {
-        //         ConnectorDirectiveError::InvalidJoinDirective(
-        //             format!("Missing graph {} in join__Graph enum", graph).to_string(),
-        //         )
-        //     })?;
-        //     let source_api = Self::from_schema_directive(graph_name, args)?;
-        //     let name = format!("{}_{}", source_api.graph, source_api.name);
-        //     apis.insert(name, source_api);
-        // }
-
-        // Ok(result)
     }
 
     pub(super) fn apis(&self) -> Arc<HashMap<String, SourceAPI>> {
@@ -291,13 +261,10 @@ impl SourceAPI {
             .unwrap_or_default()
     }
 
-    pub(super) fn from_schema(
+    pub(super) fn from_schema_and_graph_names(
         schema: &Schema,
+        graph_names: &HashMap<String, String>,
     ) -> Result<HashMap<String, Self>, ConnectorDirectiveError> {
-        let graph_names = graph_enum_map(schema).ok_or_else(|| {
-            ConnectorDirectiveError::InvalidJoinDirective("Missing join__Graph enum".to_string())
-        })?;
-
         let mut result = HashMap::new();
 
         let joins =
@@ -510,11 +477,10 @@ pub(super) struct SourceType {
 }
 
 impl SourceType {
-    pub(super) fn from_schema(schema: &Schema) -> Result<Vec<Self>, ConnectorDirectiveError> {
-        let graph_names = graph_enum_map(schema).ok_or_else(|| {
-            ConnectorDirectiveError::InvalidJoinDirective("Missing join__Graph enum".to_string())
-        })?;
-
+    pub(super) fn from_schema_and_graph_names(
+        schema: &Schema,
+        graph_names: &HashMap<String, String>,
+    ) -> Result<Vec<Self>, ConnectorDirectiveError> {
         let mut result: Vec<Self> = Vec::new();
 
         let source_type_directive_name = crate::spec::Schema::directive_name(
@@ -723,11 +689,10 @@ pub(super) struct SourceField {
 }
 
 impl SourceField {
-    pub(super) fn from_schema(schema: &Schema) -> Result<Vec<Self>, ConnectorDirectiveError> {
-        let graph_names = graph_enum_map(schema).ok_or_else(|| {
-            ConnectorDirectiveError::InvalidJoinDirective("Missing join__Graph enum".to_string())
-        })?;
-
+    pub(super) fn from_schema_and_graph_names(
+        schema: &Schema,
+        graph_names: &HashMap<String, String>,
+    ) -> Result<Vec<Self>, ConnectorDirectiveError> {
         let source_field_directive_name = crate::spec::Schema::directive_name(
             schema,
             SOURCE_DIRECTIVE_URL,
@@ -738,7 +703,7 @@ impl SourceField {
         let mut source_fields = vec![];
         for (_, ty) in schema.types.iter() {
             source_fields.extend(Self::from_type(
-                &graph_names,
+                graph_names,
                 ty,
                 source_field_directive_name.as_ref(),
             )?);
@@ -1039,8 +1004,15 @@ mod tests {
             }
             "#;
         let partial_schema = apollo_compiler::Schema::parse(partial_sdl, "schema.graphql").unwrap();
-
-        let all_source_apis = SourceAPI::from_schema(&partial_schema).unwrap();
+        let graph_names = graph_enum_map(&partial_schema)
+            .ok_or_else(|| {
+                ConnectorDirectiveError::InvalidJoinDirective(
+                    "Missing join__Graph enum".to_string(),
+                )
+            })
+            .unwrap();
+        let all_source_apis =
+            SourceAPI::from_schema_and_graph_names(&partial_schema, &graph_names).unwrap();
 
         insta::with_settings!({sort_maps => true}, {
             assert_json_snapshot!(all_source_apis);
@@ -1068,7 +1040,15 @@ mod tests {
             "#;
 
         let partial_schema = apollo_compiler::Schema::parse(partial_sdl, "schema.graphql").unwrap();
-        let missing_name_error = SourceAPI::from_schema(&partial_schema).unwrap_err();
+        let graph_names = graph_enum_map(&partial_schema)
+            .ok_or_else(|| {
+                ConnectorDirectiveError::InvalidJoinDirective(
+                    "Missing join__Graph enum".to_string(),
+                )
+            })
+            .unwrap();
+        let missing_name_error =
+            SourceAPI::from_schema_and_graph_names(&partial_schema, &graph_names).unwrap_err();
         assert_eq!(
             ConnectorDirectiveError::MissingAttributeForType(
                 "name".to_string(),
@@ -1097,7 +1077,15 @@ mod tests {
             "#;
 
         let partial_schema = apollo_compiler::Schema::parse(partial_sdl, "schema.graphql").unwrap();
-        let missing_base_url_error = SourceAPI::from_schema(&partial_schema).unwrap_err();
+        let graph_names = graph_enum_map(&partial_schema)
+            .ok_or_else(|| {
+                ConnectorDirectiveError::InvalidJoinDirective(
+                    "Missing join__Graph enum".to_string(),
+                )
+            })
+            .unwrap();
+        let missing_base_url_error =
+            SourceAPI::from_schema_and_graph_names(&partial_schema, &graph_names).unwrap_err();
         assert_eq!(
             ConnectorDirectiveError::MissingAttributeForType(
                 "baseURL".to_string(),
@@ -1127,7 +1115,15 @@ mod tests {
             "#;
 
         let partial_schema = apollo_compiler::Schema::parse(partial_sdl, "schema.graphql").unwrap();
-        let missing_header_name_error = SourceAPI::from_schema(&partial_schema).unwrap_err();
+        let graph_names = graph_enum_map(&partial_schema)
+            .ok_or_else(|| {
+                ConnectorDirectiveError::InvalidJoinDirective(
+                    "Missing join__Graph enum".to_string(),
+                )
+            })
+            .unwrap();
+        let missing_header_name_error =
+            SourceAPI::from_schema_and_graph_names(&partial_schema, &graph_names).unwrap_err();
         assert_eq!(
             ConnectorDirectiveError::MissingAttributeForType(
                 "name".to_string(),
@@ -1170,7 +1166,15 @@ mod tests {
         "#;
 
         let partial_schema = apollo_compiler::Schema::parse(partial_sdl, "schema.graphql").unwrap();
-        let source_types = SourceType::from_schema(&partial_schema).unwrap();
+        let graph_names = graph_enum_map(&partial_schema)
+            .ok_or_else(|| {
+                ConnectorDirectiveError::InvalidJoinDirective(
+                    "Missing join__Graph enum".to_string(),
+                )
+            })
+            .unwrap();
+        let source_types =
+            SourceType::from_schema_and_graph_names(&partial_schema, &graph_names).unwrap();
 
         insta::with_settings!({sort_maps => true}, {
             assert_json_snapshot!(source_types);
@@ -1199,7 +1203,15 @@ mod tests {
         "#;
 
         let partial_schema = apollo_compiler::Schema::parse(partial_sdl, "schema.graphql").unwrap();
-        let source_fields = SourceField::from_schema(&partial_schema).unwrap();
+        let graph_names = graph_enum_map(&partial_schema)
+            .ok_or_else(|| {
+                ConnectorDirectiveError::InvalidJoinDirective(
+                    "Missing join__Graph enum".to_string(),
+                )
+            })
+            .unwrap();
+        let source_fields =
+            SourceField::from_schema_and_graph_names(&partial_schema, &graph_names).unwrap();
 
         insta::with_settings!({sort_maps => true}, {
             assert_json_snapshot!(source_fields, @r###"
@@ -1263,9 +1275,15 @@ mod tests {
         "#;
 
         let partial_schema = apollo_compiler::Schema::parse(partial_sdl, "schema.graphql").unwrap();
-
+        let graph_names = graph_enum_map(&partial_schema)
+            .ok_or_else(|| {
+                ConnectorDirectiveError::InvalidJoinDirective(
+                    "Missing join__Graph enum".to_string(),
+                )
+            })
+            .unwrap();
         assert_eq!(
-            SourceField::from_schema(&partial_schema).unwrap_err(),
+            SourceField::from_schema_and_graph_names(&partial_schema, &graph_names).unwrap_err(),
             ConnectorDirectiveError::RequiresExactlyOne(
                 "GET, PATCH, POST, PUT, DELETE".to_string(),
                 "HTTPSourceField".to_string(),

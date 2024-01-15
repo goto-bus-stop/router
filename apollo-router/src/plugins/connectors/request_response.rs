@@ -50,7 +50,7 @@ enum ResponseKey {
 
 #[derive(Clone, Debug)]
 enum ResponseTypeName {
-    Concrete(String), // TODO Abstract(Vec<String>) with discriminator?
+    Concrete(String),
     /// For interfaceObject support. We don't want to include __typename in the
     /// response because this subgraph doesn't know the concrete type
     Omitted,
@@ -193,12 +193,13 @@ fn root_fields(
                 Ok((response_key, request_inputs))
             }
 
-            // TODO if the client operation uses fragments, we'll probably need to handle that here
+            // The query planner removes fragments at the root so we don't have
+            // to worry these branches
             Selection::FragmentSpread(_) => Err(MakeRequestError::UnsupportedOperation(
-                "root field fragment spread not supported".into(),
+                "top-level fragments in query planner nodes should not happen".into(),
             )),
             Selection::InlineFragment(_) => Err(MakeRequestError::UnsupportedOperation(
-                "root field inline fragment not supported".into(),
+                "top-level inline fragments in query planner nodes should not happen".into(),
             )),
         })
         .collect::<Result<Vec<_>, MakeRequestError>>()
@@ -597,29 +598,37 @@ fn format_response(
 }
 
 fn inject_typename(data: &mut Value, typename: &str, key_type_map: &Option<KeyTypeMap>) {
-    if let Value::Object(data) = data {
-        if let Some(key_type_map) = key_type_map {
-            let key = ByteString::from(key_type_map.key.clone());
-            let discriminator = data
-                .get(&key)
-                .and_then(|val| val.as_str())
-                .map(|val| val.to_string())
-                .unwrap_or_default();
-
-            for (typename, value) in key_type_map.type_map.iter() {
-                if value == &discriminator {
-                    data.insert(
-                        ByteString::from("__typename"),
-                        Value::String(ByteString::from(typename.as_str())),
-                    );
-                }
+    match data {
+        Value::Array(data) => {
+            for data in data {
+                inject_typename(data, typename, key_type_map);
             }
-        } else {
-            data.insert(
-                ByteString::from("__typename"),
-                Value::String(ByteString::from(typename)),
-            );
         }
+        Value::Object(data) => {
+            if let Some(key_type_map) = key_type_map {
+                let key = ByteString::from(key_type_map.key.clone());
+                let discriminator = data
+                    .get(&key)
+                    .and_then(|val| val.as_str())
+                    .map(|val| val.to_string())
+                    .unwrap_or_default();
+
+                for (typename, value) in key_type_map.type_map.iter() {
+                    if value == &discriminator {
+                        data.insert(
+                            ByteString::from("__typename"),
+                            Value::String(ByteString::from(typename.as_str())),
+                        );
+                    }
+                }
+            } else {
+                data.insert(
+                    ByteString::from("__typename"),
+                    Value::String(ByteString::from(typename)),
+                );
+            }
+        }
+        _ => {}
     }
 }
 

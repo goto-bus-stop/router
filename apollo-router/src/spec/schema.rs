@@ -18,8 +18,7 @@ use crate::configuration::GraphQLValidationMode;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
 use crate::error::ValidationErrors;
-use crate::plugins::connectors::connectors_from_schema;
-use crate::plugins::connectors::Connectors;
+use crate::plugins::connectors::Source;
 use crate::query_planner::OperationKind;
 use crate::Configuration;
 
@@ -39,7 +38,7 @@ pub(crate) struct Schema {
 
     /// If the schema contains connectors, we'll extract them and the inner
     /// supergraph schema here for use in the router factory and query planner.
-    pub(crate) connectors: Option<Connectors>,
+    pub(crate) source: Option<Source>,
 }
 
 #[cfg(test)]
@@ -146,7 +145,7 @@ impl Schema {
 
         let implementers_map = definitions.implementers_map();
 
-        let connectors = connectors_from_schema(&definitions)
+        let source = Source::new(&definitions)
             .map_err(|e| SchemaError::Connector(format!("Failed to create connectors: {}", e)))?;
 
         Ok(Schema {
@@ -158,7 +157,7 @@ impl Schema {
             api_schema: None,
             schema_id,
             subgraph_definition_and_names,
-            connectors,
+            source,
         })
     }
 

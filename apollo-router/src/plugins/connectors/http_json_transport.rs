@@ -326,7 +326,7 @@ impl HttpHeader {
     }
 }
 
-// TODO: why is this leaking?
+// These are runtime error only, configuration errors should be captured as ConnectorDirectiveError
 #[derive(Error, Display, Debug)]
 pub(crate) enum HttpJsonTransportError {
     /// Error building URI

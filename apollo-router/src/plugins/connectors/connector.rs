@@ -5,12 +5,8 @@ use std::fmt::Display;
 
 use apollo_compiler::ast::Selection as GraphQLSelection;
 use apollo_compiler::schema::Name;
-use apollo_compiler::Schema;
-use tower::BoxError;
 
-use super::directives::graph_enum_map;
 use super::directives::KeyTypeMap;
-use super::directives::Source;
 use super::directives::SourceAPI;
 use super::directives::SourceField;
 use super::directives::SourceType;
@@ -19,6 +15,7 @@ use crate::error::ConnectorDirectiveError;
 
 /// A connector wraps the API and type/field connector metadata and has
 /// a unique name used to construct a "subgraph" in the inner supergraph
+/// TODO: make it more clone friendly
 #[derive(Clone, Debug)]
 pub(crate) struct Connector {
     /// Internal name used to construct "subgraphs" in the inner supergraph
@@ -165,19 +162,6 @@ impl Connector {
         })
     }
 
-    /// Generate a map of connectors with unique names
-    pub(crate) fn from_schema(schema: &Schema) -> Result<HashMap<String, Self>, BoxError> {
-        // NOTE: crate::spec::Schema::parse might be called with an API schema, which doesn't have a join__Graph
-        // TODO: we can extract this map once and pass it to the ::from_schema functions instead of generating it for each connector type
-        if graph_enum_map(schema).is_none() {
-            return Ok(Default::default());
-        }
-
-        Source::new(schema)?
-            .connectors()
-            .map_err(std::convert::Into::into)
-    }
-
     pub(super) fn finder_field_name(&self) -> Option<serde_json_bytes::ByteString> {
         match &self.kind {
             ConnectorKind::RootField { .. } => None,
@@ -207,6 +191,7 @@ mod tests {
     use std::sync::Arc;
 
     use apollo_compiler::name;
+    use apollo_compiler::Schema;
 
     use super::*;
     use crate::plugins::connectors::directives::HTTPSource;

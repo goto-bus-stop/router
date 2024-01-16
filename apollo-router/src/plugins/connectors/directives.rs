@@ -9,13 +9,17 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
 use apollo_compiler::schema::Name;
 use apollo_compiler::schema::Value;
+use apollo_compiler::validation::Valid;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use http::Method;
 use indexmap::IndexMap;
+use itertools::Itertools;
 use serde::Serialize;
 
+use super::join_spec_helpers::*;
 use super::selection_parser::Selection as JSONSelection;
+use super::supergraph::*;
 use super::url_path_parser::URLPathTemplate;
 use super::Connector;
 use crate::error::ConnectorDirectiveError;
@@ -34,8 +38,7 @@ const JOIN_GRAPH_DIRECTIVE_NAME: &str = "join__graph";
 
 // --- @join__* ----------------------------------------------------------------
 
-// TODO: I don't think this should be pub(super), demeter at play here.
-pub(super) fn graph_enum_map(schema: &apollo_compiler::Schema) -> Option<HashMap<String, String>> {
+fn graph_enum_map(schema: &apollo_compiler::Schema) -> Option<HashMap<String, String>> {
     schema.get_enum(JOIN_GRAPH_ENUM_NAME).map(|e| {
         e.values
             .iter()
@@ -204,23 +207,32 @@ impl TryFrom<&Node<apollo_compiler::ast::Value>> for DirectiveAsObject {
 
 // --- @sourceAPI --------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize)]
-pub(super) struct Source {
+#[derive(Debug, Clone)]
+pub(crate) struct Source {
     types: Arc<Vec<SourceType>>,
     fields: Arc<Vec<SourceField>>,
     apis: Arc<HashMap<String, SourceAPI>>,
+    connectors: Arc<HashMap<String, Connector>>,
+    supergraph: Arc<Valid<Schema>>,
 }
 
 impl Source {
-    pub(super) fn new(schema: &Schema) -> Result<Self, ConnectorDirectiveError> {
-        let graph_names = graph_enum_map(schema).ok_or_else(|| {
-            ConnectorDirectiveError::InvalidJoinDirective("Missing join__Graph enum".to_string())
-        })?;
+    pub(crate) fn new(schema: &Schema) -> Result<Option<Self>, ConnectorDirectiveError> {
+        let graph_names = if let Some(graph_names) = graph_enum_map(schema) {
+            graph_names
+        } else {
+            return Ok(None);
+        };
 
         let apis = Arc::new(SourceAPI::from_schema_and_graph_names(
             schema,
             &graph_names,
         )?);
+        // No connector
+        if apis.is_empty() {
+            return Ok(None);
+        }
+
         let types = Arc::new(SourceType::from_schema_and_graph_names(
             schema,
             &graph_names,
@@ -230,11 +242,18 @@ impl Source {
             &graph_names,
         )?);
 
-        Ok(Self {
+        let connectors = Arc::new(Self::_connectors(&apis, &types, &fields)?);
+        let supergraph = Arc::new(
+            Self::generate_connector_supergraph(schema, &connectors)
+                .map_err(ConnectorDirectiveError::InconsistentSchema)?,
+        );
+        Ok(Some(Self {
             apis,
             fields,
             types,
-        })
+            connectors,
+            supergraph,
+        }))
     }
 
     pub(super) fn apis(&self) -> Arc<HashMap<String, SourceAPI>> {
@@ -248,27 +267,35 @@ impl Source {
         Arc::clone(&self.fields)
     }
 
-    pub(super) fn default_api(&self) -> Result<&SourceAPI, ConnectorDirectiveError> {
-        self.apis
-            .values()
-            .find(|api| api.is_default())
-            .or_else(|| self.apis.values().next())
-            .ok_or(ConnectorDirectiveError::NoSourceAPIDefined)
+    pub(crate) fn connectors(&self) -> Arc<HashMap<String, Connector>> {
+        Arc::clone(&self.connectors)
     }
 
-    pub(super) fn connectors(&self) -> Result<HashMap<String, Connector>, ConnectorDirectiveError> {
-        if self.apis.is_empty() || (self.types.is_empty() && self.fields.is_empty()) {
+    pub(crate) fn supergraph(&self) -> Arc<Valid<Schema>> {
+        Arc::clone(&self.supergraph)
+    }
+
+    fn _connectors(
+        apis: &HashMap<String, SourceAPI>,
+        types: &Vec<SourceType>,
+        fields: &Vec<SourceField>,
+    ) -> Result<HashMap<String, Connector>, ConnectorDirectiveError> {
+        if apis.is_empty() || (types.is_empty() && fields.is_empty()) {
             return Ok(Default::default());
         }
 
-        let default_api = self.default_api()?;
+        let default_api = apis
+            .values()
+            .find(|api| api.is_default())
+            .or_else(|| apis.values().next())
+            .ok_or(ConnectorDirectiveError::NoSourceAPIDefined)?;
 
         let mut connectors = HashMap::new();
 
         // todo: remove clones come on jeremy
-        for (i, directive) in self.types.iter().enumerate() {
+        for (i, directive) in types.iter().enumerate() {
             let connector_name = format!("CONNECTOR_{}_{}", directive.type_name, i).to_uppercase();
-            let api = self.apis.get(&directive.api_name()).unwrap_or(default_api);
+            let api = apis.get(&directive.api_name()).unwrap_or(default_api);
 
             connectors.insert(
                 connector_name.clone(),
@@ -276,14 +303,14 @@ impl Source {
             );
         }
 
-        for (i, directive) in self.fields.iter().enumerate() {
+        for (i, directive) in fields.iter().enumerate() {
             let connector_name = format!(
                 "CONNECTOR_{}_{}_{}",
                 directive.parent_type_name, directive.field_name, i
             )
             .to_uppercase();
 
-            let api = self.apis.get(&directive.api_name()).unwrap_or(default_api);
+            let api = apis.get(&directive.api_name()).unwrap_or(default_api);
             // todo: remove clones come on jeremy
             connectors.insert(
                 connector_name.clone(),
@@ -292,6 +319,51 @@ impl Source {
         }
 
         Ok(connectors)
+    }
+
+    /// Generates a new supergraph schema with one subgraph per connector. Copies
+    /// types and fields from the original schema and adds directives to associate
+    /// them with the appropriate connector.
+    fn generate_connector_supergraph(
+        schema: &Schema,
+        connectors: &HashMap<String, Connector>,
+    ) -> Result<Valid<Schema>, ConnectorSupergraphError> {
+        let mut new_schema = Schema::new();
+        copy_definitions(schema, &mut new_schema);
+
+        /* enum name -> subgraph name  */
+        let origin_subgraph_map = graph_enum_map(schema)
+            .ok_or_else(|| {
+                ConnectorSupergraphError::InvalidOuterSupergraph("missing join__Graph enum".into())
+            })?
+            .into_iter()
+            .map(|(k, v)| (v, k))
+            .collect::<HashMap<_, _>>();
+
+        let mut changes = Vec::new();
+        // sorted for stable SDL generation
+        for connector in connectors.values().sorted_by_key(|c| c.name.clone()) {
+            changes.extend(make_changes(connector, schema, &origin_subgraph_map)?);
+        }
+
+        for change in changes {
+            change.apply_to(schema, &mut new_schema)?;
+        }
+
+        let connector_graph_names = connectors
+            .values()
+            // sorted for stable SDL generation
+            .sorted_by_key(|c| c.name.clone())
+            .map(|c| c.name.as_str())
+            .collect::<Vec<_>>();
+        new_schema.types.insert(
+            name!("join__Graph"),
+            join_graph_enum(&connector_graph_names),
+        );
+
+        new_schema
+            .validate()
+            .map_err(ConnectorSupergraphError::InvalidInnerSupergraph)
     }
 }
 

@@ -2,20 +2,17 @@ use std::collections::HashMap;
 
 use apollo_compiler::ast;
 use apollo_compiler::ast::Selection;
-use apollo_compiler::name;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
 use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::schema::Name;
-use apollo_compiler::validation::Valid;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use itertools::Itertools;
 
 use super::connector::Connector;
 use super::connector::ConnectorKind;
-use super::directives::graph_enum_map;
 use super::join_spec_helpers::add_entities_field;
 use super::join_spec_helpers::add_input_join_field_directive;
 use super::join_spec_helpers::add_join_enum_value_directive;
@@ -23,50 +20,7 @@ use super::join_spec_helpers::add_join_field_directive;
 use super::join_spec_helpers::add_join_implements;
 use super::join_spec_helpers::add_join_type_directive;
 use super::join_spec_helpers::add_join_union_member_directive;
-use super::join_spec_helpers::copy_definitions;
-use super::join_spec_helpers::join_graph_enum;
 use super::join_spec_helpers::make_any_scalar;
-
-/// Generates a new supergraph schema with one subgraph per connector. Copies
-/// types and fields from the original schema and adds directives to associate
-/// them with the appropriate connector.
-pub(crate) fn generate_connector_supergraph(
-    schema: &Schema,
-    connectors: &HashMap<String, Connector>,
-) -> Result<Valid<Schema>, ConnectorSupergraphError> {
-    let mut new_schema = Schema::new();
-    copy_definitions(schema, &mut new_schema);
-
-    /* enum name -> subgraph name  */
-    let origin_subgraph_map = graph_enum_map(schema)
-        .ok_or_else(|| InvalidOuterSupergraph("missing join__Graph enum".into()))?
-        .into_iter()
-        .map(|(k, v)| (v, k))
-        .collect::<HashMap<_, _>>();
-
-    let mut changes = Vec::new();
-    // sorted for stable SDL generation
-    for connector in connectors.values().sorted_by_key(|c| c.name.clone()) {
-        changes.extend(make_changes(connector, schema, &origin_subgraph_map)?);
-    }
-
-    for change in changes {
-        change.apply_to(schema, &mut new_schema)?;
-    }
-
-    let connector_graph_names = connectors
-        .values()
-        // sorted for stable SDL generation
-        .sorted_by_key(|c| c.name.clone())
-        .map(|c| c.name.as_str())
-        .collect::<Vec<_>>();
-    new_schema.types.insert(
-        name!("join__Graph"),
-        join_graph_enum(&connector_graph_names),
-    );
-
-    new_schema.validate().map_err(InvalidInnerSupergraph)
-}
 
 /// Generate a list of changes to apply to the new schame
 pub(super) fn make_changes(
@@ -925,6 +879,26 @@ pub(crate) enum ConnectorSupergraphError {
 }
 use ConnectorSupergraphError::*;
 
+impl PartialEq for ConnectorSupergraphError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::InvalidOuterSupergraph(l0), Self::InvalidOuterSupergraph(r0)) => l0 == r0,
+            (Self::MissingField(l0, l1), Self::MissingField(r0, r1)) => l0 == r0 && l1 == r1,
+            (Self::MissingType(l0), Self::MissingType(r0)) => l0 == r0,
+            (Self::MissingPossibleTypes(l0), Self::MissingPossibleTypes(r0)) => l0 == r0,
+            (Self::Unsupported(l0), Self::Unsupported(r0)) => l0 == r0,
+            (Self::InvalidSelection(l0), Self::InvalidSelection(r0)) => l0 == r0,
+            (Self::Invariant(l0), Self::Invariant(r0)) => l0 == r0,
+            (Self::InvalidName(l0), Self::InvalidName(r0)) => l0 == r0,
+            // WithErrors doesn't implement PartialEq
+            (Self::InvalidInnerSupergraph(l0), Self::InvalidInnerSupergraph(r0)) => {
+                l0.to_string() == r0.to_string()
+            }
+            _ => false,
+        }
+    }
+}
+
 /// Given an enum definition, find all the values that are associated with the origin
 /// subgraph. Return a list of enum value inclusions for the connector subgraph.
 fn enum_values_for_graph(ty: &ExtendedType, origin_graph: &str, graph: &str) -> Vec<Change> {
@@ -954,15 +928,12 @@ fn enum_values_for_graph(ty: &ExtendedType, origin_graph: &str, graph: &str) -> 
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use apollo_compiler::Schema;
     use insta::assert_debug_snapshot;
     use insta::assert_snapshot;
     use itertools::Itertools;
 
-    use super::generate_connector_supergraph;
-    use crate::plugins::connectors::connector::Connector;
+    use crate::plugins::connectors::Source;
     use crate::spec::Schema as RouterSchema;
     use crate::Configuration;
 
@@ -972,8 +943,8 @@ mod tests {
     fn it_works() {
         let schema = Schema::parse_and_validate(SCHEMA, "outer.graphql").unwrap();
 
-        let connectors = Arc::from(Connector::from_schema(&schema).unwrap());
-        let inner = generate_connector_supergraph(&schema, &connectors).unwrap();
+        let source = Source::new(&schema).unwrap().unwrap();
+        let inner = source.supergraph();
 
         // new supergraph can be parsed into subgraphs
         let result = RouterSchema::parse(

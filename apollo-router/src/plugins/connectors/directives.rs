@@ -209,9 +209,6 @@ impl TryFrom<&Node<apollo_compiler::ast::Value>> for DirectiveAsObject {
 
 #[derive(Debug, Clone)]
 pub(crate) struct Source {
-    types: Arc<Vec<SourceType>>,
-    fields: Arc<Vec<SourceField>>,
-    apis: Arc<HashMap<String, SourceAPI>>,
     connectors: Arc<HashMap<String, Connector>>,
     supergraph: Arc<Valid<Schema>>,
 }
@@ -224,47 +221,24 @@ impl Source {
             return Ok(None);
         };
 
-        let apis = Arc::new(SourceAPI::from_schema_and_graph_names(
-            schema,
-            &graph_names,
-        )?);
+        let apis = SourceAPI::from_schema_and_graph_names(schema, &graph_names)?;
         // No connector
         if apis.is_empty() {
             return Ok(None);
         }
 
-        let types = Arc::new(SourceType::from_schema_and_graph_names(
-            schema,
-            &graph_names,
-        )?);
-        let fields = Arc::new(SourceField::from_schema_and_graph_names(
-            schema,
-            &graph_names,
-        )?);
+        let types = SourceType::from_schema_and_graph_names(schema, &graph_names)?;
+        let fields = SourceField::from_schema_and_graph_names(schema, &graph_names)?;
 
-        let connectors = Arc::new(Self::_connectors(&apis, &types, &fields)?);
+        let connectors = Arc::new(Self::generate_connectors(&apis, &types, &fields)?);
         let supergraph = Arc::new(
             Self::generate_connector_supergraph(schema, &connectors)
                 .map_err(ConnectorDirectiveError::InconsistentSchema)?,
         );
         Ok(Some(Self {
-            apis,
-            fields,
-            types,
             connectors,
             supergraph,
         }))
-    }
-
-    pub(super) fn apis(&self) -> Arc<HashMap<String, SourceAPI>> {
-        Arc::clone(&self.apis)
-    }
-
-    pub(super) fn types(&self) -> Arc<Vec<SourceType>> {
-        Arc::clone(&self.types)
-    }
-    pub(super) fn fields(&self) -> Arc<Vec<SourceField>> {
-        Arc::clone(&self.fields)
     }
 
     pub(crate) fn connectors(&self) -> Arc<HashMap<String, Connector>> {
@@ -275,7 +249,7 @@ impl Source {
         Arc::clone(&self.supergraph)
     }
 
-    fn _connectors(
+    fn generate_connectors(
         apis: &HashMap<String, SourceAPI>,
         types: &Vec<SourceType>,
         fields: &Vec<SourceField>,

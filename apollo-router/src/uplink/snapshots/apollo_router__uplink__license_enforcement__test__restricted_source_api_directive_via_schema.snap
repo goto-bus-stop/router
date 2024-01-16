@@ -1,0 +1,7 @@
+---
+source: apollo-router/src/uplink/license_enforcement.rs
+expression: report.to_string()
+---
+Schema features:
+* @sourceAPI
+  https://specs.apollo.dev/source/v0.1

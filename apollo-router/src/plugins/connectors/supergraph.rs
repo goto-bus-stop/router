@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use apollo_compiler::ast;
 use apollo_compiler::ast::Selection;
@@ -44,7 +45,7 @@ pub(super) fn make_changes(
             let mut changes = vec![
                 Change::Type {
                     name: parent_type_name.clone(),
-                    graph: graph.clone(),
+                    graph: Arc::clone(&graph),
                     key: None,
                     is_interface_object: false,
                     implements: None,
@@ -52,13 +53,13 @@ pub(super) fn make_changes(
                 Change::Field {
                     type_name: parent_type_name.clone(),
                     field_name: field_name.clone(),
-                    graph: graph.clone(),
+                    graph: Arc::clone(&graph),
                 },
             ];
 
             changes.extend(recurse_selection(
                 origin_subgraph_name,
-                graph.clone(),
+                Arc::clone(&graph),
                 schema,
                 output_type_name,
                 schema
@@ -74,7 +75,7 @@ pub(super) fn make_changes(
                 .map_err(|_| MissingField(parent_type_name.to_string(), field_name.to_string()))?;
 
             for arg in field_def.arguments.iter() {
-                changes.extend(recurse_inputs(graph.clone(), schema, arg)?);
+                changes.extend(recurse_inputs(Arc::clone(&graph), schema, arg)?);
             }
 
             Ok(changes)
@@ -89,20 +90,20 @@ pub(super) fn make_changes(
             let mut changes = vec![
                 Change::Type {
                     name: type_name.clone(),
-                    graph: graph.clone(),
+                    graph: Arc::clone(&graph),
                     key: Some(key.clone()),
                     is_interface_object: *is_interface_object,
                     implements: None,
                 },
                 Change::MagicFinder {
                     type_name: type_name.clone(),
-                    graph: graph.clone(),
+                    graph: Arc::clone(&graph),
                 },
             ];
 
             changes.extend(recurse_selection(
                 origin_subgraph_name,
-                graph.clone(),
+                Arc::clone(&graph),
                 schema,
                 type_name,
                 schema
@@ -143,7 +144,7 @@ pub(super) fn make_changes(
             let mut changes = vec![
                 Change::Type {
                     name: type_name.clone(),
-                    graph: graph.clone(),
+                    graph: Arc::clone(&graph),
                     key: Some(key.clone()),
                     is_interface_object: *on_interface_object,
                     implements: None,
@@ -151,17 +152,17 @@ pub(super) fn make_changes(
                 Change::Field {
                     type_name: type_name.clone(),
                     field_name: field_name.clone(),
-                    graph: graph.clone(),
+                    graph: Arc::clone(&graph),
                 },
                 Change::MagicFinder {
                     type_name: type_name.clone(),
-                    graph: graph.clone(),
+                    graph: Arc::clone(&graph),
                 },
             ];
 
             changes.extend(recurse_selection(
                 origin_subgraph_name,
-                graph.clone(),
+                Arc::clone(&graph),
                 schema,
                 output_type_name,
                 schema
@@ -176,7 +177,7 @@ pub(super) fn make_changes(
             // TODO mark key fields as external if necessary
             changes.extend(recurse_selection(
                 origin_subgraph_name,
-                graph.clone(),
+                Arc::clone(&graph),
                 schema,
                 type_name, // key fields are on the entity type, not the output type
                 schema
@@ -192,7 +193,7 @@ pub(super) fn make_changes(
                 .map_err(|_| MissingField(type_name.to_string(), field_name.to_string()))?;
 
             for arg in field_def.arguments.iter() {
-                changes.extend(recurse_inputs(graph.clone(), schema, arg)?);
+                changes.extend(recurse_inputs(Arc::clone(&graph), schema, arg)?);
             }
 
             Ok(changes)
@@ -209,7 +210,7 @@ pub(super) enum Change {
     /// Include a type in the schema and add the `@join__type` directive
     Type {
         name: Name,
-        graph: String,
+        graph: Arc<String>,
         key: Option<String>,
         is_interface_object: bool,
         implements: Option<Name>,
@@ -219,26 +220,26 @@ pub(super) enum Change {
     Field {
         type_name: Name,
         field_name: Name,
-        graph: String,
+        graph: Arc<String>,
     },
     InputField {
         type_name: Name,
         field_name: Name,
-        graph: String,
+        graph: Arc<String>,
     },
     /// Add a special field to Query that we can use instead of `_entities`
-    MagicFinder { type_name: Name, graph: String },
+    MagicFinder { type_name: Name, graph: Arc<String> },
     /// Add an enum value
     EnumValue {
         enum_name: Name,
         value_name: Name,
-        graph: String,
+        graph: Arc<String>,
     },
     /// Union member
     UnionMember {
         union_name: Name,
         member_name: Name,
-        graph: String,
+        graph: Arc<String>,
     },
 }
 
@@ -516,7 +517,7 @@ fn clean_copy_of_type(ty: &ExtendedType) -> ExtendedType {
 
 fn recurse_selection(
     origin_graph: &str,
-    graph: String,
+    graph: Arc<String>,
     schema: &Schema,
     type_name: &Name,
     ty: &ExtendedType,
@@ -529,7 +530,7 @@ fn recurse_selection(
 
     mutations.push(Change::Type {
         name: type_name.clone(),
-        graph: graph.clone(),
+        graph: Arc::clone(&graph),
         key: None,
         is_interface_object: false,
         implements: None,
@@ -549,7 +550,7 @@ fn recurse_selection(
                         mutations.push(Change::Field {
                             type_name: type_name.clone(),
                             field_name: selection.name.clone(),
-                            graph: graph.clone(),
+                            graph: Arc::clone(&graph),
                         });
 
                         let field_type = schema
@@ -561,14 +562,14 @@ fn recurse_selection(
                             mutations.extend(enum_values_for_graph(
                                 field_type,
                                 origin_graph,
-                                &graph,
+                                Arc::clone(&graph),
                             ));
                         }
 
                         if !selection.selection_set.is_empty() {
                             mutations.extend(recurse_selection(
                                 origin_graph,
-                                graph.clone(),
+                                Arc::clone(&graph),
                                 schema,
                                 field_type_name,
                                 field_type,
@@ -610,7 +611,7 @@ fn recurse_selection(
                             mutations.push(Change::Field {
                                 type_name: type_name.clone(),
                                 field_name: selection.name.clone(),
-                                graph: graph.clone(),
+                                graph: Arc::clone(&graph),
                             });
 
                             if !selection.selection_set.is_empty() {
@@ -621,7 +622,7 @@ fn recurse_selection(
 
                                 mutations.extend(recurse_selection(
                                     origin_graph,
-                                    graph.clone(),
+                                    Arc::clone(&graph),
                                     schema,
                                     field_type_name,
                                     field_type,
@@ -638,7 +639,8 @@ fn recurse_selection(
                                         {
                                             mutations.push(Change::Type {
                                                 name: possible_type.name().clone(),
-                                                graph: graph.clone(),
+                                                graph: Arc::clone(&graph),
+
                                                 key: parent_entity_interface_key.clone(),
                                                 is_interface_object: false,
                                                 implements: Some(type_name.clone()),
@@ -649,7 +651,7 @@ fn recurse_selection(
                                             mutations.push(Change::Field {
                                                 type_name: possible_type.name().clone(),
                                                 field_name: selection.name.clone(),
-                                                graph: graph.clone(),
+                                                graph: Arc::clone(&graph),
                                             });
 
                                             let field_type = schema
@@ -661,14 +663,14 @@ fn recurse_selection(
                                                 mutations.extend(enum_values_for_graph(
                                                     field_type,
                                                     origin_graph,
-                                                    &graph,
+                                                    Arc::clone(&graph),
                                                 ));
                                             }
 
                                             if !selection.selection_set.is_empty() {
                                                 mutations.extend(recurse_selection(
                                                     origin_graph,
-                                                    graph.clone(),
+                                                    Arc::clone(&graph),
                                                     schema,
                                                     field_type_name,
                                                     field_type,
@@ -729,12 +731,12 @@ fn recurse_selection(
                                     mutations.push(Change::UnionMember {
                                         union_name: un.name.clone(),
                                         member_name: obj.name.clone(),
-                                        graph: graph.clone(),
+                                        graph: Arc::clone(&graph),
                                     });
 
                                     mutations.push(Change::Type {
                                         name: member_type.name().clone(),
-                                        graph: graph.clone(),
+                                        graph: Arc::clone(&graph),
                                         key: None,
                                         is_interface_object: false,
                                         implements: None,
@@ -745,7 +747,7 @@ fn recurse_selection(
                                     mutations.push(Change::Field {
                                         type_name: member_type.name().clone(),
                                         field_name: selection.name.clone(),
-                                        graph: graph.clone(),
+                                        graph: Arc::clone(&graph),
                                     });
 
                                     let field_type = schema
@@ -757,14 +759,14 @@ fn recurse_selection(
                                         mutations.extend(enum_values_for_graph(
                                             field_type,
                                             origin_graph,
-                                            &graph,
+                                            Arc::clone(&graph),
                                         ));
                                     }
 
                                     if !selection.selection_set.is_empty() {
                                         mutations.extend(recurse_selection(
                                             origin_graph,
-                                            graph.clone(),
+                                            Arc::clone(&graph),
                                             schema,
                                             field_type_name,
                                             field_type,
@@ -799,7 +801,7 @@ fn recurse_selection(
 }
 
 fn recurse_inputs(
-    graph: String,
+    graph: Arc<String>,
     schema: &Schema,
     input_value_def: &Node<InputValueDefinition>,
 ) -> Result<Vec<Change>, ConnectorSupergraphError> {
@@ -815,7 +817,7 @@ fn recurse_inputs(
     if !ty.is_built_in() {
         changes.push(Change::Type {
             name: output_type_name.clone(),
-            graph: graph.clone(),
+            graph: Arc::clone(&graph),
             key: None,
             is_interface_object: false,
             implements: None,
@@ -828,9 +830,9 @@ fn recurse_inputs(
                 changes.push(Change::InputField {
                     type_name: output_type_name.clone(),
                     field_name: field.name.clone(),
-                    graph: graph.clone(),
+                    graph: Arc::clone(&graph),
                 });
-                changes.extend(recurse_inputs(graph.clone(), schema, &field.node)?);
+                changes.extend(recurse_inputs(Arc::clone(&graph), schema, &field.node)?);
             }
         }
         ExtendedType::Enum(enm) => {
@@ -838,7 +840,7 @@ fn recurse_inputs(
                 changes.push(Change::EnumValue {
                     enum_name: ty.name().clone(),
                     value_name: value.value.clone(),
-                    graph: graph.to_string(),
+                    graph: Arc::clone(&graph),
                 });
             }
         }
@@ -901,7 +903,7 @@ impl PartialEq for ConnectorSupergraphError {
 
 /// Given an enum definition, find all the values that are associated with the origin
 /// subgraph. Return a list of enum value inclusions for the connector subgraph.
-fn enum_values_for_graph(ty: &ExtendedType, origin_graph: &str, graph: &str) -> Vec<Change> {
+fn enum_values_for_graph(ty: &ExtendedType, origin_graph: &str, graph: Arc<String>) -> Vec<Change> {
     let mut results = Vec::new();
 
     if let ExtendedType::Enum(enm) = ty {
@@ -917,7 +919,7 @@ fn enum_values_for_graph(ty: &ExtendedType, origin_graph: &str, graph: &str) -> 
                 results.push(Change::EnumValue {
                     enum_name: ty.name().clone(),
                     value_name: value.value.clone(),
-                    graph: graph.to_string(),
+                    graph: Arc::clone(&graph),
                 });
             }
         }

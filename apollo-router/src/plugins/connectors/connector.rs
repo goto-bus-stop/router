@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Display;
+use std::sync::Arc;
 
 use apollo_compiler::ast::Selection as GraphQLSelection;
 use apollo_compiler::schema::Name;
@@ -19,10 +20,10 @@ use crate::error::ConnectorDirectiveError;
 #[derive(Clone, Debug)]
 pub(crate) struct Connector {
     /// Internal name used to construct "subgraphs" in the inner supergraph
-    pub(super) name: String,
+    pub(super) name: Arc<String>,
     /// The api name, as defined in the `sourceAPI` directive
     api: String,
-    pub(crate) origin_subgraph: String,
+    pub(crate) origin_subgraph: Arc<String>,
     pub(super) kind: ConnectorKind,
     pub(super) transport: ConnectorTransport,
     pub(super) output_selection: Vec<GraphQLSelection>,
@@ -66,7 +67,9 @@ impl ConnectorTransport {
 
 /// The list of the subgraph names that should use the inner query planner
 /// instead of making a normal subgraph request.
-pub(crate) fn connector_subgraph_names(connectors: &HashMap<String, Connector>) -> HashSet<String> {
+pub(crate) fn connector_subgraph_names(
+    connectors: &HashMap<Arc<String>, Connector>,
+) -> HashSet<Arc<String>> {
     connectors
         .values()
         .map(|c| c.origin_subgraph.clone())
@@ -75,7 +78,7 @@ pub(crate) fn connector_subgraph_names(connectors: &HashMap<String, Connector>) 
 
 impl Connector {
     pub(super) fn new_from_source_type(
-        name: String,
+        name: Arc<String>,
         api: SourceAPI,
         directive: SourceType,
     ) -> Result<Self, ConnectorDirectiveError> {
@@ -103,7 +106,7 @@ impl Connector {
         Ok(Connector {
             name,
             api: directive.api.clone(),
-            origin_subgraph: directive.graph.clone(),
+            origin_subgraph: Arc::clone(&directive.graph),
             kind,
             transport,
             output_selection,
@@ -113,8 +116,8 @@ impl Connector {
     }
 
     pub(super) fn new_from_source_field(
-        name: String,
-        api: SourceAPI,
+        name: Arc<String>,
+        api: &SourceAPI,
         directive: SourceField,
     ) -> Result<Self, ConnectorDirectiveError> {
         let (input_selection, key, transport) = if let Some(http) = &directive.http {
@@ -122,7 +125,7 @@ impl Connector {
                 HttpJsonTransport::input_selection_from_http_source(http);
 
             let transport = ConnectorTransport::HttpJson(
-                HttpJsonTransport::from_source_field(&api, &directive)
+                HttpJsonTransport::from_source_field(api, &directive)
                     .map_err(std::convert::Into::into)?,
             );
 
@@ -153,7 +156,7 @@ impl Connector {
         Ok(Connector {
             name,
             api: directive.api.clone(),
-            origin_subgraph: directive.graph.clone(),
+            origin_subgraph: Arc::clone(&directive.graph),
             kind,
             transport,
             output_selection,
@@ -222,7 +225,7 @@ mod tests {
         };
 
         let directive = SourceField {
-            graph: "B".to_string(),
+            graph: Arc::new("B".to_string()),
             parent_type_name: name!(Query),
             field_name: name!(field),
             output_type_name: name!(String),
@@ -237,9 +240,12 @@ mod tests {
             on_interface_object: false,
         };
 
-        let connector =
-            Connector::new_from_source_field("CONNECTOR_QUERY_FIELDB".to_string(), api, directive)
-                .unwrap();
+        let connector = Connector::new_from_source_field(
+            Arc::new("CONNECTOR_QUERY_FIELDB".to_string()),
+            &api,
+            directive,
+        )
+        .unwrap();
 
         let schema = Arc::new(
             Schema::parse_and_validate(

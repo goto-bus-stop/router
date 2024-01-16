@@ -62,8 +62,8 @@ pub(crate) struct BridgeQueryPlanner {
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
     subgraph_schemas: Arc<HashMap<String, Arc<Schema>>>,
-    subgraph_planners: Arc<HashMap<String, Arc<Planner<QueryPlanResult>>>>,
-    connector_urls: HashMap<String, String>,
+    subgraph_planners: Arc<HashMap<Arc<String>, Arc<Planner<QueryPlanResult>>>>,
+    connector_urls: HashMap<Arc<String>, String>,
 }
 
 impl BridgeQueryPlanner {

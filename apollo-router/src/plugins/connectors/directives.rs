@@ -209,7 +209,7 @@ impl TryFrom<&Node<apollo_compiler::ast::Value>> for DirectiveAsObject {
 
 #[derive(Debug, Clone)]
 pub(crate) struct Source {
-    connectors: Arc<HashMap<String, Connector>>,
+    connectors: Arc<HashMap<Arc<String>, Connector>>,
     supergraph: Arc<Valid<Schema>>,
 }
 
@@ -230,7 +230,7 @@ impl Source {
         let types = SourceType::from_schema_and_graph_names(schema, &graph_names)?;
         let fields = SourceField::from_schema_and_graph_names(schema, &graph_names)?;
 
-        let connectors = Arc::new(Self::generate_connectors(&apis, &types, &fields)?);
+        let connectors = Arc::new(Self::generate_connectors(apis, types, fields)?);
         let supergraph = Arc::new(
             Self::generate_connector_supergraph(schema, &connectors)
                 .map_err(ConnectorDirectiveError::InconsistentSchema)?,
@@ -241,7 +241,7 @@ impl Source {
         }))
     }
 
-    pub(crate) fn connectors(&self) -> Arc<HashMap<String, Connector>> {
+    pub(crate) fn connectors(&self) -> Arc<HashMap<Arc<String>, Connector>> {
         Arc::clone(&self.connectors)
     }
 
@@ -250,10 +250,10 @@ impl Source {
     }
 
     fn generate_connectors(
-        apis: &HashMap<String, SourceAPI>,
-        types: &Vec<SourceType>,
-        fields: &Vec<SourceField>,
-    ) -> Result<HashMap<String, Connector>, ConnectorDirectiveError> {
+        apis: HashMap<String, SourceAPI>,
+        types: Vec<SourceType>,
+        fields: Vec<SourceField>,
+    ) -> Result<HashMap<Arc<String>, Connector>, ConnectorDirectiveError> {
         if apis.is_empty() || (types.is_empty() && fields.is_empty()) {
             return Ok(Default::default());
         }
@@ -266,29 +266,30 @@ impl Source {
 
         let mut connectors = HashMap::new();
 
-        // todo: remove clones come on jeremy
-        for (i, directive) in types.iter().enumerate() {
-            let connector_name = format!("CONNECTOR_{}_{}", directive.type_name, i).to_uppercase();
+        for (i, directive) in types.into_iter().enumerate() {
+            let connector_name =
+                Arc::new(format!("CONNECTOR_{}_{}", directive.type_name, i).to_uppercase());
             let api = apis.get(&directive.api_name()).unwrap_or(default_api);
 
             connectors.insert(
-                connector_name.clone(),
-                Connector::new_from_source_type(connector_name, api.clone(), directive.clone())?,
+                Arc::clone(&connector_name),
+                Connector::new_from_source_type(connector_name, api.clone(), directive)?,
             );
         }
 
-        for (i, directive) in fields.iter().enumerate() {
-            let connector_name = format!(
-                "CONNECTOR_{}_{}_{}",
-                directive.parent_type_name, directive.field_name, i
-            )
-            .to_uppercase();
+        for (i, directive) in fields.into_iter().enumerate() {
+            let connector_name = Arc::new(
+                format!(
+                    "CONNECTOR_{}_{}_{}",
+                    directive.parent_type_name, directive.field_name, i
+                )
+                .to_uppercase(),
+            );
 
             let api = apis.get(&directive.api_name()).unwrap_or(default_api);
-            // todo: remove clones come on jeremy
             connectors.insert(
                 connector_name.clone(),
-                Connector::new_from_source_field(connector_name, api.clone(), directive.clone())?,
+                Connector::new_from_source_field(connector_name, api, directive)?,
             );
         }
 
@@ -300,7 +301,7 @@ impl Source {
     /// them with the appropriate connector.
     fn generate_connector_supergraph(
         schema: &Schema,
-        connectors: &HashMap<String, Connector>,
+        connectors: &HashMap<Arc<String>, Connector>,
     ) -> Result<Valid<Schema>, ConnectorSupergraphError> {
         let mut new_schema = Schema::new();
         copy_definitions(schema, &mut new_schema);
@@ -562,7 +563,7 @@ impl HTTPHeaderMapping {
 
 #[derive(Debug, Serialize, Clone)]
 pub(super) struct SourceType {
-    pub(super) graph: String,
+    pub(super) graph: Arc<String>,
     pub(super) type_name: Name,
     pub(super) api: String,
     pub(super) http: Option<HTTPSource>,
@@ -710,7 +711,7 @@ impl SourceType {
             .transpose()?;
 
         Ok(Self {
-            graph,
+            graph: Arc::new(graph),
             type_name,
             api,
             http,
@@ -773,7 +774,7 @@ impl KeyTypeMap {
 
 #[derive(Debug, Serialize, Clone)]
 pub(super) struct SourceField {
-    pub(super) graph: String,
+    pub(super) graph: Arc<String>,
     pub(super) parent_type_name: Name,
     pub(super) field_name: Name,
     pub(super) output_type_name: Name,
@@ -939,7 +940,7 @@ impl SourceField {
             .transpose()?;
 
         Ok(Self {
-            graph,
+            graph: Arc::new(graph),
             parent_type_name,
             field_name,
             output_type_name,

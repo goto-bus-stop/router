@@ -394,8 +394,8 @@ impl PlanNode {
     // generates a query plan for each connector fetch node in the main query plan
     pub(crate) fn generate_connector_plan<'a>(
         &'a mut self,
-        subgraph_planners: &'a HashMap<String, Arc<Planner<QueryPlanResult>>>,
-        connector_urls: &'a HashMap<String, String>,
+        subgraph_planners: &'a HashMap<Arc<String>, Arc<Planner<QueryPlanResult>>>,
+        connector_urls: &'a HashMap<Arc<String>, String>,
     ) -> future::BoxFuture<Result<(), QueryPlannerError>> {
         Box::pin(async move {
             match self {
@@ -491,7 +491,7 @@ impl PlanNode {
     pub(crate) fn update_connector_plan<'a>(
         &'a mut self,
         service: &'a String,
-        connector_urls: &'a HashMap<String, String>,
+        connector_urls: &'a HashMap<Arc<String>, String>,
     ) {
         match self {
             PlanNode::Fetch(fetch_node) => {

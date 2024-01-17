@@ -278,4 +278,48 @@ mod tests {
             .unwrap()
         );
     }
+
+    #[test]
+    fn test_list_coercion() {
+        let schema = Schema::parse_and_validate(
+            "type Query {hello: [Hello]} interface Hello{id:ID} type Foo implements Hello{id:ID a:ID}",
+            "schema.graphql",
+        )
+        .unwrap();
+
+        let document = ExecutableDocument::parse_and_validate(
+            &schema,
+            "{hello{__typename id ...on Foo {a}}}",
+            "op.graphql",
+        )
+        .unwrap();
+
+        let data = serde_json_bytes::json!({
+            "hello": {
+                "id": "123",
+                "a": "a"
+            }
+        });
+
+        let mut diagnostics = vec![];
+        let result = super::execute(
+            &schema,
+            &document,
+            diagnostics.as_mut(),
+            data.as_object().unwrap().clone(),
+        );
+
+        assert_eq!(
+            result,
+            *serde_json_bytes::json!({
+                "hello": [{
+                    "__typename": "Foo",
+                    "id": "123",
+                    "a": "a"
+                }]
+            })
+            .as_object()
+            .unwrap()
+        );
+    }
 }

@@ -40,7 +40,32 @@ pub(super) fn complete_value<'a, 'b>(
             let ty_name = match ty {
                 Type::Named(name) | Type::NonNullNamed(name) => name,
                 Type::List(_) | Type::NonNullList(_) => {
-                    field_diagnostic!("List type {ty} resolved to an object")
+                    // If the schema expects a list, but the response is an object,
+                    // we'll wrap it in a list to make a valid response. This might
+                    // be unexpected, but it the alternative is doing nothing and
+                    // letting the router's response validation silently drop the data.
+                    // We'll also emit a diagnostic to help users identify this mismatch.
+                    diagnostics.push(FormattingDiagnostic::for_path(
+                        format!("List type {ty} resolved to an object"),
+                        path,
+                    ));
+
+                    let inner_path = LinkedPathElement {
+                        element: ResponseDataPathElement::ListIndex(0),
+                        next: path,
+                    };
+
+                    let inner_resolved = JsonValue::Array(vec![resolved.clone()]);
+
+                    return complete_value(
+                        schema,
+                        document,
+                        diagnostics,
+                        Some(&inner_path),
+                        ty,
+                        &inner_resolved,
+                        fields,
+                    );
                 }
             };
 

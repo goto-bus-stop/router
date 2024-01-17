@@ -30,6 +30,7 @@ use super::join_spec_helpers::selection_set_to_string;
 use super::selection_parser::ApplyTo;
 use super::selection_parser::Selection as JSONSelection;
 use super::url_path_parser::URLPathTemplate;
+use crate::error::ConnectorDirectiveError;
 use crate::services::SubgraphRequest;
 
 // Copied from plugins::headers
@@ -70,21 +71,22 @@ impl HttpJsonTransport {
     pub(super) fn from_source_type(
         api: &SourceAPI,
         directive: &SourceType,
-    ) -> Result<Self, HttpJsonTransportError> {
+    ) -> Result<Self, ConnectorDirectiveError> {
         let api_http = api
             .http
             .as_ref()
-            .ok_or(HttpJsonTransportError::MissingHttp)?;
+            .ok_or(ConnectorDirectiveError::MissingHttp)?;
         let http = directive
             .http
             .as_ref()
-            .ok_or(HttpJsonTransportError::MissingHttp)?;
+            .ok_or(ConnectorDirectiveError::MissingHttp)?;
 
+        // TODO: refactor clones
         Ok(Self {
             base_uri: api_http
                 .base_url
                 .parse()
-                .map_err(HttpJsonTransportError::InvalidBaseUri)?,
+                .map_err(ConnectorDirectiveError::InvalidBaseUri)?,
             method: http.method.clone(),
             // TODO: merge or override headers from the sourceType?
             headers: HttpHeader::from_directive(&api_http.headers)?,
@@ -98,21 +100,21 @@ impl HttpJsonTransport {
     pub(super) fn from_source_field(
         api: &SourceAPI,
         directive: &SourceField,
-    ) -> Result<Self, HttpJsonTransportError> {
+    ) -> Result<Self, ConnectorDirectiveError> {
         let api_http = api
             .http
             .as_ref()
-            .ok_or(HttpJsonTransportError::MissingHttp)?;
+            .ok_or(ConnectorDirectiveError::MissingHttp)?;
         let http = directive
             .http
             .as_ref()
-            .ok_or(HttpJsonTransportError::MissingHttp)?;
+            .ok_or(ConnectorDirectiveError::MissingHttp)?;
 
         Ok(Self {
             base_uri: api_http
                 .base_url
                 .parse()
-                .map_err(HttpJsonTransportError::InvalidBaseUri)?,
+                .map_err(ConnectorDirectiveError::InvalidBaseUri)?,
             method: http.method.clone(),
             // TODO: merge or override headers from the sourceField?
             headers: HttpHeader::from_directive(&api_http.headers)?,
@@ -139,7 +141,11 @@ impl HttpJsonTransport {
 
         let mut request = http::Request::builder()
             .method(self.method.clone())
-            .uri(self.make_uri(&inputs)?.as_str())
+            .uri(
+                self.make_uri(&inputs)
+                    .map_err(HttpJsonTransportError::ConnectorDirectiveError)?
+                    .as_str(),
+            )
             .header("content-type", "application/json")
             .body(body)
             .map_err(HttpJsonTransportError::InvalidNewRequest)?;
@@ -153,11 +159,11 @@ impl HttpJsonTransport {
         Ok(request)
     }
 
-    fn make_uri(&self, inputs: &Value) -> Result<url::Url, HttpJsonTransportError> {
+    fn make_uri(&self, inputs: &Value) -> Result<url::Url, ConnectorDirectiveError> {
         let path = self
             .path_template
             .generate_path(inputs)
-            .map_err(HttpJsonTransportError::PathGenerationError)?;
+            .map_err(ConnectorDirectiveError::PathGenerationError)?;
         append_path(self.base_uri.clone(), &path)
     }
 
@@ -178,13 +184,13 @@ impl HttpJsonTransport {
 }
 
 /// Append a path and query to a URI. Uses the path from base URI (but will discard the query).
-fn append_path(base_uri: Url, path: &str) -> Result<Url, HttpJsonTransportError> {
+fn append_path(base_uri: Url, path: &str) -> Result<Url, ConnectorDirectiveError> {
     // we will need to work on path segments, and on query parameters.
     // the first thing we need to do is parse the path so we have APIs to reason with both:
     let path_uri: Url = Url::options()
         .base_url(Some(&base_uri))
         .parse(path)
-        .map_err(HttpJsonTransportError::InvalidPath)?;
+        .map_err(ConnectorDirectiveError::InvalidPath)?;
     // get query parameters from both base_uri and path
     let base_uri_query_pairs =
         (!base_uri.query().unwrap_or_default().is_empty()).then(|| base_uri.query_pairs());
@@ -197,16 +203,16 @@ fn append_path(base_uri: Url, path: &str) -> Result<Url, HttpJsonTransportError>
     {
         // Path segments being none indicates the base_uri cannot be a base URL.
         // This means the schema is invalid.
-        let segments = base_uri.path_segments().ok_or_else(|| {
-            HttpJsonTransportError::InvalidBaseUri(
+        let segments = base_uri
+            .path_segments()
+            .ok_or(ConnectorDirectiveError::InvalidBaseUri(
                 url::ParseError::RelativeUrlWithCannotBeABaseBase,
-            )
-        })?;
+            ))?;
 
         // Ok this one is a bit tricky.
         // Here we're trying to only append segments that are not empty, to avoid `//`
         let mut res_segments = res.path_segments_mut().map_err(|_| {
-            HttpJsonTransportError::InvalidBaseUri(
+            ConnectorDirectiveError::InvalidBaseUri(
                 url::ParseError::RelativeUrlWithCannotBeABaseBase,
             )
         })?;
@@ -216,11 +222,9 @@ fn append_path(base_uri: Url, path: &str) -> Result<Url, HttpJsonTransportError>
             .extend(
                 path_uri
                     .path_segments()
-                    .ok_or_else(|| {
-                        HttpJsonTransportError::InvalidPath(
-                            url::ParseError::RelativeUrlWithCannotBeABaseBase,
-                        )
-                    })?
+                    .ok_or(ConnectorDirectiveError::InvalidPath(
+                        url::ParseError::RelativeUrlWithCannotBeABaseBase,
+                    ))?
                     .filter(|segment| !segment.is_empty()),
             );
     }
@@ -297,8 +301,8 @@ pub(super) enum HttpHeader {
 impl HttpHeader {
     fn from_directive(
         header_map: &[HTTPHeaderMapping],
-    ) -> Result<Vec<Self>, HttpJsonTransportError> {
-        use HttpJsonTransportError::InvalidHeaderMapping;
+    ) -> Result<Vec<Self>, ConnectorDirectiveError> {
+        use ConnectorDirectiveError::InvalidHeaderMapping;
         header_map
             .iter()
             .map(|mapping| {
@@ -322,24 +326,17 @@ impl HttpHeader {
     }
 }
 
+// These are runtime error only, configuration errors should be captured as ConnectorDirectiveError
 #[derive(Error, Display, Debug)]
-pub(super) enum HttpJsonTransportError {
-    /// HTTP parameters missing
-    MissingHttp,
-    /// Invalid Base URI on API
-    InvalidBaseUri(#[from] url::ParseError),
-    /// Invalid Path for directive
-    InvalidPath(url::ParseError),
-    /// Invalid HTTP header mapping
-    InvalidHeaderMapping,
+pub(crate) enum HttpJsonTransportError {
     /// Error building URI
     NewUriError(#[from] Option<http::uri::InvalidUri>),
-    /// Could not generate path from inputs
-    PathGenerationError(String),
     /// Could not generate HTTP request
     InvalidNewRequest(#[source] http::Error),
     /// Could not serialize body
     BodySerialization(#[source] serde_json::Error),
+    /// Invalid connector directive. This error should have been caught earlier
+    ConnectorDirectiveError(#[source] ConnectorDirectiveError),
 }
 
 #[cfg(test)]

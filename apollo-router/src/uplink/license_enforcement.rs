@@ -11,6 +11,7 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use apollo_compiler::name;
 use buildstructor::Builder;
 use displaydoc::Display;
 use itertools::Itertools;
@@ -26,7 +27,7 @@ use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::spec::LINK_DIRECTIVE_NAME;
+use crate::spec::schema_directives_by_name;
 use crate::spec::LINK_URL_ARGUMENT;
 use crate::Configuration;
 
@@ -134,11 +135,7 @@ impl LicenseEnforcementReport {
         schema: &apollo_compiler::ast::Document,
         schema_restrictions: &Vec<SchemaRestriction>,
     ) -> Vec<SchemaRestriction> {
-        let feature_urls = schema
-            .definitions
-            .iter()
-            .filter_map(|def| def.as_schema_definition())
-            .flat_map(|def| def.directives.get_all(LINK_DIRECTIVE_NAME))
+        let feature_urls = schema_directives_by_name(schema, &name!("link"))
             .filter_map(|link| {
                 link.argument_by_name(LINK_URL_ARGUMENT)
                     .and_then(|value| value.as_str().map(|s| s.to_string()))
@@ -246,6 +243,10 @@ impl LicenseEnforcementReport {
             SchemaRestriction::builder()
                 .name("@requiresScopes")
                 .url("https://specs.apollo.dev/requiresScopes/v0.1")
+                .build(),
+            SchemaRestriction::builder()
+                .name("@sourceAPI")
+                .url("https://specs.apollo.dev/source/v0.1")
                 .build(),
         ]
     }
@@ -445,6 +446,33 @@ mod test {
             "should have found restricted features"
         );
         assert_snapshot!(report.to_string());
+    }
+
+    #[test]
+    fn test_restricted_source_api_directive_via_schema() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/source.graphql"),
+        );
+
+        assert!(
+            !report.restricted_schema_in_use.is_empty(),
+            "should have found restricted features"
+        );
+        assert_snapshot!(report.to_string());
+    }
+
+    #[test]
+    fn test_restricted_source_api_directive_via_schema_join_directive_import() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/source_join_directive.graphql"),
+        );
+
+        assert!(
+            !report.restricted_schema_in_use.is_empty(),
+            "should have found restricted features"
+        );
     }
 
     #[test]

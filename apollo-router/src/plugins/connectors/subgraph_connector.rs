@@ -26,14 +26,14 @@ static CONNECTOR_HTTP_REQUEST: &str = "connector http request";
 
 #[derive(Clone)]
 pub(crate) struct SubgraphConnector {
-    http_connectors: HashMap<String, HTTPConnector>,
+    http_connectors: HashMap<Arc<String>, HTTPConnector>,
 }
 
 impl SubgraphConnector {
     pub(crate) fn for_schema(
         schema: Arc<Valid<Schema>>,
         configuration: Option<&HashMap<String, SourceApiConfiguration>>,
-        connectors: HashMap<String, &Connector>,
+        connectors: HashMap<Arc<String>, &Connector>,
     ) -> Result<Self, BoxError> {
         let http_connectors = connectors
             .into_iter()

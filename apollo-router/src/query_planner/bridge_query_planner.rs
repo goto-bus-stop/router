@@ -62,8 +62,8 @@ pub(crate) struct BridgeQueryPlanner {
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
     subgraph_schemas: Arc<HashMap<String, Arc<Schema>>>,
-    subgraph_planners: Arc<HashMap<String, Arc<Planner<QueryPlanResult>>>>,
-    connector_urls: HashMap<String, String>,
+    subgraph_planners: Arc<HashMap<Arc<String>, Arc<Planner<QueryPlanResult>>>>,
+    connector_urls: HashMap<Arc<String>, String>,
 }
 
 impl BridgeQueryPlanner {
@@ -199,11 +199,11 @@ impl BridgeQueryPlanner {
 
         let schema = Arc::new(schema.with_api_schema(api_schema));
 
-        let (subgraph_planners, connector_urls) = if let Some((connector_schema, connectors)) =
-            &schema.connectors
-        {
-            let connector_subgraph_names = connector_subgraph_names(connectors);
-            let connector_schema_s = connector_schema.serialize().to_string();
+        let (subgraph_planners, connector_urls) = if let Some(source) = &schema.source {
+            let connector_supergraph = source.supergraph();
+            let connectors = source.connectors();
+            let connector_subgraph_names = connector_subgraph_names(&connectors);
+            let connector_supergraph_str = connector_supergraph.serialize().to_string();
 
             let mut subgraph_planners = HashMap::new();
 
@@ -215,7 +215,7 @@ impl BridgeQueryPlanner {
             let subgraph_planner = Arc::new(
                 planner
                     .update(
-                        connector_schema_s.clone(),
+                        connector_supergraph_str.clone(),
                         QueryPlannerConfig {
                             incremental_delivery: Some(IncrementalDeliverySupport {
                                 enable_defer: Some(configuration.supergraph.defer_support),
@@ -321,11 +321,11 @@ impl BridgeQueryPlanner {
 
         let schema = Arc::new(Schema::parse(&schema, &configuration)?.with_api_schema(api_schema));
 
-        let (subgraph_planners, connector_urls) = if let Some((connector_schema, connectors)) =
-            &schema.connectors
-        {
-            let connector_subgraph_names = connector_subgraph_names(connectors);
-            let connector_schema_s = connector_schema.serialize().to_string();
+        let (subgraph_planners, connector_urls) = if let Some(source) = &schema.source {
+            let connector_supergraph = source.supergraph();
+            let connectors = source.connectors();
+            let connector_subgraph_names = connector_subgraph_names(&connectors);
+            let connector_supergraph_str = connector_supergraph.serialize().to_string();
 
             let mut subgraph_planners = HashMap::new();
 
@@ -337,7 +337,7 @@ impl BridgeQueryPlanner {
             let subgraph_planner = Arc::new(
                 planner
                     .update(
-                        connector_schema_s.clone(),
+                        connector_supergraph_str.clone(),
                         QueryPlannerConfig {
                             incremental_delivery: Some(IncrementalDeliverySupport {
                                 enable_defer: Some(configuration.supergraph.defer_support),

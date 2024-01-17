@@ -2,28 +2,28 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Display;
+use std::sync::Arc;
 
 use apollo_compiler::ast::Selection as GraphQLSelection;
 use apollo_compiler::schema::Name;
-use apollo_compiler::Schema;
-use tower::BoxError;
 
-use super::directives::graph_enum_map;
 use super::directives::KeyTypeMap;
 use super::directives::SourceAPI;
 use super::directives::SourceField;
 use super::directives::SourceType;
 use super::http_json_transport::HttpJsonTransport;
+use crate::error::ConnectorDirectiveError;
 
 /// A connector wraps the API and type/field connector metadata and has
 /// a unique name used to construct a "subgraph" in the inner supergraph
+/// TODO: make it more clone friendly
 #[derive(Clone, Debug)]
 pub(crate) struct Connector {
     /// Internal name used to construct "subgraphs" in the inner supergraph
-    pub(super) name: String,
+    pub(super) name: Arc<String>,
     /// The api name, as defined in the `sourceAPI` directive
     pub(super) api: String,
-    pub(crate) origin_subgraph: String,
+    pub(crate) origin_subgraph: Arc<String>,
     pub(super) kind: ConnectorKind,
     pub(super) transport: ConnectorTransport,
     pub(super) output_selection: Vec<GraphQLSelection>,
@@ -67,7 +67,9 @@ impl ConnectorTransport {
 
 /// The list of the subgraph names that should use the inner query planner
 /// instead of making a normal subgraph request.
-pub(crate) fn connector_subgraph_names(connectors: &HashMap<String, Connector>) -> HashSet<String> {
+pub(crate) fn connector_subgraph_names(
+    connectors: &HashMap<Arc<String>, Connector>,
+) -> HashSet<Arc<String>> {
     connectors
         .values()
         .map(|c| c.origin_subgraph.clone())
@@ -76,11 +78,11 @@ pub(crate) fn connector_subgraph_names(connectors: &HashMap<String, Connector>) 
 
 impl Connector {
     pub(super) fn new_from_source_type(
-        name: String,
+        name: Arc<String>,
         api: SourceAPI,
         directive: SourceType,
-    ) -> Result<Self, BoxError> {
-        let (input_selection, key, transport) = if let Some(ref http) = directive.http {
+    ) -> Result<Self, ConnectorDirectiveError> {
+        let (input_selection, key, transport) = if let Some(http) = &directive.http {
             let (input_selection, key_string) =
                 HttpJsonTransport::input_selection_from_http_source(http);
 
@@ -90,7 +92,7 @@ impl Connector {
 
             (input_selection, key_string, transport)
         } else {
-            return Err("Only HTTP sources are supported".into());
+            return Err(ConnectorDirectiveError::UknownSourceAPIKind);
         };
 
         let output_selection = directive.selection.clone().into();
@@ -104,7 +106,7 @@ impl Connector {
         Ok(Connector {
             name,
             api: directive.api.clone(),
-            origin_subgraph: directive.graph.clone(),
+            origin_subgraph: Arc::clone(&directive.graph),
             kind,
             transport,
             output_selection,
@@ -114,21 +116,22 @@ impl Connector {
     }
 
     pub(super) fn new_from_source_field(
-        name: String,
-        api: SourceAPI,
+        name: Arc<String>,
+        api: &SourceAPI,
         directive: SourceField,
-    ) -> Result<Self, BoxError> {
-        let (input_selection, key, transport) = if let Some(ref http) = directive.http {
+    ) -> Result<Self, ConnectorDirectiveError> {
+        let (input_selection, key, transport) = if let Some(http) = &directive.http {
             let (input_selection, key_string) =
                 HttpJsonTransport::input_selection_from_http_source(http);
 
-            let transport = ConnectorTransport::HttpJson(HttpJsonTransport::from_source_field(
-                &api, &directive,
-            )?);
+            let transport = ConnectorTransport::HttpJson(
+                HttpJsonTransport::from_source_field(api, &directive)
+                    .map_err(std::convert::Into::into)?,
+            );
 
             (input_selection, key_string, transport)
         } else {
-            return Err("Only HTTP sources are supported".into());
+            return Err(ConnectorDirectiveError::UknownSourceAPIKind);
         };
 
         let output_selection = directive.selection.clone().into();
@@ -153,64 +156,13 @@ impl Connector {
         Ok(Connector {
             name,
             api: directive.api.clone(),
-            origin_subgraph: directive.graph.clone(),
+            origin_subgraph: Arc::clone(&directive.graph),
             kind,
             transport,
             output_selection,
             input_selection,
             key_type_map: None,
         })
-    }
-
-    /// Generate a map of connectors with unique names
-    pub(crate) fn from_schema(schema: &Schema) -> Result<HashMap<String, Self>, BoxError> {
-        // NOTE: crate::spec::Schema::parse might be called with an API schema, which doesn't have a join__Graph
-        // TODO: we can extract this map once and pass it to the ::from_schema functions instead of generating it for each connector type
-        if graph_enum_map(schema).is_none() {
-            return Ok(Default::default());
-        }
-
-        let apis = SourceAPI::from_schema(schema)?;
-        let types = SourceType::from_schema(schema)?;
-        let fields = SourceField::from_schema(schema)?;
-
-        if apis.is_empty() || (types.is_empty() && fields.is_empty()) {
-            return Ok(Default::default());
-        }
-
-        let default_api = apis
-            .values()
-            .find(|api| api.is_default())
-            .unwrap_or(apis.values().next().ok_or("No APIs defined")?);
-
-        let mut connectors = HashMap::new();
-
-        for (i, directive) in types.into_iter().enumerate() {
-            let connector_name = format!("CONNECTOR_{}_{}", directive.type_name, i).to_uppercase();
-            let api = apis.get(&directive.api_name()).unwrap_or(default_api);
-
-            connectors.insert(
-                connector_name.clone(),
-                Connector::new_from_source_type(connector_name, api.clone(), directive)?,
-            );
-        }
-
-        for (i, directive) in fields.into_iter().enumerate() {
-            let connector_name = format!(
-                "CONNECTOR_{}_{}_{}",
-                directive.parent_type_name, directive.field_name, i
-            )
-            .to_uppercase();
-
-            let api = apis.get(&directive.api_name()).unwrap_or(default_api);
-
-            connectors.insert(
-                connector_name.clone(),
-                Connector::new_from_source_field(connector_name, api.clone(), directive)?,
-            );
-        }
-
-        Ok(connectors)
     }
 
     pub(super) fn finder_field_name(&self) -> Option<serde_json_bytes::ByteString> {
@@ -248,6 +200,7 @@ mod tests {
     use std::sync::Arc;
 
     use apollo_compiler::name;
+    use apollo_compiler::Schema;
 
     use super::*;
     use crate::plugins::connectors::directives::HTTPSource;
@@ -278,7 +231,7 @@ mod tests {
         };
 
         let directive = SourceField {
-            graph: "B".to_string(),
+            graph: Arc::new("B".to_string()),
             parent_type_name: name!(Query),
             field_name: name!(field),
             output_type_name: name!(String),
@@ -293,9 +246,12 @@ mod tests {
             on_interface_object: false,
         };
 
-        let connector =
-            Connector::new_from_source_field("CONNECTOR_QUERY_FIELDB".to_string(), api, directive)
-                .unwrap();
+        let connector = Connector::new_from_source_field(
+            Arc::new("CONNECTOR_QUERY_FIELDB".to_string()),
+            &api,
+            directive,
+        )
+        .unwrap();
 
         let schema = Arc::new(
             Schema::parse_and_validate(

@@ -635,8 +635,8 @@ impl FetchNode {
 
     pub(crate) async fn generate_connector_plan(
         &mut self,
-        subgraph_planners: &HashMap<String, Arc<Planner<QueryPlanResult>>>,
-        connector_urls: &HashMap<String, String>,
+        subgraph_planners: &HashMap<Arc<String>, Arc<Planner<QueryPlanResult>>>,
+        connector_urls: &HashMap<Arc<String>, String>,
     ) -> Result<Option<(PlanSuccess<QueryPlanResult>, Option<String>)>, QueryPlannerError> {
         if let Some(planner) = subgraph_planners.get(&self.service_name) {
             tracing::debug!(
@@ -678,7 +678,7 @@ impl FetchNode {
     pub(crate) fn update_connector_plan(
         &mut self,
         parent_service_name: &String,
-        connector_urls: &HashMap<String, String>,
+        connector_urls: &HashMap<Arc<String>, String>,
     ) {
         let parent_service_name = parent_service_name.to_string();
         let connector = connector_urls

@@ -928,7 +928,7 @@ mod tests {
         };
 
         let directive = SourceField {
-            graph: "B".to_string(),
+            graph: Arc::new("B".to_string()),
             parent_type_name: name!("Entity"),
             field_name: name!("field"),
             output_type_name: name!("String"),
@@ -943,9 +943,12 @@ mod tests {
             on_interface_object: false,
         };
 
-        let connector =
-            Connector::new_from_source_field("CONNECTOR_QUERY_FIELDB".to_string(), api, directive)
-                .unwrap();
+        let connector = Connector::new_from_source_field(
+            Arc::new("CONNECTOR_QUERY_FIELDB".to_string()),
+            &api,
+            directive,
+        )
+        .unwrap();
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(&req, schema.clone(), &connector).unwrap(), @r###"
         [
@@ -1069,7 +1072,7 @@ mod tests {
         };
 
         let directive = SourceField {
-            graph: "B".to_string(),
+            graph: Arc::new("B".to_string()),
             parent_type_name: name!("Query"),
             field_name: name!("field"),
             output_type_name: name!("String"),
@@ -1085,7 +1088,8 @@ mod tests {
         };
 
         let connector =
-            Connector::new_from_source_field("CONNECTOR_0".to_string(), api, directive).unwrap();
+            Connector::new_from_source_field(Arc::new("CONNECTOR_0".to_string()), &api, directive)
+                .unwrap();
 
         let requests = super::make_requests(req, &connector, Arc::new(schema)).unwrap();
 
@@ -1144,7 +1148,7 @@ mod tests {
         let source_api_name = "API";
 
         let directive = SourceField {
-            graph: "B".to_string(),
+            graph: Arc::new("B".to_string()),
             parent_type_name: name!("Query"),
             field_name: name!("field"),
             output_type_name: name!("String"),
@@ -1159,9 +1163,12 @@ mod tests {
             on_interface_object: false,
         };
 
-        let connector =
-            Connector::new_from_source_field("CONNECTOR_QUERY_FIELDB".to_string(), api, directive)
-                .unwrap();
+        let connector = Connector::new_from_source_field(
+            Arc::new("CONNECTOR_QUERY_FIELDB".to_string()),
+            &api,
+            directive,
+        )
+        .unwrap();
 
         let response1 = http::Response::builder()
             .extension(super::ResponseParams {

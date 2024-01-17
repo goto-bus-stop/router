@@ -1353,8 +1353,8 @@ async fn execute(uri: &str, query: &str, config: Option<serde_json::Value>) -> s
     config_object.insert(
         "override_subgraph_url".to_string(),
         serde_json::json!({
-        "normal": subgraph_uri
-          }),
+          "normal": subgraph_uri
+        }),
     );
 
     let router_creator = factory

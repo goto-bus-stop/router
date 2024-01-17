@@ -289,11 +289,6 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let _spawned_task = tokio::task::spawn(emulate_rest_connector(listener));
 
-        let schema = SCHEMA.replace(
-            "https://ip.demo.starstuff.dev",
-            &format!("http://127.0.0.1:{}/", address.port()),
-        );
-
         // we cannot use Testharness because the subgraph connectors are actually extracted in YamlRouterFactory
         let mut factory = YamlRouterFactory;
         use crate::router_factory::RouterSuperServiceFactory;
@@ -301,11 +296,20 @@ mod tests {
             .create(
                 Arc::new(
                     serde_json::from_value(serde_json::json!({
-                        "include_subgraph_errors": { "all": true }
+                        "include_subgraph_errors": { "all": true },
+                        "preview_connectors": {
+                            "subgraphs": {
+                                "network": {
+                                    "ipinfo": {
+                                      "override_url": format!("http://127.0.0.1:{}/", address.port())
+                                    }
+                                }
+                            }
+                        }
                     }))
                     .unwrap(),
                 ),
-                schema,
+                SCHEMA.to_string(),
                 None,
                 None,
             )

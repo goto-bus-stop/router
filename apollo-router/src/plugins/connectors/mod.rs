@@ -11,6 +11,7 @@ pub(crate) mod configuration;
 mod http_json_transport;
 mod request_inputs;
 mod request_response;
+mod response_formatting;
 mod url_path_parser;
 
 #[cfg(test)]

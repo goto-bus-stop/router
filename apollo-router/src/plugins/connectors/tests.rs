@@ -140,6 +140,30 @@ mod mock_api {
             })))
     }
 
+    pub(super) fn entity_interface_a() -> Mock {
+        Mock::given(method("GET"))
+            .and(path_template("/v1/entity-interface/a-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+              "data": {
+                "id": "a-1",
+                "kind": "a",
+                "a": "a1"
+              }
+            })))
+    }
+
+    pub(super) fn entity_interface_b() -> Mock {
+        Mock::given(method("GET"))
+            .and(path_template("/v1/entity-interface/b-2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+              "data": {
+                "id": "b-2",
+                "kind": "b",
+                "b": "b2"
+              }
+            })))
+    }
+
     pub(super) fn interfaces() -> Mock {
         Mock::given(method("GET"))
             .and(path("/v1/interfaces"))
@@ -202,6 +226,8 @@ mod mock_api {
             entity_e(),
             interface_object_id(),
             interface_object_id_d(),
+            entity_interface_a(),
+            entity_interface_b(),
             interfaces(),
             unions(),
             shipping(),
@@ -257,6 +283,62 @@ mod mock_subgraph {
                     })),
             )
     }
+
+    pub(super) fn interface_object() -> Mock {
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_json(serde_json::json!({
+              "query": "{interfaceObject{__typename id ...on IOa{__typename id a}...on IOb{__typename id b}}}"
+            })))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .set_body_json(serde_json::json!({
+                      "data": {
+                        "interfaceObject": [
+                          {
+                            "__typename": "IOa",
+                            "id": "a-1",
+                            "a": "a1",
+                          },
+                          {
+                            "__typename": "IOb",
+                            "id": "b-2",
+                            "b": "b102",
+                          },
+                        ]
+                      }
+                    })),
+            )
+    }
+
+    pub(super) fn entity_interface() -> Mock {
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_json(serde_json::json!({
+              "query": "{entityInterface{__typename id c}}"
+            })))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .set_body_json(serde_json::json!({
+                      "data": {
+                        "entityInterface": [
+                          {
+                            "__typename": "EntityInterface",
+                            "id": "a-1",
+                            "c": "c-a1",
+                          },
+                          {
+                            "__typename": "EntityInterface",
+                            "id": "b-2",
+                            "c": "c-b2",
+                          },
+                        ]
+                      }
+                    })),
+            )
+    }
 }
 
 #[tokio::test]
@@ -266,7 +348,12 @@ async fn test_root_field_plus_entity() {
 
     // @sourceField on Query.hello
     // @sourceType on Hello
-    let response = execute(&mock_server.uri(), "query { hello { id field enum } }").await;
+    let response = execute(
+        &mock_server.uri(),
+        "query { hello { id field enum } }",
+        None,
+    )
+    .await;
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
@@ -299,6 +386,7 @@ async fn test_root_field_plus_entity_field() {
     let response = execute(
         &mock_server.uri(),
         "query { hello { __typename id world { __typename field nested { __typename field }} } }",
+        None,
     )
     .await;
 
@@ -342,6 +430,7 @@ async fn test_query_parameters() {
     let response = execute(
         &mock_server.uri(),
         "query { withArguments(done: true, value: \"bye\", enum: Y) }",
+        None,
     )
     .await;
 
@@ -372,6 +461,7 @@ async fn test_mutation_inputs() {
     let response = execute(
         &mock_server.uri(),
         "mutation { mutation(input: { nums: [1,2,3], values: [{ num: 42 }]}) { success } }",
+        None,
     )
     .await;
 
@@ -410,7 +500,12 @@ async fn test_entity_join() {
     // Query.startJoin from subgraph
     // @sourceType on EntityAcrossBoth
     // @sourceField on EntityAcrossBoth.e
-    let response = execute(&mock_server.uri(), "query { startJoin { a b c d e } }").await;
+    let response = execute(
+        &mock_server.uri(),
+        "query { startJoin { a b c d e } }",
+        None,
+    )
+    .await;
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
@@ -446,7 +541,7 @@ async fn test_entity_join() {
 }
 
 #[tokio::test]
-async fn aliases_on_connector_fields() {
+async fn test_aliases_on_connector_fields() {
     let mock_server = MockServer::start().await;
     mock_api::mount_all(&mock_server).await;
     mock_subgraph::start_join().mount(&mock_server).await;
@@ -461,6 +556,7 @@ async fn aliases_on_connector_fields() {
           startJoin { a b c alias3: e alias4: e }
         }
         "#,
+        None,
     )
     .await;
 
@@ -509,6 +605,357 @@ async fn aliases_on_connector_fields() {
 }
 
 #[tokio::test]
+async fn test_response_formatting_aliases() {
+    let mock_server = MockServer::start().await;
+    mock_api::mount_all(&mock_server).await;
+    mock_subgraph::start_join().mount(&mock_server).await;
+
+    // @sourceField on Query
+    // @sourceField on Hello.world
+    // @sourceType on Hello
+    let response = execute(
+        &mock_server.uri(),
+        r#"
+        query {
+          hello {
+            a: id
+            b: field
+            c: world {
+              d: field
+              e: nested {
+                f: field
+              }
+            }
+          }
+        }
+        "#,
+        None,
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new().method("GET").path("/v1/hello").build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/hello/42/world")
+                .build(),
+            Matcher::new().method("GET").path("/v1/hello/42").build(),
+        ],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "hello": {
+          "a": 42,
+          "b": "hello",
+          "c": {
+            "d": "world",
+            "e": {
+              "f": "hi"
+            }
+          }
+        }
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn test_interface_object() {
+    let mock_server = MockServer::start().await;
+    mock_api::mount_all(&mock_server).await;
+    mock_subgraph::interface_object().mount(&mock_server).await;
+
+    // @sourceType on TestingInterfaceObject
+    // @sourceField on TestingInterfaceObject.d
+    let response = execute(
+        &mock_server.uri(),
+        r#"
+        query {
+          interfaceObject {
+            __typename
+            id
+            ... on IOa {
+              __typename
+              a
+              c
+              d
+            }
+            ... on IOb {
+              __typename
+              b
+              c
+              d
+            }
+          }
+        }
+        "#,
+        None,
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new()
+                .method("POST")
+                .path("/graphql")
+                .body(serde_json::json!({
+                  "query": "{interfaceObject{__typename id ...on IOa{__typename id a}...on IOb{__typename id b}}}"
+                }))
+                .build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/interface-object/a-1")
+                .build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/interface-object/b-2")
+                .build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/interface-object/a-1/d")
+                .build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/interface-object/b-2/d")
+                .build(),
+        ],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "interfaceObject": [
+          {
+            "__typename": "IOa",
+            "id": "a-1",
+            "a": "a1",
+            "c": "c: 1",
+            "d": "d: 1"
+          },
+          {
+            "__typename": "IOb",
+            "id": "b-2",
+            "b": "b102",
+            "c": "c: 1",
+            "d": "d: 1"
+          }
+        ]
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn test_entity_interface() {
+    let mock_server = MockServer::start().await;
+    mock_api::mount_all(&mock_server).await;
+    mock_subgraph::entity_interface().mount(&mock_server).await;
+
+    // @sourceType on EntityInterface
+    let response = execute(
+        &mock_server.uri(),
+        r#"
+        query {
+          entityInterface {
+            __typename
+            id
+            ... on EIa {
+              a
+            }
+            ... on EIb {
+              b
+            }
+            c
+          }
+        }
+        "#,
+        None,
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new()
+                .method("POST")
+                .path("/graphql")
+                .body(serde_json::json!({
+                  "query": "{entityInterface{__typename id c}}"
+                }))
+                .build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/entity-interface/a-1")
+                .build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/entity-interface/b-2")
+                .build(),
+        ],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "entityInterface": [
+          {
+            "__typename": "EIa",
+            "id": "a-1",
+            "a": "a1",
+            "c": "c-a1"
+          },
+          {
+            "__typename": "EIb",
+            "id": "b-2",
+            "b": "b2",
+            "c": "c-b2"
+          }
+        ]
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn test_interfaces() {
+    let mock_server = MockServer::start().await;
+    mock_api::mount_all(&mock_server).await;
+    mock_subgraph::interface_object().mount(&mock_server).await;
+
+    // @sourceField on Query.interfaces
+    let response = execute(
+        &mock_server.uri(),
+        r#"
+        query {
+          interfaces {
+            __typename
+            id
+            ... on Ia {
+              a
+            }
+            ... on Ib {
+              b
+            }
+            nested {
+              __typename
+              id
+              ... on NIa {
+                a
+              }
+              ... on NIb {
+                b
+              }
+            }
+          }
+        }
+        "#,
+        None,
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new().method("GET").path("/v1/interfaces").build()],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "interfaces": [
+          {
+            "__typename": "Ia",
+            "id": "i1",
+            "a": "a1",
+            "nested": {
+              "__typename": "NIa",
+              "id": "ni1",
+              "a": "na1"
+            }
+          },
+          {
+            "__typename": "Ib",
+            "id": "i2",
+            "b": "b2",
+            "nested": {
+              "__typename": "NIb",
+              "id": "ni2",
+              "b": "nb2"
+            }
+          }
+        ]
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn test_unions() {
+    let mock_server = MockServer::start().await;
+    mock_api::mount_all(&mock_server).await;
+    mock_subgraph::interface_object().mount(&mock_server).await;
+
+    // @sourceField on Query.unions
+    let response = execute(
+        &mock_server.uri(),
+        r#"
+        query {
+          unions {
+            __typename
+            ... on UnionA {
+              z
+              nested {
+                __typename
+                ... on NestedUnionC {
+                  x
+                }
+                ... on NestedUnionD {
+                  w
+                }
+              }
+            }
+            ... on UnionB {
+              y
+            }
+          }
+        }
+        "#,
+        None,
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new().method("GET").path("/v1/unions").build()],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "unions": [
+          {
+            "__typename": "UnionA",
+            "z": "a1",
+            "nested": {
+              "__typename": "NestedUnionC",
+              "x": "na1"
+            }
+          },
+          {
+            "__typename": "UnionB",
+            "y": "b2"
+          }
+        ]
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
 async fn basic_errors() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -520,7 +967,7 @@ async fn basic_errors() {
         .await;
 
     // @sourceField on Query
-    let response = execute(&mock_server.uri(), "{ hello { id } }").await;
+    let response = execute(&mock_server.uri(), "{ hello { id } }", None).await;
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
@@ -536,7 +983,7 @@ async fn basic_errors() {
         {
           "message": "http error: 404 Not Found",
           "extensions": {
-            "connector": "a: GET /hello",
+            "connector": "kitchen-sink.a: GET /hello",
             "code": "404"
           }
         }
@@ -552,7 +999,12 @@ async fn test_requires() {
     mock_subgraph::test_requires().mount(&mock_server).await;
 
     // @sourceField on TestRequires.shippingCost
-    let response = execute(&mock_server.uri(), "query { requires { shippingCost } }").await;
+    let response = execute(
+        &mock_server.uri(),
+        "query { requires { shippingCost } }",
+        None,
+    )
+    .await;
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
@@ -607,7 +1059,12 @@ async fn test_internal_dependencies() {
 
     // @sourceField on Query.internal_dependency
     // @sourceField on TestInternalDependency.c
-    let response = execute(&mock_server.uri(), "query { internal_dependencies { c } }").await;
+    let response = execute(
+        &mock_server.uri(),
+        "query { internal_dependencies { c } }",
+        None,
+    )
+    .await;
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
@@ -635,9 +1092,237 @@ async fn test_internal_dependencies() {
     "###);
 }
 
+#[tokio::test]
+async fn test_simple_header_propagation() {
+    let mock_server = MockServer::start().await;
+    mock_api::mount_all(&mock_server).await;
+
+    // @sourceField on Query.hello
+    // @sourceType on Hello
+    let response = execute(
+        &mock_server.uri(),
+        "query { hello { id field enum } }",
+        Some(serde_json::json!({
+          "include_subgraph_errors": { "all": true },
+          "headers": {
+            "subgraphs": {
+              "kitchen-sink": {
+                "request": [
+                  {
+                    "insert": {
+                      "name": "x-api-key",
+                      "value": "abcd1234"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        })),
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new()
+                .method("GET")
+                .path("/v1/hello")
+                .header("x-api-key".into(), "abcd1234".parse().unwrap())
+                .build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/hello/42")
+                .header("x-api-key".into(), "abcd1234".parse().unwrap())
+                .build(),
+        ],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "hello": {
+          "id": 42,
+          "field": "hello",
+          "enum": "A"
+        }
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn test_directive_header_propagation() {
+    let mock_server = MockServer::start().await;
+    mock_api::mount_all(&mock_server).await;
+
+    // @sourceField on Query.helloWithHeaders (from the "with_headers" sourceAPI)
+    // @sourceType on Hello
+    let response = execute(
+        &mock_server.uri(),
+        "query { helloWithHeaders { id field enum } }",
+        Some(serde_json::json!({
+          "include_subgraph_errors": { "all": true },
+          "headers": {
+            "subgraphs": {
+              "kitchen-sink": {
+                "request": [
+                  {
+                    "insert": {
+                      "name": "x-propagate",
+                      "value": "propagated"
+                    }
+                  },
+                  {
+                    "insert": {
+                      "name": "x-rename",
+                      "value": "renamed"
+                    }
+                  },
+                  {
+                    "insert": {
+                      "name": "x-ignore",
+                      "value": "ignored"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        })),
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new()
+                .method("GET")
+                .path("/v1/hello")
+                .header("x-propagate".into(), "propagated".parse().unwrap())
+                .header("x-new-name".into(), "renamed".parse().unwrap())
+                .header("x-insert".into(), "inserted".parse().unwrap())
+                .build(),
+            Matcher::new()
+                .method("GET")
+                .path("/v1/hello/42")
+                // these are the passthrough headers because this connector uses the "a" api
+                .header("x-propagate".into(), "propagated".parse().unwrap())
+                .header("x-rename".into(), "renamed".parse().unwrap())
+                .header("x-ignore".into(), "ignored".parse().unwrap())
+                .build(),
+        ],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "helloWithHeaders": {
+          "id": 42,
+          "field": "hello",
+          "enum": "A"
+        }
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn test_request_deduping() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/hellos"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+          "data": [{
+            "id": 1,
+            "relatedId": 123
+          }, {
+            "id": 2,
+            "relatedId": 234
+          }, {
+            "id": 3,
+            "relatedId": 234
+          },
+          {
+            "id": 4,
+            "relatedId": 123
+          }]
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/related/123"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+          "data": {"id": 123, "field": "related 1"}
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/related/234"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+          "data": {"id": 234, "field": "related 2"}
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let response = execute(
+        &mock_server.uri(),
+        "query { hellos { id related { id field } } }",
+        None,
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new().method("GET").path("/v1/hellos").build(),
+            // Only two not four!
+            Matcher::new().method("GET").path("/v1/related/123").build(),
+            Matcher::new().method("GET").path("/v1/related/234").build(),
+        ],
+    );
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "hellos": [
+          {
+            "id": 1,
+            "related": {
+              "id": 123,
+              "field": "related 1"
+            }
+          },
+          {
+            "id": 2,
+            "related": {
+              "id": 234,
+              "field": "related 2"
+            }
+          },
+          {
+            "id": 3,
+            "related": {
+              "id": 234,
+              "field": "related 2"
+            }
+          },
+          {
+            "id": 4,
+            "related": {
+              "id": 123,
+              "field": "related 1"
+            }
+          }
+        ]
+      }
+    }
+    "###);
+}
+
 const SCHEMA: &str = include_str!("./test_supergraph.graphql");
 
-async fn execute(uri: &str, query: &str) -> serde_json::Value {
+async fn execute(uri: &str, query: &str, config: Option<serde_json::Value>) -> serde_json::Value {
     let schema = SCHEMA.replace("http://localhost:8080", uri);
     let schema = schema.replace(
         "http://localhost:8081/",
@@ -647,14 +1332,13 @@ async fn execute(uri: &str, query: &str) -> serde_json::Value {
     // we cannot use Testharness because the subgraph connectors are actually extracted in YamlRouterFactory
     let mut factory = YamlRouterFactory;
 
+    let config = config.unwrap_or(serde_json::json!({
+        "include_subgraph_errors": { "all": true }
+    }));
+
     let router_creator = factory
         .create(
-            Arc::new(
-                serde_json::from_value(serde_json::json!({
-                    "include_subgraph_errors": { "all": true }
-                }))
-                .unwrap(),
-            ),
+            Arc::new(serde_json::from_value(config).unwrap()),
             schema,
             None,
             None,
@@ -683,13 +1367,21 @@ async fn execute(uri: &str, query: &str) -> serde_json::Value {
 }
 
 mod req_asserts {
+    use std::collections::HashMap;
+    use std::collections::HashSet;
+
+    use itertools::Itertools;
+    use wiremock::http::HeaderName;
+    use wiremock::http::HeaderValue;
+    use wiremock::http::HeaderValues;
+
     #[derive(Clone)]
     pub(super) struct Matcher {
         method: Option<String>,
         path: Option<String>,
         query: Option<String>,
         body: Option<serde_json::Value>,
-        // TODO headers
+        headers: HashMap<HeaderName, HeaderValues>,
     }
 
     impl Matcher {
@@ -699,6 +1391,7 @@ mod req_asserts {
                 path: None,
                 query: None,
                 body: None,
+                headers: Default::default(),
             }
         }
 
@@ -719,6 +1412,12 @@ mod req_asserts {
 
         pub(super) fn body(&mut self, body: serde_json::Value) -> &mut Self {
             self.body = Some(body);
+            self
+        }
+
+        pub(super) fn header(&mut self, name: HeaderName, value: HeaderValue) -> &mut Self {
+            let values = self.headers.entry(name).or_insert(Vec::new().into());
+            values.append(&mut Vec::from([value]).into());
             self
         }
 
@@ -768,10 +1467,40 @@ mod req_asserts {
                     index,
                 )
             }
+
+            for (name, expected) in self.headers.iter() {
+                match request.headers.get(name) {
+                    Some(actual) => {
+                        let expected: HashSet<String> =
+                            expected.iter().map(|v| v.as_str().to_owned()).collect();
+                        let actual: HashSet<String> =
+                            actual.iter().map(|v| v.as_str().to_owned()).collect();
+                        assert_eq!(
+                            expected,
+                            actual,
+                            "[Request {}]: expected header {} to be [{}], was [{}]",
+                            index,
+                            name,
+                            expected.iter().join(", "),
+                            actual.iter().join(", ")
+                        );
+                    }
+                    None => {
+                        panic!("[Request {}]: expected header {}, was missing", index, name);
+                    }
+                }
+            }
         }
     }
 
     pub(super) fn matches(received: &[wiremock::Request], matchers: Vec<Matcher>) {
+        assert_eq!(
+            received.len(),
+            matchers.len(),
+            "Expected {} requests, recorded {}",
+            matchers.len(),
+            received.len()
+        );
         for (i, (request, matcher)) in received.iter().zip(matchers.iter()).enumerate() {
             matcher.matches(request, i);
         }

@@ -1,25 +1,19 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Display;
-use std::sync::Arc;
 
 use apollo_compiler::ast::Selection as GraphQLSelection;
 use apollo_compiler::schema::Name;
-use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
 use tower::BoxError;
 
 use super::directives::graph_enum_map;
+use super::directives::KeyTypeMap;
 use super::directives::SourceAPI;
 use super::directives::SourceField;
 use super::directives::SourceType;
 use super::http_json_transport::HttpJsonTransport;
-use super::request_response::handle_responses;
-use super::request_response::make_requests;
-use super::request_response::ResponseParams;
-use crate::services::SubgraphRequest;
-use crate::services::SubgraphResponse;
-use crate::Context;
 
 /// A connector wraps the API and type/field connector metadata and has
 /// a unique name used to construct a "subgraph" in the inner supergraph
@@ -34,6 +28,7 @@ pub(crate) struct Connector {
     pub(super) transport: ConnectorTransport,
     pub(super) output_selection: Vec<GraphQLSelection>,
     pub(super) input_selection: Vec<GraphQLSelection>,
+    pub(super) key_type_map: Option<KeyTypeMap>,
 }
 
 #[derive(Clone, Debug)]
@@ -60,6 +55,14 @@ pub(super) enum ConnectorKind {
 #[derive(Clone, Debug)]
 pub(super) enum ConnectorTransport {
     HttpJson(HttpJsonTransport),
+}
+
+impl ConnectorTransport {
+    pub(super) fn source_api_name(&self) -> Cow<'static, str> {
+        match self {
+            Self::HttpJson(transport) => transport.source_api_name.clone(),
+        }
+    }
 }
 
 /// The list of the subgraph names that should use the inner query planner
@@ -106,6 +109,7 @@ impl Connector {
             transport,
             output_selection,
             input_selection,
+            key_type_map: directive.key_type_map,
         })
     }
 
@@ -154,6 +158,7 @@ impl Connector {
             transport,
             output_selection,
             input_selection,
+            key_type_map: None,
         })
     }
 
@@ -208,34 +213,16 @@ impl Connector {
         Ok(connectors)
     }
 
-    pub(crate) fn create_requests(
-        &self,
-        subgraph_request: SubgraphRequest,
-        schema: Arc<Valid<Schema>>,
-    ) -> Result<Vec<(http::Request<hyper::Body>, ResponseParams)>, BoxError> {
-        make_requests(subgraph_request, self, schema.clone()).map_err(|e| {
-            format!(
-                "Failed to create requests for connector `{}`: {}",
-                self.name, e
-            )
-            .into()
-        })
-    }
-
-    pub(super) async fn map_http_responses(
-        &self,
-        responses: Vec<http::Response<hyper::Body>>,
-        context: Context,
-    ) -> Result<SubgraphResponse, BoxError> {
-        handle_responses(context, self, responses)
-            .await
-            .map_err(|e| {
-                format!(
-                    "Failed to map responses for connector `{}`: {}",
-                    self.name, e
-                )
-                .into()
-            })
+    pub(super) fn finder_field_name(&self) -> Option<serde_json_bytes::ByteString> {
+        match &self.kind {
+            ConnectorKind::RootField { .. } => None,
+            ConnectorKind::Entity { type_name, .. } => {
+                Some(format!("_{}_finder", type_name).into())
+            }
+            ConnectorKind::EntityField { type_name, .. } => {
+                Some(format!("_{}_finder", type_name).into())
+            }
+        }
     }
 
     pub(crate) fn override_base_url(&mut self, url: url::Url) {
@@ -248,17 +235,24 @@ impl Connector {
 impl Display for Connector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let ConnectorTransport::HttpJson(tr) = &self.transport;
-        write!(f, "{}: {} {}", self.api, tr.method, tr.path_template)
+        write!(
+            f,
+            "{}.{}: {} {}",
+            self.origin_subgraph, self.api, tr.method, tr.path_template
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use apollo_compiler::name;
 
     use super::*;
     use crate::plugins::connectors::directives::HTTPSource;
     use crate::plugins::connectors::directives::HTTPSourceAPI;
+    use crate::plugins::connectors::request_response::make_requests;
     use crate::plugins::connectors::selection_parser::Selection as JSONSelection;
     use crate::plugins::connectors::url_path_parser::URLPathTemplate;
     use crate::services::subgraph;
@@ -303,18 +297,16 @@ mod tests {
             Connector::new_from_source_field("CONNECTOR_QUERY_FIELDB".to_string(), api, directive)
                 .unwrap();
 
-        let requests_and_params = connector
-            .create_requests(
-                subgraph_request,
-                Arc::new(
-                    Schema::parse_and_validate(
-                        "type Query { field: String }".to_string(),
-                        "schema.graphql",
-                    )
-                    .unwrap(),
-                ),
+        let schema = Arc::new(
+            Schema::parse_and_validate(
+                "type Query { field: String }".to_string(),
+                "schema.graphql",
             )
-            .unwrap();
+            .unwrap(),
+        );
+
+        let requests_and_params =
+            make_requests(subgraph_request, &connector, schema.clone()).unwrap();
         insta::assert_debug_snapshot!(requests_and_params);
     }
 }

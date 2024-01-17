@@ -1,6 +1,7 @@
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY)
   @join__directive(
     graphs: [KITCHEN_SINK]
     name: "link"
@@ -14,10 +15,27 @@ schema
     graphs: [KITCHEN_SINK]
     name: "sourceAPI"
     args: { name: "a", http: { baseURL: "http://localhost:8080/v1/" } }
+  )
+  @join__directive(
+    graphs: [KITCHEN_SINK]
+    name: "sourceAPI"
+    args: {
+      name: "with_headers"
+      http: {
+        baseURL: "http://localhost:8080/v1/"
+        headers: [
+          { name: "x-propagate" }
+          { name: "x-insert", value: "inserted" }
+          { name: "x-rename", as: "x-new-name" }
+        ]
+      }
+    }
   ) {
   query: Query
   mutation: Mutation
 }
+
+directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
 directive @join__directive(
   graphs: [join__Graph!]
@@ -64,6 +82,22 @@ directive @link(
   import: [link__Import]
 ) repeatable on SCHEMA
 
+type EIa implements EntityInterface
+  @join__implements(graph: KITCHEN_SINK, interface: "EntityInterface")
+  @join__type(graph: KITCHEN_SINK, key: "id") {
+  id: ID!
+  a: String
+  c: String @join__field
+}
+
+type EIb implements EntityInterface
+  @join__implements(graph: KITCHEN_SINK, interface: "EntityInterface")
+  @join__type(graph: KITCHEN_SINK, key: "id") {
+  id: ID!
+  b: String
+  c: String @join__field
+}
+
 type EntityAcrossBoth
   @join__type(graph: KITCHEN_SINK, key: "a b")
   @join__type(graph: NORMAL, key: "a b")
@@ -93,6 +127,23 @@ type EntityAcrossBoth
   c: String @join__field(graph: NORMAL)
 }
 
+interface EntityInterface
+  @join__type(graph: KITCHEN_SINK, key: "id")
+  @join__type(graph: NORMAL, key: "id", isInterfaceObject: true)
+  @join__directive(
+    graphs: [KITCHEN_SINK]
+    name: "sourceType"
+    args: {
+      api: "a"
+      http: { GET: "/entity-interface/{id}" }
+      selection: ".data {\n  id\n  kind\n  a\n  b\n}"
+      keyTypeMap: { key: "kind", typeMap: { EIa: "a", EIb: "b" } }
+    }
+  ) {
+  id: ID!
+  c: String @join__field(graph: NORMAL)
+}
+
 type Hello
   @join__type(graph: KITCHEN_SINK, key: "id")
   @join__directive(
@@ -117,6 +168,17 @@ type Hello
       }
     )
   enum: OutputEnum
+  relatedId: ID! @inaccessible
+  related: Related
+    @join__directive(
+      graphs: [KITCHEN_SINK]
+      name: "sourceField"
+      args: {
+        api: "a"
+        http: { GET: "/related/{relatedId}" }
+        selection: ".data { id field }"
+      }
+    )
 }
 
 input HTTPHeaderMapping @join__type(graph: KITCHEN_SINK) {
@@ -288,13 +350,6 @@ enum OutputEnum @join__type(graph: KITCHEN_SINK) @join__type(graph: NORMAL) {
 }
 
 type Query @join__type(graph: KITCHEN_SINK) @join__type(graph: NORMAL) {
-  hello: Hello
-    @join__field(graph: KITCHEN_SINK)
-    @join__directive(
-      graphs: [KITCHEN_SINK]
-      name: "sourceField"
-      args: { api: "a", http: { GET: "/hello" }, selection: ".data { id }" }
-    )
   withArguments(value: String, done: Boolean, enum: InputEnum): String
     @join__field(graph: KITCHEN_SINK)
     @join__directive(
@@ -306,6 +361,35 @@ type Query @join__type(graph: KITCHEN_SINK) @join__type(graph: NORMAL) {
           GET: "/with-arguments?value={value}&done={done}&enum_value={enum}"
         }
         selection: ".data"
+      }
+    )
+  hello: Hello
+    @join__field(graph: KITCHEN_SINK)
+    @join__directive(
+      graphs: [KITCHEN_SINK]
+      name: "sourceField"
+      args: { api: "a", http: { GET: "/hello" }, selection: ".data { id }" }
+    )
+  hellos: [Hello]
+    @join__field(graph: KITCHEN_SINK)
+    @join__directive(
+      graphs: [KITCHEN_SINK]
+      name: "sourceField"
+      args: {
+        api: "a"
+        http: { GET: "/hellos" }
+        selection: ".data { id relatedId }"
+      }
+    )
+  helloWithHeaders: Hello
+    @join__field(graph: KITCHEN_SINK)
+    @join__directive(
+      graphs: [KITCHEN_SINK]
+      name: "sourceField"
+      args: {
+        api: "with_headers"
+        http: { GET: "/hello" }
+        selection: ".data { id }"
       }
     )
   interfaces: [TestingInterface]
@@ -345,6 +429,12 @@ type Query @join__type(graph: KITCHEN_SINK) @join__type(graph: NORMAL) {
   startJoin: EntityAcrossBoth @join__field(graph: NORMAL)
   interfaceObject: [TestingInterfaceObject] @join__field(graph: NORMAL)
   requires: TestRequires @join__field(graph: NORMAL)
+  entityInterface: [EntityInterface] @join__field(graph: NORMAL)
+}
+
+type Related @join__type(graph: KITCHEN_SINK) {
+  id: ID!
+  field: String
 }
 
 scalar source__JSON @join__type(graph: KITCHEN_SINK)

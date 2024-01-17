@@ -111,6 +111,7 @@ pub(super) fn make_changes(
                     .types
                     .get(output_type_name)
                     .ok_or_else(|| MissingType(output_type_name.to_string()))?,
+                None,
                 &connector.output_selection,
             )?);
 
@@ -154,6 +155,7 @@ pub(super) fn make_changes(
                     .types
                     .get(type_name)
                     .ok_or_else(|| MissingType(type_name.to_string()))?,
+                Some(key.clone()), // if this is an entity interface, the implementing types need the key too
                 &connector.output_selection,
             )?);
 
@@ -168,6 +170,7 @@ pub(super) fn make_changes(
                     .types
                     .get(type_name)
                     .ok_or_else(|| MissingType(type_name.to_string()))?,
+                None,
                 &connector.input_selection,
             )?);
 
@@ -211,6 +214,7 @@ pub(super) fn make_changes(
                     .types
                     .get(output_type_name)
                     .ok_or_else(|| MissingType(output_type_name.to_string()))?,
+                Some(key.clone()), // if this is an entity interface, the implementing types need the key too
                 &connector.output_selection,
             )?);
 
@@ -225,6 +229,7 @@ pub(super) fn make_changes(
                     .types
                     .get(type_name.as_str())
                     .ok_or_else(|| MissingType(type_name.to_string()))?,
+                None,
                 &connector.input_selection,
             )?);
 
@@ -561,6 +566,9 @@ fn recurse_selection(
     schema: &Schema,
     type_name: &Name,
     ty: &ExtendedType,
+    // If we're adding an entity interface, we must ensure that any implementing
+    // types have the same key for the subgraph to be valid
+    parent_entity_interface_key: Option<String>,
     selections: &Vec<Selection>,
 ) -> Result<Vec<Change>, ConnectorSupergraphError> {
     let mut mutations = Vec::new();
@@ -610,6 +618,7 @@ fn recurse_selection(
                                 schema,
                                 field_type_name,
                                 field_type,
+                                None,
                                 &selection.selection_set,
                             )?);
                         }
@@ -662,6 +671,7 @@ fn recurse_selection(
                                     schema,
                                     field_type_name,
                                     field_type,
+                                    None,
                                     &selection.selection_set,
                                 )?);
                             }
@@ -675,7 +685,7 @@ fn recurse_selection(
                                             mutations.push(Change::Type {
                                                 name: possible_type.name().clone(),
                                                 graph: graph.clone(),
-                                                key: None,
+                                                key: parent_entity_interface_key.clone(),
                                                 is_interface_object: false,
                                                 implements: Some(type_name.clone()),
                                             });
@@ -708,6 +718,7 @@ fn recurse_selection(
                                                     schema,
                                                     field_type_name,
                                                     field_type,
+                                                    None,
                                                     &selection.selection_set,
                                                 )?);
                                             }
@@ -803,6 +814,7 @@ fn recurse_selection(
                                             schema,
                                             field_type_name,
                                             field_type,
+                                            None,
                                             &selection.selection_set,
                                         )?);
                                     }
@@ -983,18 +995,22 @@ mod tests {
         [
             "CONNECTOR_ENTITYACROSSBOTH_0",
             "CONNECTOR_ENTITYACROSSBOTH_E_0",
-            "CONNECTOR_HELLO_1",
+            "CONNECTOR_ENTITYINTERFACE_1",
+            "CONNECTOR_HELLO_2",
+            "CONNECTOR_HELLO_RELATED_2",
             "CONNECTOR_HELLO_WORLD_1",
-            "CONNECTOR_MUTATION_MUTATION_2",
-            "CONNECTOR_QUERY_HELLO_3",
-            "CONNECTOR_QUERY_INTERFACES_5",
-            "CONNECTOR_QUERY_INTERNAL_DEPENDENCIES_7",
-            "CONNECTOR_QUERY_UNIONS_6",
+            "CONNECTOR_MUTATION_MUTATION_3",
+            "CONNECTOR_QUERY_HELLOS_6",
+            "CONNECTOR_QUERY_HELLOWITHHEADERS_7",
+            "CONNECTOR_QUERY_HELLO_5",
+            "CONNECTOR_QUERY_INTERFACES_8",
+            "CONNECTOR_QUERY_INTERNAL_DEPENDENCIES_10",
+            "CONNECTOR_QUERY_UNIONS_9",
             "CONNECTOR_QUERY_WITHARGUMENTS_4",
-            "CONNECTOR_TESTINGINTERFACEOBJECT_2",
-            "CONNECTOR_TESTINGINTERFACEOBJECT_D_8",
-            "CONNECTOR_TESTINTERNALDEPENDENCY_C_9",
-            "CONNECTOR_TESTREQUIRES_SHIPPINGCOST_10",
+            "CONNECTOR_TESTINGINTERFACEOBJECT_3",
+            "CONNECTOR_TESTINGINTERFACEOBJECT_D_11",
+            "CONNECTOR_TESTINTERNALDEPENDENCY_C_12",
+            "CONNECTOR_TESTREQUIRES_SHIPPINGCOST_13",
         ]
         "###
         );

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use apollo_compiler::executable::Selection;
@@ -6,11 +7,15 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Schema;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
+use tower::BoxError;
 
 use super::connector::ConnectorKind;
 use super::connector::ConnectorTransport;
+use super::directives::KeyTypeMap;
 use super::http_json_transport::HttpJsonTransportError;
 use super::request_inputs::RequestInputs;
+use super::response_formatting::execute;
+use super::response_formatting::JsonMap;
 use super::Connector;
 use crate::json_ext::Object;
 use crate::services::SubgraphRequest;
@@ -23,6 +28,7 @@ const ENTITIES: &str = "_entities";
 #[derive(Debug)]
 pub(crate) struct ResponseParams {
     key: ResponseKey,
+    source_api_name: Cow<'static, str>,
 }
 
 #[derive(Clone, Debug)]
@@ -44,7 +50,7 @@ enum ResponseKey {
 
 #[derive(Clone, Debug)]
 enum ResponseTypeName {
-    Concrete(String), // TODO Abstract(Vec<String>) with discriminator?
+    Concrete(String),
     /// For interfaceObject support. We don't want to include __typename in the
     /// response because this subgraph doesn't know the concrete type
     Omitted,
@@ -58,15 +64,15 @@ pub(super) fn make_requests(
     match connector.kind {
         ConnectorKind::RootField { .. } => {
             let parts = root_fields(&request, schema)?;
-            Ok(request_params_to_requests(connector, parts)?)
+            Ok(request_params_to_requests(connector, parts, &request)?)
         }
         ConnectorKind::Entity { .. } => {
             let parts = entities_from_request(&request, schema)?;
-            Ok(request_params_to_requests(connector, parts)?)
+            Ok(request_params_to_requests(connector, parts, &request)?)
         }
         ConnectorKind::EntityField { .. } => {
             let parts = entities_with_fields_from_request(&request, schema, connector)?;
-            Ok(request_params_to_requests(connector, parts)?)
+            Ok(request_params_to_requests(connector, parts, &request)?)
         }
     }
 }
@@ -74,6 +80,7 @@ pub(super) fn make_requests(
 fn request_params_to_requests(
     connector: &Connector,
     from_request: Vec<(ResponseKey, RequestInputs)>,
+    original_request: &SubgraphRequest,
 ) -> Result<Vec<(http::Request<hyper::Body>, ResponseParams)>, MakeRequestError> {
     from_request
         .into_iter()
@@ -81,10 +88,15 @@ fn request_params_to_requests(
             let inputs = inputs.merge();
 
             let request = match connector.transport {
-                ConnectorTransport::HttpJson(ref transport) => transport.make_request(inputs)?,
+                ConnectorTransport::HttpJson(ref transport) => {
+                    transport.make_request(inputs, original_request)?
+                }
             };
 
-            let response_params = ResponseParams { key: response_key };
+            let response_params = ResponseParams {
+                key: response_key,
+                source_api_name: connector.transport.source_api_name().clone(),
+            };
 
             Ok((request, response_params))
         })
@@ -124,6 +136,9 @@ pub(super) enum HandleResponseError {
 
     /// Merge error: {0}
     MergeError(String),
+
+    /// ResponseFormattingError
+    ResponseFormattingError,
 }
 
 // --- ROOT FIELDS -------------------------------------------------------------
@@ -178,12 +193,13 @@ fn root_fields(
                 Ok((response_key, request_inputs))
             }
 
-            // TODO if the client operation uses fragments, we'll probably need to handle that here
+            // The query planner removes fragments at the root so we don't have
+            // to worry these branches
             Selection::FragmentSpread(_) => Err(MakeRequestError::UnsupportedOperation(
-                "root field fragment spread not supported".into(),
+                "top-level fragments in query planner nodes should not happen".into(),
             )),
             Selection::InlineFragment(_) => Err(MakeRequestError::UnsupportedOperation(
-                "root field inline fragment not supported".into(),
+                "top-level inline fragments in query planner nodes should not happen".into(),
             )),
         })
         .collect::<Result<Vec<_>, MakeRequestError>>()
@@ -391,11 +407,21 @@ fn entities_with_fields_from_request(
 // --- RESPONSES ---------------------------------------------------------------
 
 pub(super) async fn handle_responses(
+    schema: &Valid<Schema>,
+    document: Option<String>,
     context: Context,
     connector: &Connector,
     responses: Vec<http::Response<hyper::Body>>,
 ) -> Result<SubgraphResponse, HandleResponseError> {
     use HandleResponseError::*;
+
+    // If the query plan fetch used the "magic finder" field, we'll stick the
+    // response data under that key so we can apply the GraphQL selection
+    // set to handle aliases and type names.
+    let (document, magic_response_key) =
+        handle_magic_finder(document, connector, schema).map_err(|_| ResponseFormattingError)?;
+    let original_magic_response_key = magic_response_key.clone();
+    let response_key = magic_response_key.unwrap_or(ENTITIES.into());
 
     let mut data = serde_json_bytes::Map::new();
     let mut errors = Vec::new();
@@ -407,6 +433,14 @@ pub(super) async fn handle_responses(
             .extensions
             .get::<ResponseParams>()
             .ok_or_else(|| MissingResponseParams)?;
+
+        u64_counter!(
+            "apollo.router.operations.source.rest",
+            "rest source api calls",
+            1,
+            rest.response.api = response_params.source_api_name.clone(),
+            rest.response.status_code = parts.status.as_u16() as i64
+        );
 
         if parts.status.is_success() {
             let json_data: Value =
@@ -428,7 +462,7 @@ pub(super) async fn handle_responses(
                     ref typename,
                 } => {
                     if let ResponseTypeName::Concrete(typename) = typename {
-                        inject_typename(&mut res_data, typename);
+                        inject_typename(&mut res_data, typename, &None);
                     }
 
                     data.insert(name.clone(), res_data);
@@ -440,10 +474,12 @@ pub(super) async fn handle_responses(
                     ref typename,
                 } => {
                     if let ResponseTypeName::Concrete(typename) = typename {
-                        inject_typename(&mut res_data, typename);
+                        inject_typename(&mut res_data, typename, &connector.key_type_map);
                     }
 
-                    let entities = data.entry(ENTITIES).or_insert(Value::Array(vec![]));
+                    let entities = data
+                        .entry(response_key.clone())
+                        .or_insert(Value::Array(vec![]));
                     entities
                         .as_array_mut()
                         .ok_or_else(|| MergeError("entities is not an array".into()))?
@@ -458,7 +494,7 @@ pub(super) async fn handle_responses(
                     ref typename,
                 } => {
                     let entities = data
-                        .entry(ENTITIES)
+                        .entry(response_key.clone())
                         .or_insert(Value::Array(vec![]))
                         .as_array_mut()
                         .ok_or_else(|| MergeError("entities is not an array".into()))?;
@@ -490,6 +526,18 @@ pub(super) async fn handle_responses(
         }
     }
 
+    // Apply the GraphQL operation's selection set to the result to handle
+    // aliases and type names.
+    let mut data = format_response(schema, &document, data);
+
+    // Before we return the response, we ensure that the entity data is under
+    // the `_entities` key. The execution service knows how to merge that data
+    // correctly (it doesn't know anything about "magic finder" fields).
+    if let Some(response_key) = original_magic_response_key {
+        let entities = data.remove(&response_key).ok_or(ResponseFormattingError)?;
+        data.insert(ENTITIES, entities);
+    }
+
     let response = SubgraphResponse::builder()
         .data(Value::Object(data))
         .errors(errors)
@@ -501,17 +549,92 @@ pub(super) async fn handle_responses(
     Ok(response)
 }
 
-fn inject_typename(data: &mut Value, typename: &str) {
-    if let Value::Object(data) = data {
-        data.insert(
-            ByteString::from("__typename"),
-            Value::String(ByteString::from(typename)),
-        );
+/// Special handling for "magic_finder" fields:
+///
+/// The "inner" supergraph doesn't expose an `_entities` field. Instead we inject
+/// fields like `_EntityName_finder` to query plan against. This
+/// transformation happens in [`FetchNode::generate_connector_plan`].
+///
+/// In order to format the response according to the incoming client
+/// operation, we need the operation to be valid against the inner supergraph.
+/// This code does a simple string replacement if necessary and passes the
+/// response key to the response formatting code.
+fn handle_magic_finder(
+    document: Option<String>,
+    connector: &Connector,
+    schema: &Valid<Schema>,
+) -> Result<(Valid<ExecutableDocument>, Option<ByteString>), BoxError> {
+    let mut document = document.ok_or("missing document")?;
+    let mut magic_response_key = None;
+
+    if let Some(finder_field_name) = connector.finder_field_name() {
+        if document.contains("_entities") {
+            document = document.replace("_entities", finder_field_name.as_str());
+            magic_response_key = Some(finder_field_name);
+        } else if document.contains(finder_field_name.as_str()) {
+            magic_response_key = Some(finder_field_name);
+        }
+    }
+
+    let document = ExecutableDocument::parse_and_validate(schema, document, "document.graphql")
+        .map_err(|_| "failed to parse document")?;
+
+    Ok((document, magic_response_key))
+}
+
+fn format_response(
+    schema: &Valid<Schema>,
+    document: &Valid<ExecutableDocument>,
+    data: JsonMap,
+) -> JsonMap {
+    let mut diagnostics = vec![];
+    let result = execute(schema, document, diagnostics.as_mut(), data);
+    if !diagnostics.is_empty() {
+        for diagnostic in diagnostics {
+            tracing::debug!("{:?}", diagnostic);
+        }
+    }
+    result
+}
+
+fn inject_typename(data: &mut Value, typename: &str, key_type_map: &Option<KeyTypeMap>) {
+    match data {
+        Value::Array(data) => {
+            for data in data {
+                inject_typename(data, typename, key_type_map);
+            }
+        }
+        Value::Object(data) => {
+            if let Some(key_type_map) = key_type_map {
+                let key = ByteString::from(key_type_map.key.clone());
+                let discriminator = data
+                    .get(&key)
+                    .and_then(|val| val.as_str())
+                    .map(|val| val.to_string())
+                    .unwrap_or_default();
+
+                for (typename, value) in key_type_map.type_map.iter() {
+                    if value == &discriminator {
+                        data.insert(
+                            ByteString::from("__typename"),
+                            Value::String(ByteString::from(typename.as_str())),
+                        );
+                    }
+                }
+            } else {
+                data.insert(
+                    ByteString::from("__typename"),
+                    Value::String(ByteString::from(typename)),
+                );
+            }
+        }
+        _ => {}
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
     use std::sync::Arc;
 
     use apollo_compiler::name;
@@ -987,6 +1110,7 @@ mod tests {
                             "String",
                         ),
                     },
+                    source_api_name: "API",
                 },
             ),
         ]
@@ -1000,6 +1124,7 @@ mod tests {
                     "String",
                 ),
             },
+            source_api_name: "API",
         }
         "###);
     }
@@ -1015,6 +1140,8 @@ mod tests {
                 headers: vec![],
             }),
         };
+
+        let source_api_name = "API";
 
         let directive = SourceField {
             graph: "B".to_string(),
@@ -1042,6 +1169,7 @@ mod tests {
                     name: "hello".to_string(),
                     typename: super::ResponseTypeName::Concrete("String".to_string()),
                 },
+                source_api_name: Cow::from(source_api_name),
             })
             .body(hyper::Body::from(r#"{"data":"world"}"#))
             .expect("response builder");
@@ -1052,14 +1180,30 @@ mod tests {
                     name: "hello2".to_string(),
                     typename: super::ResponseTypeName::Concrete("String".to_string()),
                 },
+                source_api_name: Cow::from(source_api_name),
             })
             .body(hyper::Body::from(r#"{"data":"world"}"#))
             .expect("response builder");
 
-        let res =
-            super::handle_responses(Context::default(), &connector, vec![response1, response2])
-                .await
-                .unwrap();
+        let schema = Schema::parse_and_validate(
+            "
+            type Query {
+                hello: String
+            }
+            ",
+            "schema.graphql",
+        )
+        .unwrap();
+
+        let res = super::handle_responses(
+            &schema,
+            Some("{hello hello2: hello}".to_string()),
+            Context::default(),
+            &connector,
+            vec![response1, response2],
+        )
+        .await
+        .unwrap();
 
         assert_debug_snapshot!(res.response.body(), @r###"
         Response {
@@ -1108,13 +1252,9 @@ mod graphql_utils {
         for argument in field.arguments.iter() {
             match &*argument.value {
                 apollo_compiler::schema::Value::Variable(name) => {
-                    arguments.insert(
-                        argument.name.as_str(),
-                        variables
-                            .get(name.as_str())
-                            .unwrap_or(&JSONValue::Null)
-                            .clone(),
-                    );
+                    if let Some(value) = variables.get(name.as_str()) {
+                        arguments.insert(argument.name.as_str(), value.clone());
+                    }
                 }
                 _ => {
                     arguments.insert(
@@ -1135,13 +1275,9 @@ mod graphql_utils {
         for argument in field.arguments.iter() {
             match &*argument.value {
                 apollo_compiler::schema::Value::Variable(name) => {
-                    arguments.insert(
-                        argument.name.as_str(),
-                        variables
-                            .get(name.as_str())
-                            .unwrap_or(&JSONValue::Null)
-                            .clone(),
-                    );
+                    if let Some(value) = variables.get(name.as_str()) {
+                        arguments.insert(argument.name.as_str(), value.clone());
+                    }
                 }
                 _ => {
                     arguments.insert(

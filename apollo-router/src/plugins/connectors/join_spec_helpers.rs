@@ -31,11 +31,15 @@ pub(super) fn copy_definitions(schema: &Schema, new_schema: &mut Schema) {
             schema_definition.directives.push(directive.clone());
         });
 
-    // join__ directive definitions
+    // @join__ directive definitions
+    // @link
+    // @inaccessible
     schema
         .directive_definitions
         .iter()
-        .filter(|(name, _)| name.to_string().starts_with("join__") || *name == "link")
+        .filter(|(name, _)| {
+            name.to_string().starts_with("join__") || *name == "link" || *name == "inaccessible"
+        })
         .for_each(|(name, d)| {
             new_schema
                 .directive_definitions
@@ -358,6 +362,20 @@ fn join_implements_directive(graph: &str, interface: &str) -> Directive {
 }
 
 pub(super) fn add_join_implements(ty: &mut ExtendedType, graph: &str, interface: &Name) {
+    if ty.directives().iter().any(|d| {
+        d.name == "join__implements"
+            && d.argument_by_name("graph")
+                .and_then(|val| val.as_enum())
+                .map(|val| val.as_str() == graph)
+                .unwrap_or_default()
+            && d.argument_by_name("interface")
+                .and_then(|val| val.as_str())
+                .map(|val| val == interface.as_str())
+                .unwrap_or_default()
+    }) {
+        return;
+    }
+
     match ty {
         ExtendedType::Object(ref mut ty) => {
             let ty = ty.make_mut();

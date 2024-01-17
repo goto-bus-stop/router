@@ -1,6 +1,18 @@
 const express = require("express");
 const app = express();
-const port = 4003;
+const cors = require("cors");
+const rateLimit = require("express-rate-limit");
+
+const port = process.env.PORT || 4003;
+
+const rateLimitTreshold = process.env.LIMIT || 5000;
+
+const limiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: rateLimitTreshold,
+});
+
+app.use("/", cors(), limiter);
 
 app.get("/data/2.5/weather", (req, res) => {
   res.setHeader("Content-Type", "application/json");

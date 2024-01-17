@@ -349,7 +349,6 @@ impl HTTPSourceAPI {
 #[derive(Clone, Debug, Serialize)]
 pub(super) struct HTTPHeaderMapping {
     pub(crate) name: String,
-    //TODO: how to translate?
     pub(crate) r#as: Option<String>,
     pub(crate) value: Option<String>,
 }
@@ -569,20 +568,47 @@ impl SourceType {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub(super) struct KeyTypeMap {
-    key: String,
+    pub(super) key: String,
     // Dictionary mapping possible __typename strings to values of the JSON
     // property named by key.
-    type_map: HashMap<String, String>, // TODO: is this accurate?
+    pub(super) type_map: HashMap<Name, String>,
 }
 
 impl KeyTypeMap {
-    pub(super) fn from_argument(_arguments: &Node<Value>) -> Result<Self, ConnectorDirectiveError> {
-        Ok(Self {
-            key: Default::default(),
-            type_map: Default::default(),
-        })
+    pub(super) fn from_argument(argument: &Node<Value>) -> Result<Self, ConnectorDirectiveError> {
+        use ConnectorDirectiveError::*;
+
+        let object = argument
+            .as_object()
+            .ok_or_else(|| InvalidTypeForAttribute("keyTypeMap".into(), "Object".into()))?
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect::<HashMap<Name, Node<Value>>>();
+
+        let key = object
+            .get("key")
+            .ok_or_else(|| MissingAttributeForType("key".into(), "keyTypeMap".into()))?
+            .as_str()
+            .ok_or_else(|| InvalidTypeForAttribute("key".into(), "String".into()))?
+            .to_string();
+
+        let type_map = object
+            .get("typeMap")
+            .ok_or_else(|| MissingAttributeForType("typeMap".into(), "keyTypeMap".into()))?
+            .as_object()
+            .ok_or_else(|| InvalidTypeForAttribute("typeMap".into(), "Object".into()))?
+            .iter()
+            .map(|(name, value)| {
+                let value = value
+                    .as_str()
+                    .ok_or_else(|| InvalidTypeForAttribute(name.to_string(), "String".into()))?;
+                Ok((name.clone(), value.to_string()))
+            })
+            .collect::<Result<HashMap<Name, String>, _>>()?;
+
+        Ok(Self { key, type_map })
     }
 }
 

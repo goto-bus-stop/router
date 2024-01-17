@@ -13,6 +13,8 @@ use tracing::Instrument;
 use tracing::Span;
 
 use super::configuration::SourceApiConfiguration;
+use super::request_response::handle_responses;
+use super::request_response::make_requests;
 use super::Connector;
 use crate::plugins::telemetry::OTEL_STATUS_CODE;
 use crate::services::trust_dns_connector::new_async_http_connector;
@@ -131,7 +133,16 @@ impl HTTPConnector {
         let client = self.client.clone();
 
         let subgraph_name = request.subgraph_name.clone();
-        let requests = connector.create_requests(request, schema.clone())?;
+        let document = request.subgraph_request.body().query.clone();
+
+        let requests =
+            make_requests(request, &connector, schema.clone()).map_err(|e| -> BoxError {
+                format!(
+                    "Failed to create requests for connector `{}`: {}",
+                    connector.name, e
+                )
+                .into()
+            })?;
 
         let http_request_span = tracing::info_span!(
             CONNECTOR_HTTP_REQUEST,
@@ -172,7 +183,15 @@ impl HTTPConnector {
             Err(e) => return Err(BoxError::from(e)),
         };
 
-        let subgraph_response = connector.map_http_responses(responses, context).await?;
+        let subgraph_response = handle_responses(&schema, document, context, &connector, responses)
+            .await
+            .map_err(|e| -> BoxError {
+                format!(
+                    "Failed to map responses for connector `{}`: {}",
+                    connector.name, e
+                )
+                .into()
+            })?;
 
         Ok(subgraph_response)
     }
@@ -195,6 +214,7 @@ mod tests {
     use mime::APPLICATION_JSON;
     use tower::ServiceExt;
 
+    use crate::metrics::FutureMetricsExt;
     use crate::router_factory::YamlRouterFactory;
     use crate::services::new_service::ServiceFactory;
     use crate::services::supergraph;
@@ -206,7 +226,7 @@ mod tests {
             request: http::Request<Body>,
         ) -> Result<http::Response<String>, Infallible> {
             /*
-                        type IP
+            type IP
               @join__type(graph: NETWORK, key: "ip")
               @sourceType(
                 graph: "network"
@@ -225,7 +245,7 @@ mod tests {
               timezone: String
               readme: String
             }
-                         */
+            */
 
             let res = if request.method() == Method::GET
             /*&& request.uri().path() == "/json"*/
@@ -270,7 +290,7 @@ mod tests {
         let _spawned_task = tokio::task::spawn(emulate_rest_connector(listener));
 
         let schema = SCHEMA.replace(
-            "https://ipinfo.io/",
+            "https://ip.demo.starstuff.dev",
             &format!("http://127.0.0.1:{}/", address.port()),
         );
 
@@ -300,16 +320,28 @@ mod tests {
             .unwrap()
             .try_into()
             .unwrap();
-        let response = service
-            .oneshot(request)
-            .await
-            .unwrap()
-            .next_response()
-            .await
-            .unwrap()
-            .unwrap();
-        let response: serde_json::Value = serde_json::from_slice(&response).unwrap();
 
-        insta::assert_json_snapshot!(response);
+        async {
+            let response = service
+                .oneshot(request)
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap()
+                .unwrap();
+            let response: serde_json::Value = serde_json::from_slice(&response).unwrap();
+
+            insta::assert_json_snapshot!(response);
+
+            assert_counter!(
+                "apollo.router.operations.source.rest",
+                1,
+                "rest.response.api" = "ipinfo",
+                "rest.response.status_code" = 200
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }

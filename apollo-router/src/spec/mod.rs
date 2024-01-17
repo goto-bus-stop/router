@@ -14,6 +14,7 @@ pub(crate) use field_type::*;
 pub(crate) use fragments::*;
 pub(crate) use query::Query;
 pub(crate) use query::TYPENAME;
+pub(crate) use schema::schema_directives_by_name;
 pub(crate) use schema::Schema;
 pub(crate) use selection::*;
 use serde::Deserialize;
@@ -23,8 +24,9 @@ use thiserror::Error;
 use crate::graphql::ErrorExtension;
 use crate::json_ext::Object;
 
-pub(crate) const LINK_DIRECTIVE_NAME: &str = "link";
+pub(crate) const JOIN_DIRECTIVE_NAME: &str = "join__directive";
 pub(crate) const LINK_URL_ARGUMENT: &str = "url";
+pub(crate) const ARGS_ARGUMENT: &str = "args";
 
 /// GraphQL parsing errors.
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]

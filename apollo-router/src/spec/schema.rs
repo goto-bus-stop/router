@@ -7,9 +7,14 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_compiler::ast;
+use apollo_compiler::ast::DirectiveList;
+use apollo_compiler::executable::Argument;
+use apollo_compiler::schema::Directive;
+use apollo_compiler::schema::Name;
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
+use apollo_compiler::Node;
 use http::Uri;
 use sha2::Digest;
 use sha2::Sha256;
@@ -20,6 +25,8 @@ use crate::error::SchemaError;
 use crate::error::ValidationErrors;
 use crate::plugins::connectors::Source;
 use crate::query_planner::OperationKind;
+use crate::spec::ARGS_ARGUMENT;
+use crate::spec::JOIN_DIRECTIVE_NAME;
 use crate::Configuration;
 
 /// A GraphQL schema.
@@ -291,11 +298,85 @@ impl Schema {
     }
 }
 
+/// Returns a list of `@name` directives declared on schema.
+///
+/// Automatically expands `join__directive` into @ directives.
+/// See expand_join_directive() below for more detail
+pub(crate) fn schema_directives_by_name(
+    schema: &apollo_compiler::ast::Document,
+    name: &Name,
+) -> impl Iterator<Item = Node<Directive>> {
+    schema
+        .definitions
+        .iter()
+        .filter_map(|def| def.as_schema_definition())
+        .flat_map(move |def| {
+            let d2 = def.directives.clone();
+            def.directives
+                .get_all(name.as_str())
+                .cloned()
+                .chain(expand_join_directive(d2, name))
+        })
+        .collect::<Vec<_>>()
+        .into_iter()
+}
+
+/// Given a join directive in the form:
+///  @join__directive(
+///     graphs: [KITCHEN_SINK]
+///    name: "link"
+///     args: {
+///       url: "https://specs.apollo.dev/source/v0.1"
+///       import: ["@sourceAPI", "@sourceType", "@sourceField"]
+///       for: "EXECUTION"
+///     }
+///   )
+/// Generate:
+/// @link(url: "https://specs.apollo.dev/source/v0.1", for: EXECUTION, import: ["@sourceAPI"])
+/// @link(url: "https://specs.apollo.dev/source/v0.1", for: EXECUTION, import: ["@sourceType"])
+/// @link(url: "https://specs.apollo.dev/source/v0.1", for: EXECUTION, import: ["@sourceField"])
+fn expand_join_directive(
+    directives: DirectiveList,
+    directive_name: &Name,
+) -> impl Iterator<Item = Node<Directive>> {
+    let mut res = Vec::new();
+
+    directives
+        .get_all(JOIN_DIRECTIVE_NAME)
+        .filter(|d| {
+            d.argument_by_name("name")
+                .map(|name| name.as_str() == Some(directive_name.as_str()))
+                .unwrap_or_default()
+        })
+        .for_each(|d| {
+            if let Some(args) = d
+                .argument_by_name(ARGS_ARGUMENT)
+                .and_then(|n| n.as_object())
+            {
+                let mut arguments = Vec::new();
+                for (name, value) in args {
+                    arguments.push(Node::from(Argument {
+                        name: name.clone(),
+                        value: value.clone(),
+                    }));
+                }
+
+                res.push(Node::from(Directive {
+                    name: directive_name.clone(),
+                    arguments,
+                }));
+            }
+        });
+    res.into_iter()
+}
+
 #[derive(Debug)]
 pub(crate) struct InvalidObject;
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::name;
+
     use super::*;
 
     fn with_supergraph_boilerplate(content: &str) -> String {
@@ -533,5 +614,69 @@ GraphQL request:42:1
         let schema = "schema {";
         let result = Schema::parse_test(schema, &Default::default());
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_expand_join_directive() {
+        let schema_join_str = r#"
+schema
+    @core(feature: "https://specs.apollo.dev/core/v0.1")
+    @core(feature: "https://specs.apollo.dev/join/v0.1")
+    @join__directive(
+        graphs: [KITCHEN_SINK]
+        name: "link"
+        args: {
+        url: "https://specs.apollo.dev/source/v0.1"
+        import: ["@sourceAPI", "@sourceType", "@sourceField"]
+        for: "EXECUTION"
+        }
+    )
+    @join__directive(
+        graphs: [NETWORK]
+        name: "sourceAPI"
+        args: { name: "test", http: { baseURL: "http://localhost" } }
+    ) {
+    query: Query
+    }
+"#;
+
+        let schema_no_join_str = r#"
+schema
+    @core(feature: "https://specs.apollo.dev/core/v0.1")
+    @core(feature: "https://specs.apollo.dev/join/v0.1")
+    @link(
+        url: "https://specs.apollo.dev/source/v0.1"
+        import: ["@sourceAPI", "@sourceType", "@sourceField"]
+        for: "EXECUTION"
+        )
+    @join__directive(
+        graphs: [NETWORK]
+        name: "sourceAPI"
+        args: { name: "test", http: { baseURL: "http://localhost" } }
+    ) {
+    query: Query
+    }
+"#;
+        let join_schema =
+            Schema::parse_ast(schema_join_str).expect("supergraph schema must be valid");
+        let no_join_schema =
+            Schema::parse_ast(schema_no_join_str).expect("supergraph schema must be valid");
+
+        let expected_directives = vec![
+            r#"@link(url: "https://specs.apollo.dev/source/v0.1", import: ["@sourceAPI", "@sourceType", "@sourceField"], for: "EXECUTION")"#,
+        ];
+        let directive_name = name!("link");
+        assert_eq!(
+            expected_directives,
+            schema_directives_by_name(&join_schema, &directive_name)
+                .map(|d| d.to_string())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            expected_directives,
+            schema_directives_by_name(&no_join_schema, &directive_name)
+                .map(|d| d.to_string())
+                .collect::<Vec<_>>()
+        );
     }
 }

@@ -1252,13 +1252,9 @@ mod graphql_utils {
         for argument in field.arguments.iter() {
             match &*argument.value {
                 apollo_compiler::schema::Value::Variable(name) => {
-                    arguments.insert(
-                        argument.name.as_str(),
-                        variables
-                            .get(name.as_str())
-                            .unwrap_or(&JSONValue::Null)
-                            .clone(),
-                    );
+                    if let Some(value) = variables.get(name.as_str()) {
+                        arguments.insert(argument.name.as_str(), value.clone());
+                    }
                 }
                 _ => {
                     arguments.insert(
@@ -1279,13 +1275,9 @@ mod graphql_utils {
         for argument in field.arguments.iter() {
             match &*argument.value {
                 apollo_compiler::schema::Value::Variable(name) => {
-                    arguments.insert(
-                        argument.name.as_str(),
-                        variables
-                            .get(name.as_str())
-                            .unwrap_or(&JSONValue::Null)
-                            .clone(),
-                    );
+                    if let Some(value) = variables.get(name.as_str()) {
+                        arguments.insert(argument.name.as_str(), value.clone());
+                    }
                 }
                 _ => {
                     arguments.insert(

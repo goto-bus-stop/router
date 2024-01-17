@@ -1323,23 +1323,44 @@ async fn test_request_deduping() {
 const SCHEMA: &str = include_str!("./test_supergraph.graphql");
 
 async fn execute(uri: &str, query: &str, config: Option<serde_json::Value>) -> serde_json::Value {
-    let schema = SCHEMA.replace("http://localhost:8080", uri);
-    let schema = schema.replace(
-        "http://localhost:8081/",
-        format!("{}/graphql", uri).as_str(),
-    );
+    let connector_uri = format!("{}/v1/", uri);
+    let subgraph_uri = format!("{}/graphql", uri);
 
     // we cannot use Testharness because the subgraph connectors are actually extracted in YamlRouterFactory
     let mut factory = YamlRouterFactory;
 
-    let config = config.unwrap_or(serde_json::json!({
-        "include_subgraph_errors": { "all": true }
+    let mut config = config.unwrap_or(serde_json::json!({
+      "include_subgraph_errors": { "all": true },
     }));
+
+    let config_object = config.as_object_mut().unwrap();
+    config_object.insert(
+        "preview_connectors".to_string(),
+        serde_json::json!({
+          "subgraphs": {
+              "kitchen-sink": {
+                "a": {
+                  "override_url": connector_uri
+                },
+              "with_headers": {
+                "override_url": connector_uri
+              }
+            }
+          }
+        }),
+    );
+
+    config_object.insert(
+        "override_subgraph_url".to_string(),
+        serde_json::json!({
+        "normal": subgraph_uri
+          }),
+    );
 
     let router_creator = factory
         .create(
             Arc::new(serde_json::from_value(config).unwrap()),
-            schema,
+            SCHEMA.to_string(),
             None,
             None,
         )

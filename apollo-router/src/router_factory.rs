@@ -185,6 +185,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             let connectors = source.connectors();
             let mut aggregated_connectors: HashMap<Arc<String>, HashMap<Arc<String>, &Connector>> =
                 HashMap::new();
+
             for (name, connector) in connectors.iter() {
                 let subgraph_name = connector.origin_subgraph.clone();
 
@@ -195,13 +196,15 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             }
             let mut subgraph_connectors = HashMap::new();
             for (name, connectors_map) in aggregated_connectors.into_iter() {
-                subgraph_connectors.insert(
-                    name,
-                    SubgraphConnector::for_schema(
-                        Arc::clone(&connector_supergraph),
-                        connectors_map,
-                    )?,
-                );
+                let connector = SubgraphConnector::for_schema(
+                    Arc::clone(&connector_supergraph),
+                    configuration
+                        .preview_connectors
+                        .subgraphs
+                        .get(name.as_ref()),
+                    connectors_map,
+                )?;
+                subgraph_connectors.insert(name, connector);
             }
 
             subgraph_connectors

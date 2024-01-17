@@ -3,6 +3,7 @@ use std::fmt::Display;
 
 use indexmap::IndexMap;
 use itertools::Itertools;
+use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::char;
 use nom::character::complete::one_of;
@@ -538,18 +539,23 @@ impl Display for VariableExpression {
     }
 }
 
-fn nom_parse_identifier(input: &str) -> IResult<&str, String> {
+fn nom_parse_identifier_possible_namespace(input: &str) -> IResult<&str, &str> {
+    recognize(alt((tag("$this"), nom_parse_identifier)))(input)
+        .map(|(input, output)| (input, output))
+}
+
+fn nom_parse_identifier(input: &str) -> IResult<&str, &str> {
     recognize(pair(
         one_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_"),
         many0(one_of(
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789",
         )),
     ))(input)
-    .map(|(input, output)| (input, output.to_string()))
+    .map(|(input, output)| (input, output))
 }
 
 fn nom_parse_identifier_path(input: &str) -> IResult<&str, String> {
-    let (input, first) = nom_parse_identifier(input)?;
+    let (input, first) = nom_parse_identifier_possible_namespace(input)?;
     let (input, mut rest) = many0(preceded(char('.'), nom_parse_identifier))(input)?;
     let mut identifier_path = vec![first];
     identifier_path.append(&mut rest);
@@ -564,19 +570,10 @@ mod tests {
 
     #[test]
     fn test_parse_identifier() {
-        assert_eq!(nom_parse_identifier("abc"), Ok(("", "abc".to_string())));
-        assert_eq!(
-            nom_parse_identifier("abc123"),
-            Ok(("", "abc123".to_string()))
-        );
-        assert_eq!(
-            nom_parse_identifier("abc_123"),
-            Ok(("", "abc_123".to_string()))
-        );
-        assert_eq!(
-            nom_parse_identifier("abc-123"),
-            Ok(("-123", "abc".to_string()))
-        );
+        assert_eq!(nom_parse_identifier("abc"), Ok(("", "abc")));
+        assert_eq!(nom_parse_identifier("abc123"), Ok(("", "abc123")));
+        assert_eq!(nom_parse_identifier("abc_123"), Ok(("", "abc_123")));
+        assert_eq!(nom_parse_identifier("abc-123"), Ok(("-123", "abc")));
     }
 
     #[test]
@@ -592,6 +589,16 @@ mod tests {
         assert_eq!(
             nom_parse_identifier_path("abc.def.ghi"),
             Ok(("", "abc.def.ghi".to_string())),
+        );
+        assert_eq!(
+            nom_parse_identifier_path("$this.def.ghi"),
+            Ok(("", "$this.def.ghi".to_string())),
+        );
+
+        assert!(nom_parse_identifier_path("$anything.def.ghi").is_err());
+        assert_eq!(
+            nom_parse_identifier_path("abc.$this.ghi"),
+            Ok((".$this.ghi", "abc".to_string())),
         );
     }
 
@@ -1760,6 +1767,13 @@ mod tests {
                 .unwrap()
                 .required_parameters(),
             vec!["id"],
+        );
+
+        assert_eq!(
+            URLPathTemplate::parse("/users/{$this.id}?foo={$this.bar!}")
+                .unwrap()
+                .required_parameters(),
+            vec!["$this.bar", "$this.id"],
         );
     }
 }

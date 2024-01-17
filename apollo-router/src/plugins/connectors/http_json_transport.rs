@@ -16,6 +16,7 @@ use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
 use lazy_static::lazy_static;
+use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use thiserror::Error;
 use url::Url;
@@ -160,9 +161,10 @@ impl HttpJsonTransport {
     }
 
     fn make_uri(&self, inputs: &Value) -> Result<url::Url, ConnectorDirectiveError> {
+        let flat_inputs = flatten_keys(inputs);
         let path = self
             .path_template
-            .generate_path(inputs)
+            .generate_path(&Value::Object(flat_inputs))
             .map_err(ConnectorDirectiveError::PathGenerationError)?;
         append_path(self.base_uri.clone(), &path)
     }
@@ -180,6 +182,35 @@ impl HttpJsonTransport {
         let selection_set = parameters_to_selection_set(&required);
         let selection_set_string = selection_set_to_string(&selection_set);
         (selection_set, selection_set_string)
+    }
+}
+
+// URLPathTemplate expects a map with flat dot-delimited keys.
+fn flatten_keys(inputs: &Value) -> serde_json_bytes::Map<ByteString, Value> {
+    let mut flat = serde_json_bytes::Map::new();
+    flatten_keys_recursive(inputs, &mut flat, ByteString::from(""));
+    flat
+}
+
+fn flatten_keys_recursive(
+    inputs: &Value,
+    flat: &mut serde_json_bytes::Map<ByteString, Value>,
+    prefix: ByteString,
+) {
+    match inputs {
+        Value::Object(map) => {
+            for (key, value) in map {
+                let mut new_prefix = prefix.as_str().to_string();
+                if !new_prefix.is_empty() {
+                    new_prefix += ".";
+                }
+                new_prefix += key.as_str();
+                flatten_keys_recursive(value, flat, ByteString::from(new_prefix));
+            }
+        }
+        _ => {
+            flat.insert(prefix, inputs.clone());
+        }
     }
 }
 
@@ -329,13 +360,13 @@ impl HttpHeader {
 // These are runtime error only, configuration errors should be captured as ConnectorDirectiveError
 #[derive(Error, Display, Debug)]
 pub(crate) enum HttpJsonTransportError {
-    /// Error building URI
+    /// Error building URI: {0:?}
     NewUriError(#[from] Option<http::uri::InvalidUri>),
-    /// Could not generate HTTP request
+    /// Could not generate HTTP request: {0}
     InvalidNewRequest(#[source] http::Error),
-    /// Could not serialize body
+    /// Could not serialize body: {0}
     BodySerialization(#[source] serde_json::Error),
-    /// Invalid connector directive. This error should have been caught earlier
+    /// Invalid connector directive. This error should have been caught earlier: {0}
     ConnectorDirectiveError(#[source] ConnectorDirectiveError),
 }
 
@@ -466,6 +497,31 @@ mod tests {
                 ("x-new-name".parse().unwrap(), "renamed".parse().unwrap()),
                 ("x-insert".parse().unwrap(), "inserted".parse().unwrap()),
             ]
+        );
+    }
+
+    #[test]
+    fn test_flatten_keys() {
+        let inputs = serde_json_bytes::json!({
+            "a": 1,
+            "b": {
+                "c": 2,
+                "d": {
+                    "e": 3
+                }
+            }
+        });
+        let flat = super::flatten_keys(&inputs);
+        assert_eq!(
+            flat,
+            serde_json_bytes::json!({
+                "a": 1,
+                "b.c": 2,
+                "b.d.e": 3
+            })
+            .as_object()
+            .unwrap()
+            .clone()
         );
     }
 }

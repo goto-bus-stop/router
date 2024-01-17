@@ -630,11 +630,6 @@ schema
         import: ["@sourceAPI", "@sourceType", "@sourceField"]
         for: "EXECUTION"
         }
-    )
-    @join__directive(
-        graphs: [NETWORK]
-        name: "sourceAPI"
-        args: { name: "test", http: { baseURL: "http://localhost" } }
     ) {
     query: Query
     }
@@ -648,12 +643,7 @@ schema
         url: "https://specs.apollo.dev/source/v0.1"
         import: ["@sourceAPI", "@sourceType", "@sourceField"]
         for: "EXECUTION"
-        )
-    @join__directive(
-        graphs: [NETWORK]
-        name: "sourceAPI"
-        args: { name: "test", http: { baseURL: "http://localhost" } }
-    ) {
+        ) {
     query: Query
     }
 "#;

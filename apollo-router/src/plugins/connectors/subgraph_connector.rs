@@ -301,7 +301,7 @@ mod tests {
                             "subgraphs": {
                                 "network": {
                                     "ipinfo": {
-                                    "override_url": format!("http://127.0.0.1:{}/", address.port())
+                                      "override_url": format!("http://127.0.0.1:{}/", address.port())
                                     }
                                 }
                             }

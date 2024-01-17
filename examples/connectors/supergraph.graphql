@@ -8,13 +8,11 @@ schema
   @join__directive(
     graphs: [NETWORK]
     name: "sourceAPI"
-    # replace this url with http://localhost:4002 when running the docker example
     args: { name: "ipinfo", http: { baseURL: "https://ip.demo.starstuff.dev" } }
   )
   @join__directive(
     graphs: [NETWORK]
     name: "sourceAPI"
-    # replace this url with http://localhost:4003 when running the docker example
     args: {
       name: "weather"
       http: { baseURL: "https://weather.demo.starstuff.dev" }

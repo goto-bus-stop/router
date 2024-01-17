@@ -61,6 +61,7 @@ use crate::notification::Notify;
 #[cfg(not(test))]
 use crate::notification::RouterBroadcasts;
 use crate::plugin::plugins;
+use crate::plugins::connectors::configuration::Connectors;
 #[cfg(not(test))]
 use crate::plugins::subscription::SubscriptionConfig;
 #[cfg(not(test))]
@@ -191,6 +192,10 @@ pub struct Configuration {
     /// Batching configuration.
     #[serde(default)]
     pub(crate) experimental_batching: Batching,
+
+    /// Connectors configuration
+    #[serde(default)]
+    pub(crate) preview_connectors: Connectors,
 }
 
 impl PartialEq for Configuration {
@@ -256,6 +261,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             experimental_chaos: Chaos,
             experimental_graphql_validation_mode: GraphQLValidationMode,
             experimental_batching: Batching,
+            preview_connectors: Connectors,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -275,6 +281,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .uplink(ad_hoc.uplink)
             .graphql_validation_mode(ad_hoc.experimental_graphql_validation_mode)
             .experimental_batching(ad_hoc.experimental_batching)
+            .preview_connectors(ad_hoc.preview_connectors)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
@@ -313,6 +320,7 @@ impl Configuration {
         graphql_validation_mode: Option<GraphQLValidationMode>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
         experimental_batching: Option<Batching>,
+        preview_connectors: Option<Connectors>,
     ) -> Result<Self, ConfigurationError> {
         #[cfg(not(test))]
         let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
@@ -340,6 +348,7 @@ impl Configuration {
             experimental_chaos: chaos.unwrap_or_default(),
             experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
             experimental_api_schema_generation_mode:  experimental_api_schema_generation_mode.unwrap_or_default(),
+            preview_connectors: preview_connectors.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -389,6 +398,7 @@ impl Configuration {
         graphql_validation_mode: Option<GraphQLValidationMode>,
         experimental_batching: Option<Batching>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
+        preview_connectors: Option<Connectors>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -414,6 +424,7 @@ impl Configuration {
             persisted_queries: persisted_query.unwrap_or_default(),
             uplink,
             experimental_batching: experimental_batching.unwrap_or_default(),
+            preview_connectors: preview_connectors.unwrap_or_default(),
         };
 
         configuration.validate()

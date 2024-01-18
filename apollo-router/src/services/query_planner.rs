@@ -85,7 +85,7 @@ pub(crate) enum QueryPlannerContent {
         #[serde(skip)]
         relevant_subgraph_schemas: Arc<HashMap<String, Arc<Schema>>>,
     },
-    Introspection {
+    Response {
         response: Box<graphql::Response>,
     },
     IntrospectionDisabled,

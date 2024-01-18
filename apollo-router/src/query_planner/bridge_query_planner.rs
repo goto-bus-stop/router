@@ -468,7 +468,7 @@ impl BridgeQueryPlanner {
                     .await
                     .map_err(QueryPlannerError::Introspection)?;
 
-                Ok(QueryPlannerContent::Introspection {
+                Ok(QueryPlannerContent::Response {
                     response: Box::new(response),
                 })
             }
@@ -771,7 +771,7 @@ impl BridgeQueryPlanner {
                                 .collect(),
                         )
                         .build();
-                    return Ok(QueryPlannerContent::Introspection {
+                    return Ok(QueryPlannerContent::Response {
                         response: Box::new(response),
                     });
                 }
@@ -808,6 +808,21 @@ impl BridgeQueryPlanner {
         }
 
         if selections.contains_introspection() {
+            // It can happen if you have a statically skipped query like { get @skip(if: true) { id name }} because it will be statically filtered with {}
+            if selections
+                .operations
+                .get(0)
+                .map(|op| op.selection_set.is_empty())
+                .unwrap_or_default()
+            {
+                return Ok(QueryPlannerContent::Response {
+                    response: Box::new(
+                        graphql::Response::builder()
+                            .data(Value::Object(Default::default()))
+                            .build(),
+                    ),
+                });
+            }
             // If we have only one operation containing only the root field `__typename`
             // (possibly aliased or repeated). (This does mean we fail to properly support
             // {"query": "query A {__typename} query B{somethingElse}", "operationName":"A"}.)
@@ -822,7 +837,7 @@ impl BridgeQueryPlanner {
                         .into_iter()
                         .map(|key| (key, Value::String(operation_name.clone().into()))),
                 ));
-                return Ok(QueryPlannerContent::Introspection {
+                return Ok(QueryPlannerContent::Response {
                     response: Box::new(graphql::Response::builder().data(data).build()),
                 });
             } else {
@@ -1014,7 +1029,7 @@ mod tests {
         )
         .await
         .unwrap();
-        if let QueryPlannerContent::Introspection { response } = result {
+        if let QueryPlannerContent::Response { response } = result {
             assert_eq!(
                 r#"{"data":{"x":"Query"}}"#,
                 serde_json::to_string(&response).unwrap()
@@ -1034,7 +1049,7 @@ mod tests {
         )
         .await
         .unwrap();
-        if let QueryPlannerContent::Introspection { response } = result {
+        if let QueryPlannerContent::Response { response } = result {
             assert_eq!(
                 r#"{"data":{"x":"Query","__typename":"Query"}}"#,
                 serde_json::to_string(&response).unwrap()

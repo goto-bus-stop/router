@@ -8,7 +8,7 @@ pub(crate) use bridge_query_planner::FilteredQuery;
 pub(crate) use bridge_query_planner::QueryPlanResult;
 pub(crate) use caching_query_planner::*;
 
-pub(crate) use self::fetch::OperationKind;
+pub use self::fetch::OperationKind;
 
 mod bridge_query_planner;
 mod caching_query_planner;

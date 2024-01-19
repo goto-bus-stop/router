@@ -16,6 +16,8 @@ use super::configuration::SourceApiConfiguration;
 use super::request_response::handle_responses;
 use super::request_response::make_requests;
 use super::Connector;
+use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
+use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::plugins::telemetry::OTEL_STATUS_CODE;
 use crate::services::trust_dns_connector::new_async_http_connector;
 use crate::services::trust_dns_connector::AsyncHyperResolver;
@@ -135,6 +137,9 @@ impl HTTPConnector {
         let subgraph_name = request.subgraph_name.clone();
         let document = request.subgraph_request.body().query.clone();
 
+        let display_body = request.context.contains_key(LOGGING_DISPLAY_BODY);
+        let display_headers = request.context.contains_key(LOGGING_DISPLAY_HEADERS);
+
         let requests =
             make_requests(request, &connector, schema.clone()).map_err(|e| -> BoxError {
                 format!(
@@ -144,9 +149,11 @@ impl HTTPConnector {
                 .into()
             })?;
 
+        let connector_name = subgraph_name.unwrap_or_else(|| "UNKNOWN".to_string());
+
         let http_request_span = tracing::info_span!(
             CONNECTOR_HTTP_REQUEST,
-            "connector.name" = %subgraph_name.unwrap_or_else(|| "UNKNOWN".to_string()),
+            "connector.name" = %connector_name,
             "url.full" = ::tracing::field::Empty,
             "http.request.method" = ::tracing::field::Empty,
             "otel.kind" = "CLIENT",
@@ -154,9 +161,17 @@ impl HTTPConnector {
             "http.response.status_code" = ::tracing::field::Empty,
         );
         let tasks = requests.into_iter().map(|(req, res_params)| async {
+            let url = req.uri().to_string();
             let span = Span::current();
-            span.record("url.full", req.uri().to_string());
-            span.record("http.request.method", req.method().to_string());
+            if display_headers {
+                tracing::info!(http.request.headers = ?req.headers(), url.full = ?req.uri().to_string(), apollo.connector.name = %connector_name, "Request headers to REST endpoint {url:?}");
+            }
+            if display_body {
+                tracing::info!(http.request.body = ?req.body(), url.full = ?req.uri().to_string(), apollo.connector.name = %connector_name, "Request body to subgraph {url:?}");
+            }
+            span.record("url.full", &url);
+            span.record("http.request.method", req.method().as_str());
+
 
             let mut res = match client.request(req).await {
                 Ok(res) => {

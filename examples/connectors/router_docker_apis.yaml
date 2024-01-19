@@ -37,4 +37,9 @@ include_subgraph_errors:
 plugins:
   experimental.expose_query_plan: true
 experimental_graphql_validation_mode: both
-
+# useful for troubleshooting
+rhai:
+  # the scripts directory
+  # is relative to the binary invocation directory
+  scripts: ./examples/connectors/rhai
+  main: main.rhai

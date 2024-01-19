@@ -18,6 +18,8 @@ use super::response_formatting::execute;
 use super::response_formatting::JsonMap;
 use super::Connector;
 use crate::json_ext::Object;
+use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
+use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::Context;
@@ -426,7 +428,14 @@ pub(super) async fn handle_responses(
     let mut data = serde_json_bytes::Map::new();
     let mut errors = Vec::new();
 
+    let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
+    let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
+
     for response in responses {
+        if display_headers {
+            // TODO[igni]: it would be nice to keep the URL around for logging, maybe in extensions?
+            tracing::info!(http.response.headers = ?response.headers(), apollo.connector.name = %connector.name, "Response headers from REST endpoint");
+        }
         let (parts, body) = response.into_parts();
 
         let response_params = parts
@@ -442,11 +451,17 @@ pub(super) async fn handle_responses(
             rest.response.status_code = parts.status.as_u16() as i64
         );
 
+        let body = &hyper::body::to_bytes(body)
+            .await
+            .map_err(|_| InvalidResponseBody("couldn't retrieve http response body".into()))?;
+
+        if display_body {
+            // TODO[igni]: it would be nice to keep the URL around for logging, maybe in extensions?
+            tracing::info!(http.response.body = ?String::from_utf8_lossy(body), apollo.connector.name = %connector.name, "Response body from REST endpoint");
+        }
+
         if parts.status.is_success() {
-            let json_data: Value =
-                serde_json::from_slice(&hyper::body::to_bytes(body).await.map_err(|_| {
-                    InvalidResponseBody("couldn't retrieve http response body".into())
-                })?)
+            let json_data: Value = serde_json::from_slice(body)
                 .map_err(|_| InvalidResponseBody("couldn't deserialize response body".into()))?;
 
             let mut res_data = match connector.transport {

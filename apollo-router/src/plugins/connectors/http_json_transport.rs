@@ -215,6 +215,7 @@ fn flatten_keys_recursive(
 }
 
 /// Append a path and query to a URI. Uses the path from base URI (but will discard the query).
+/// Expects the path to start with "/".
 fn append_path(base_uri: Url, path: &str) -> Result<Url, ConnectorDirectiveError> {
     // we will need to work on path segments, and on query parameters.
     // the first thing we need to do is parse the path so we have APIs to reason with both:

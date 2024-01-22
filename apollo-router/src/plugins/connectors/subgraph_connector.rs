@@ -22,6 +22,7 @@ use crate::services::trust_dns_connector::AsyncHyperResolver;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 
+static CONNECTOR_FETCH: &str = "connector fetch";
 static CONNECTOR_HTTP_REQUEST: &str = "connector http request";
 
 #[derive(Clone)]
@@ -129,11 +130,10 @@ impl HTTPConnector {
         let schema = self.schema.clone();
         let connector = self.connector.clone();
         let context = request.context.clone();
-
         let client = self.client.clone();
-
-        let subgraph_name = request.subgraph_name.clone();
         let document = request.subgraph_request.body().query.clone();
+
+        let connector_name = format!("{}", &connector);
 
         let requests =
             make_requests(request, &connector, schema.clone()).map_err(|e| -> BoxError {
@@ -144,38 +144,42 @@ impl HTTPConnector {
                 .into()
             })?;
 
-        let http_request_span = tracing::info_span!(
-            CONNECTOR_HTTP_REQUEST,
-            "connector.name" = %subgraph_name.unwrap_or_else(|| "UNKNOWN".to_string()),
-            "url.full" = ::tracing::field::Empty,
-            "http.request.method" = ::tracing::field::Empty,
-            "otel.kind" = "CLIENT",
-            "otel.status_code" = ::tracing::field::Empty,
-            "http.response.status_code" = ::tracing::field::Empty,
+        let connector_fetch_span = tracing::info_span!(
+            CONNECTOR_FETCH,
+            "connector.name" = %connector_name,
         );
-        let tasks = requests.into_iter().map(|(req, res_params)| async {
-            let span = Span::current();
-            span.record("url.full", req.uri().to_string());
-            span.record("http.request.method", req.method().to_string());
+        let tasks = requests.into_iter().map(|(req, res_params)| {
+            let connector_request_span = tracing::info_span!(
+                CONNECTOR_HTTP_REQUEST,
+                "connector.name" = %connector_name,
+                "url.full" = req.uri().to_string(),
+                "http.request.method" = req.method().to_string(),
+                "otel.kind" = "CLIENT",
+                "otel.status_code" = ::tracing::field::Empty,
+                "http.response.status_code" = ::tracing::field::Empty,
+            );
+            async {
+                let span = Span::current();
+                let mut res = match client.request(req).await {
+                    Ok(res) => {
+                        span.record(OTEL_STATUS_CODE, "Ok");
+                        span.record("http.response.status_code", res.status().as_u16());
+                        Ok(res)
+                    }
+                    e => {
+                        span.record(OTEL_STATUS_CODE, "Error");
+                        e
+                    }
+                }?;
 
-            let mut res = match client.request(req).await {
-                Ok(res) => {
-                    span.record(OTEL_STATUS_CODE, "Ok");
-                    span.record("http.response.status_code", res.status().as_u16());
-                    Ok(res)
-                }
-                e => {
-                    span.record(OTEL_STATUS_CODE, "Error");
-                    e
-                }
-            }?;
-
-            res.extensions_mut().insert(res_params);
-            Ok::<_, BoxError>(res)
+                res.extensions_mut().insert(res_params);
+                Ok::<_, BoxError>(res)
+            }
+            .instrument(connector_request_span)
         });
 
         let results = futures::future::try_join_all(tasks)
-            .instrument(http_request_span)
+            .instrument(connector_fetch_span)
             .await;
 
         let responses = match results {

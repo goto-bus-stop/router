@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::sync::Arc;
 
 use apollo_compiler::executable::Selection;
@@ -30,7 +29,7 @@ const ENTITIES: &str = "_entities";
 #[derive(Debug)]
 pub(crate) struct ResponseParams {
     key: ResponseKey,
-    source_api_name: Cow<'static, str>,
+    source_api_name: Arc<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -443,11 +442,12 @@ pub(super) async fn handle_responses(
             .get::<ResponseParams>()
             .ok_or_else(|| MissingResponseParams)?;
 
+        let api_name = Arc::clone(&response_params.source_api_name);
         u64_counter!(
             "apollo.router.operations.source.rest",
             "rest source api calls",
             1,
-            rest.response.api = response_params.source_api_name.clone(),
+            rest.response.api = api_name.to_string(),
             rest.response.status_code = parts.status.as_u16() as i64
         );
 
@@ -649,7 +649,6 @@ fn inject_typename(data: &mut Value, typename: &str, key_type_map: &Option<KeyTy
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Cow;
     use std::sync::Arc;
 
     use apollo_compiler::name;
@@ -934,7 +933,7 @@ mod tests {
 
         let api = SourceAPI {
             graph: "B".to_string(),
-            name: "API".to_string(),
+            name: Arc::new("API".to_string()),
             http: Some(HTTPSourceAPI {
                 base_url: "http://localhost/api".to_string(),
                 default: true,
@@ -1078,7 +1077,7 @@ mod tests {
 
         let api = SourceAPI {
             graph: "B".to_string(),
-            name: "API".to_string(),
+            name: Arc::new("API".to_string()),
             http: Some(HTTPSourceAPI {
                 base_url: "http://localhost/api".to_string(),
                 default: true,
@@ -1152,7 +1151,7 @@ mod tests {
     async fn handle_requests() {
         let api = SourceAPI {
             graph: "B".to_string(),
-            name: "API".to_string(),
+            name: Arc::new("API".to_string()),
             http: Some(HTTPSourceAPI {
                 base_url: "http://localhost/api".to_string(),
                 default: true,
@@ -1160,7 +1159,7 @@ mod tests {
             }),
         };
 
-        let source_api_name = "API";
+        let source_api_name = Arc::new("API".to_string());
 
         let directive = SourceField {
             graph: Arc::new("B".to_string()),
@@ -1191,7 +1190,7 @@ mod tests {
                     name: "hello".to_string(),
                     typename: super::ResponseTypeName::Concrete("String".to_string()),
                 },
-                source_api_name: Cow::from(source_api_name),
+                source_api_name: Arc::clone(&source_api_name),
             })
             .body(hyper::Body::from(r#"{"data":"world"}"#))
             .expect("response builder");
@@ -1202,7 +1201,7 @@ mod tests {
                     name: "hello2".to_string(),
                     typename: super::ResponseTypeName::Concrete("String".to_string()),
                 },
-                source_api_name: Cow::from(source_api_name),
+                source_api_name: Arc::clone(&source_api_name),
             })
             .body(hyper::Body::from(r#"{"data":"world"}"#))
             .expect("response builder");

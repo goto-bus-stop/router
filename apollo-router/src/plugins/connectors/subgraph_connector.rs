@@ -24,6 +24,7 @@ use crate::services::trust_dns_connector::AsyncHyperResolver;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 
+static CONNECTOR_FETCH: &str = "connector fetch";
 static CONNECTOR_HTTP_REQUEST: &str = "connector http request";
 
 #[derive(Clone)]
@@ -131,14 +132,12 @@ impl HTTPConnector {
         let schema = self.schema.clone();
         let connector = self.connector.clone();
         let context = request.context.clone();
-
         let client = self.client.clone();
-
-        let subgraph_name = request.subgraph_name.clone();
         let document = request.subgraph_request.body().query.clone();
 
         let display_body = request.context.contains_key(LOGGING_DISPLAY_BODY);
         let display_headers = request.context.contains_key(LOGGING_DISPLAY_HEADERS);
+        let connector_name = connector.to_string();
 
         let requests =
             make_requests(request, &connector, schema.clone()).map_err(|e| -> BoxError {
@@ -149,48 +148,52 @@ impl HTTPConnector {
                 .into()
             })?;
 
-        let connector_name = subgraph_name.unwrap_or_else(|| "UNKNOWN".to_string());
-
-        let http_request_span = tracing::info_span!(
-            CONNECTOR_HTTP_REQUEST,
+        let connector_fetch_span = tracing::info_span!(
+            CONNECTOR_FETCH,
             "connector.name" = %connector_name,
-            "url.full" = ::tracing::field::Empty,
-            "http.request.method" = ::tracing::field::Empty,
-            "otel.kind" = "CLIENT",
-            "otel.status_code" = ::tracing::field::Empty,
-            "http.response.status_code" = ::tracing::field::Empty,
         );
-        let tasks = requests.into_iter().map(|(req, res_params)| async {
+
+        let tasks = requests.into_iter().map(|(req, res_params)| {
             let url = req.uri().to_string();
-            let span = Span::current();
+            let connector_request_span = tracing::info_span!(
+                CONNECTOR_HTTP_REQUEST,
+                "connector.name" = %connector_name,
+                "url.full" = %url,
+                "http.request.method" = req.method().to_string(),
+                "otel.kind" = "CLIENT",
+                "otel.status_code" = ::tracing::field::Empty,
+                "http.response.status_code" = ::tracing::field::Empty,
+            );
+
             if display_headers {
                 tracing::info!(http.request.headers = ?req.headers(), url.full = ?req.uri().to_string(), apollo.connector.name = %connector_name, "Request headers to REST endpoint {url:?}");
             }
             if display_body {
                 tracing::info!(http.request.body = ?req.body(), url.full = ?req.uri().to_string(), apollo.connector.name = %connector_name, "Request body to subgraph {url:?}");
             }
-            span.record("url.full", &url);
-            span.record("http.request.method", req.method().as_str());
-
-
-            let mut res = match client.request(req).await {
-                Ok(res) => {
-                    span.record(OTEL_STATUS_CODE, "Ok");
-                    span.record("http.response.status_code", res.status().as_u16());
-                    Ok(res)
-                }
-                e => {
-                    span.record(OTEL_STATUS_CODE, "Error");
-                    e
-                }
-            }?;
-
-            res.extensions_mut().insert(res_params);
-            Ok::<_, BoxError>(res)
+            connector_request_span.record("url.full", &url);
+            connector_request_span.record("http.request.method", req.method().as_str());
+            async {
+                let span = Span::current();
+                let mut res = match client.request(req).await {
+                    Ok(res) => {
+                        span.record(OTEL_STATUS_CODE, "Ok");
+                        span.record("http.response.status_code", res.status().as_u16());
+                        Ok(res)
+                    }
+                    e => {
+                        span.record(OTEL_STATUS_CODE, "Error");
+                        e
+                    }
+                }?;
+                res.extensions_mut().insert(res_params);
+                Ok::<_, BoxError>(res)
+            }
+            .instrument(connector_request_span)
         });
 
         let results = futures::future::try_join_all(tasks)
-            .instrument(http_request_span)
+            .instrument(connector_fetch_span)
             .await;
 
         let responses = match results {

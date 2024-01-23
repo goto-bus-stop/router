@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::sync::Arc;
 
 use apollo_compiler::ast::Selection as GraphQLSelection;
 use displaydoc::Display;
@@ -62,7 +62,7 @@ pub(super) struct HttpJsonTransport {
     pub(super) base_uri: url::Url,
     pub(super) method: http::Method,
     pub(super) headers: Vec<HttpHeader>,
-    pub(super) source_api_name: Cow<'static, str>,
+    pub(super) source_api_name: Arc<String>,
     pub(super) path_template: URLPathTemplate,
     pub(super) response_mapper: JSONSelection,
     pub(super) body_mapper: Option<JSONSelection>,
@@ -94,7 +94,7 @@ impl HttpJsonTransport {
             path_template: http.path_template.clone(),
             response_mapper: directive.selection.clone(),
             body_mapper: http.body.clone(),
-            source_api_name: Cow::from(api.name.clone()),
+            source_api_name: Arc::clone(&api.name),
         })
     }
 
@@ -122,7 +122,7 @@ impl HttpJsonTransport {
             path_template: http.path_template.clone(),
             response_mapper: directive.selection.clone(),
             body_mapper: http.body.clone(),
-            source_api_name: Cow::from(api.name.clone()),
+            source_api_name: Arc::clone(&api.name),
         })
     }
 
@@ -215,6 +215,7 @@ fn flatten_keys_recursive(
 }
 
 /// Append a path and query to a URI. Uses the path from base URI (but will discard the query).
+/// Expects the path to start with "/".
 fn append_path(base_uri: Url, path: &str) -> Result<Url, ConnectorDirectiveError> {
     // we will need to work on path segments, and on query parameters.
     // the first thing we need to do is parse the path so we have APIs to reason with both:

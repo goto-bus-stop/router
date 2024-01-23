@@ -95,6 +95,8 @@ impl URLPathTemplate {
 
     // Given a URLPathTemplate and an IndexMap of variables to be interpolated
     // into its {...} expressions, generate a new URL path String.
+    // Guaranteed to return a "/"-prefixed string to make appending to the
+    // base url easier.
     pub(super) fn generate_path(&self, vars: &JSON) -> Result<String, String> {
         let mut path = String::new();
         if let Some(var_map) = vars.as_object() {
@@ -127,7 +129,13 @@ impl URLPathTemplate {
             return Err(format!("Expected object, got {}", vars));
         }
 
-        Ok(path)
+        if path.is_empty() {
+            Ok("/".to_string())
+        } else if path.starts_with('/') {
+            Ok(path)
+        } else {
+            Ok(format!("/{}", path))
+        }
     }
 
     // Given a URLPathTemplate and a concrete URL path, extract any named/nested
@@ -935,6 +943,33 @@ mod tests {
                 "a.b.c": "value",
             })),
             Ok("/repositories/user/repo?testing=value".to_string()),
+        );
+    }
+
+    #[test]
+    fn test_generate_path_empty() {
+        assert_eq!(
+            URLPathTemplate::parse("")
+                .unwrap()
+                .generate_path(&json!({}))
+                .unwrap(),
+            "/".to_string()
+        );
+
+        assert_eq!(
+            URLPathTemplate::parse("/")
+                .unwrap()
+                .generate_path(&json!({}))
+                .unwrap(),
+            "/".to_string()
+        );
+
+        assert_eq!(
+            URLPathTemplate::parse("?foo=bar")
+                .unwrap()
+                .generate_path(&json!({}))
+                .unwrap(),
+            "/?foo=bar".to_string()
         );
     }
 

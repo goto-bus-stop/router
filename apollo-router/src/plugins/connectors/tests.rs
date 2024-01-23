@@ -1109,6 +1109,11 @@ async fn test_simple_header_propagation() {
               "kitchen-sink": {
                 "request": [
                   {
+                    "propagate": {
+                      "named": "x-client-header"
+                    }
+                  },
+                  {
                     "insert": {
                       "name": "x-api-key",
                       "value": "abcd1234"
@@ -1129,11 +1134,19 @@ async fn test_simple_header_propagation() {
                 .method("GET")
                 .path("/v1/hello")
                 .header("x-api-key".into(), "abcd1234".parse().unwrap())
+                .header(
+                    "x-client-header".into(),
+                    "client-header-value".parse().unwrap(),
+                )
                 .build(),
             Matcher::new()
                 .method("GET")
                 .path("/v1/hello/42")
                 .header("x-api-key".into(), "abcd1234".parse().unwrap())
+                .header(
+                    "x-client-header".into(),
+                    "client-header-value".parse().unwrap(),
+                )
                 .build(),
         ],
     );
@@ -1167,6 +1180,11 @@ async fn test_directive_header_propagation() {
             "subgraphs": {
               "kitchen-sink": {
                 "request": [
+                  {
+                    "propagate": {
+                      "named": "x-client-header"
+                    }
+                  },
                   {
                     "insert": {
                       "name": "x-propagate",
@@ -1206,7 +1224,11 @@ async fn test_directive_header_propagation() {
             Matcher::new()
                 .method("GET")
                 .path("/v1/hello/42")
-                // these are the passthrough headers because this connector uses the "a" api
+                // these are the passthrough headers because this connector uses the "a" api\
+                .header(
+                    "x-client-header".into(),
+                    "client-header-value".parse().unwrap(),
+                )
                 .header("x-propagate".into(), "propagated".parse().unwrap())
                 .header("x-rename".into(), "renamed".parse().unwrap())
                 .header("x-ignore".into(), "ignored".parse().unwrap())
@@ -1338,10 +1360,10 @@ async fn execute(uri: &str, query: &str, config: Option<serde_json::Value>) -> s
         "preview_connectors".to_string(),
         serde_json::json!({
           "subgraphs": {
-              "kitchen-sink": {
-                "a": {
-                  "override_url": connector_uri
-                },
+            "kitchen-sink": {
+              "a": {
+                "override_url": connector_uri
+              },
               "with_headers": {
                 "override_url": connector_uri
               }
@@ -1370,6 +1392,7 @@ async fn execute(uri: &str, query: &str, config: Option<serde_json::Value>) -> s
 
     let request = supergraph::Request::fake_builder()
         .query(query)
+        .header("x-client-header", "client-header-value")
         .build()
         .unwrap()
         .try_into()

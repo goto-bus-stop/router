@@ -4,6 +4,8 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Schema;
+use http::Method;
+use http::Uri;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tower::BoxError;
@@ -431,16 +433,28 @@ pub(super) async fn handle_responses(
     let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
 
     for response in responses {
-        if display_headers {
-            // TODO[igni]: it would be nice to keep the URL around for logging, maybe in extensions?
-            tracing::info!(http.response.headers = ?response.headers(), apollo.connector.name = %connector.name, "Response headers from REST endpoint");
-        }
         let (parts, body) = response.into_parts();
 
         let response_params = parts
             .extensions
             .get::<ResponseParams>()
             .ok_or_else(|| MissingResponseParams)?;
+
+        let url = parts
+            .extensions
+            .get::<Uri>()
+            .map(std::string::ToString::to_string)
+            .unwrap_or_else(|| "UNKNOWN".to_string());
+
+        let method = parts
+            .extensions
+            .get::<Method>()
+            .map(std::string::ToString::to_string)
+            .unwrap_or_else(|| "UNKNOWN".to_string());
+
+        if display_headers {
+            tracing::info!(http.response.headers = ?parts.headers, url.full = %url, method = %method, "Response headers received from REST endpoint");
+        }
 
         let api_name = Arc::clone(&response_params.source_api_name);
         u64_counter!(
@@ -456,8 +470,7 @@ pub(super) async fn handle_responses(
             .map_err(|_| InvalidResponseBody("couldn't retrieve http response body".into()))?;
 
         if display_body {
-            // TODO[igni]: it would be nice to keep the URL around for logging, maybe in extensions?
-            tracing::info!(http.response.body = ?String::from_utf8_lossy(body), apollo.connector.name = %connector.name, "Response body from REST endpoint");
+            tracing::info!(http.response.body = ?String::from_utf8_lossy(body), url.full = %url, method = %method, "Response body received from REST endpoint");
         }
 
         if parts.status.is_success() {

@@ -153,26 +153,29 @@ impl HTTPConnector {
             "connector.name" = %connector_name,
         );
 
-        let tasks = requests.into_iter().map(|(req, res_params)| {
-            let url = req.uri().to_string();
+        let tasks = requests.into_iter().map(|( req, res_params)| {
+            let url = req.uri().clone();
+            let method = req.method().clone();
+            let url_str = url.to_string();
+
             let connector_request_span = tracing::info_span!(
                 CONNECTOR_HTTP_REQUEST,
                 "connector.name" = %connector_name,
-                "url.full" = %url,
-                "http.request.method" = req.method().to_string(),
+                "url.full" = %url_str,
+                "http.request.method" = method.to_string(),
                 "otel.kind" = "CLIENT",
                 "otel.status_code" = ::tracing::field::Empty,
                 "http.response.status_code" = ::tracing::field::Empty,
             );
 
             if display_headers {
-                tracing::info!(http.request.headers = ?req.headers(), url.full = ?req.uri().to_string(), apollo.connector.name = %connector_name, "Request headers to REST endpoint {url:?}");
+                tracing::info!(http.request.headers = ?req.headers(), url.full = ?url_str, method = ?req.method().to_string(), "Request headers sent to REST endpoint");
             }
             if display_body {
-                tracing::info!(http.request.body = ?req.body(), url.full = ?req.uri().to_string(), apollo.connector.name = %connector_name, "Request body to subgraph {url:?}");
+                tracing::info!(http.request.body = ?req.body(), url.full = ?url_str, method = ?req.method().to_string(), "Request body sent to REST endpoint");
             }
-            connector_request_span.record("url.full", &url);
-            connector_request_span.record("http.request.method", req.method().as_str());
+            connector_request_span.record("url.full", &url_str);
+            connector_request_span.record("http.request.method", method.as_str());
             async {
                 let span = Span::current();
                 let mut res = match client.request(req).await {
@@ -186,7 +189,9 @@ impl HTTPConnector {
                         e
                     }
                 }?;
-                res.extensions_mut().insert(res_params);
+                let extensions = res.extensions_mut();
+                extensions.insert(res_params);  extensions.insert(url);
+                extensions.insert(method);
                 Ok::<_, BoxError>(res)
             }
             .instrument(connector_request_span)

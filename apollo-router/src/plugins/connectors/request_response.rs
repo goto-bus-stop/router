@@ -460,7 +460,7 @@ pub(super) async fn handle_responses(
                         .unwrap_or_else(|| "UNKNOWN".to_string()),
                 )
             })
-            .unwrap_or_else(|| (Default::default(), Default::default()));
+            .unwrap_or_default();
 
         if display_headers {
             tracing::info!(http.response.headers = ?parts.headers, url.full = %url, method = %method, "Response headers received from REST endpoint");

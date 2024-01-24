@@ -33,6 +33,7 @@ experimental_graphql_validation_mode: both
 rhai:
   # the scripts directory
   # is relative to the binary invocation directory
-  scripts: ./examples/connectors/rhai
-  main: main.rhai
-
+  # uncomment the following two lines if you would like to see
+  # verbose logs
+  # scripts: ./examples/connectors/rhai
+  # main: main.rhai

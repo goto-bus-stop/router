@@ -135,8 +135,14 @@ impl HTTPConnector {
         let client = self.client.clone();
         let document = request.subgraph_request.body().query.clone();
 
-        let display_body = request.context.contains_key(LOGGING_DISPLAY_BODY);
-        let display_headers = request.context.contains_key(LOGGING_DISPLAY_HEADERS);
+        let display_body = request
+            .context
+            .get(LOGGING_DISPLAY_BODY)
+            .unwrap_or_default();
+        let display_headers = request
+            .context
+            .get(LOGGING_DISPLAY_HEADERS)
+            .unwrap_or_default();
         let connector_name = connector.to_string();
 
         let requests =

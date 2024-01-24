@@ -429,8 +429,8 @@ pub(super) async fn handle_responses(
     let mut data = serde_json_bytes::Map::new();
     let mut errors = Vec::new();
 
-    let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
-    let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
+    let display_body = context.get(LOGGING_DISPLAY_BODY).unwrap_or_default();
+    let display_headers = context.get(LOGGING_DISPLAY_BODY).unwrap_or_default();
 
     for response in responses {
         let (parts, body) = response.into_parts();

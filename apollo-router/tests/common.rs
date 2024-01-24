@@ -96,8 +96,8 @@ pub enum Telemetry {
 #[buildstructor]
 impl IntegrationTest {
     #[builder]
-    pub async fn new(
-        config: &'static str,
+    pub async fn new<'a>(
+        config: &'a str,
         telemetry: Option<Telemetry>,
         responder: Option<ResponseTemplate>,
         collect_stdio: Option<tokio::sync::oneshot::Sender<String>>,
@@ -177,6 +177,17 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn start(&mut self) {
+        self.start_with_schema_path(PathBuf::from_iter([
+            "..",
+            "examples",
+            "graphql",
+            "local.graphql",
+        ]))
+        .await
+    }
+
+    #[allow(dead_code)]
+    pub async fn start_with_schema_path(&mut self, path: PathBuf) {
         let mut router = Command::new(&self.router_location);
         if let (Ok(apollo_key), Ok(apollo_graph_ref)) = (
             std::env::var("TEST_APOLLO_KEY"),
@@ -193,8 +204,7 @@ impl IntegrationTest {
                 "--config",
                 &self.test_config_location.to_string_lossy(),
                 "--supergraph",
-                &PathBuf::from_iter(["..", "examples", "graphql", "local.graphql"])
-                    .to_string_lossy(),
+                &path.to_string_lossy(),
                 "--log",
                 "error,apollo_router=info",
             ])

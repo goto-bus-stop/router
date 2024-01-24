@@ -1,0 +1,12 @@
+---
+source: apollo-router/tests/logging_test.rs
+expression: "result.json::<graphql::Response>().await.unwrap()"
+---
+{
+  "data": {
+    "serverNetworkInfo": {
+      "ip": "1.2.3.4",
+      "org": "AS12345 Orange S.A."
+    }
+  }
+}

@@ -1,9 +1,16 @@
+extern crate core;
+
+mod common;
+
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 
 use apollo_router::graphql;
 use apollo_router::services::router;
 use apollo_router::services::supergraph;
+use serde_json::json;
 use tower::ServiceExt;
 use tracing::field;
 use tracing::Level;
@@ -13,6 +20,8 @@ use tracing_core::dispatcher;
 use tracing_core::Dispatch;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Registry;
+
+use crate::common::IntegrationTest;
 
 struct TestLogSubscriber {
     registry: Registry,
@@ -190,4 +199,62 @@ async fn simple_query_should_display_logs_for_subgraph_and_supergraph() {
     assert_eq!(logging_count.subgraph_response_headers_count, 4);
     assert_eq!(logging_count.subgraph_request_headers_count, 4);
     assert_eq!(logging_count.subgraph_request_body_count, 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn display_headers_and_body_works_for_subgraph_and_source_api() {
+    if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
+        let rhai_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures");
+
+        let config = json! {{
+            "rhai": {
+                "scripts": rhai_path,
+                "main":"log_payload.rhai"
+            }
+        }};
+        let yaml = serde_yaml::to_string(&config).unwrap();
+
+        let mut router = IntegrationTest::builder()
+            .config(yaml.as_str())
+            .build()
+            .await;
+
+        router
+            .start_with_schema_path(PathBuf::from_iter([
+                "..",
+                "examples",
+                "connectors",
+                "supergraph.graphql",
+            ]))
+            .await;
+
+        // TODO: probably perf low hanging fruits in the way schemas are parsed / generated.
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        router.assert_started().await;
+
+        let result = router
+            .execute_query(
+                &json!({"query":"query Query { serverNetworkInfo { ip org } }","variables":{}}),
+            )
+            .await
+            .1;
+
+        insta::assert_json_snapshot!(result.json::<graphql::Response>().await.unwrap());
+
+        router
+            .assert_log_contains("Request headers sent to REST endpoint")
+            .await;
+        router
+            .assert_log_contains("Request body sent to REST endpoint")
+            .await;
+        router
+            .assert_log_contains("Response headers received from REST endpoint")
+            .await;
+        router
+            .assert_log_contains("Response body received from REST endpoint")
+            .await;
+        router.graceful_shutdown().await;
+    }
 }

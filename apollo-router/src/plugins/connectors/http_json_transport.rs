@@ -151,9 +151,13 @@ impl HttpJsonTransport {
             .body(body)
             .map_err(HttpJsonTransportError::InvalidNewRequest)?;
 
-        for (name, value) in
-            headers_to_add(original_request.subgraph_request.headers(), &self.headers)
-        {
+        for (name, value) in headers_to_add(
+            // headers propagated from the client appear here
+            original_request.supergraph_request.headers(),
+            // headers inserted in router config appear here
+            original_request.subgraph_request.headers(),
+            &self.headers,
+        ) {
             request.headers_mut().append(name, value.clone());
         }
 
@@ -276,12 +280,14 @@ fn append_path(base_uri: Url, path: &str) -> Result<Url, ConnectorDirectiveError
 }
 
 fn headers_to_add(
-    incoming_headers: &HeaderMap<HeaderValue>,
+    incoming_supergraph_headers: &HeaderMap<HeaderValue>,
+    incoming_subgraph_headers: &HeaderMap<HeaderValue>,
     config: &Vec<HttpHeader>,
 ) -> Vec<(HeaderName, HeaderValue)> {
     if config.is_empty() {
-        incoming_headers
+        incoming_supergraph_headers
             .iter()
+            .chain(incoming_subgraph_headers.iter())
             .filter(|(name, _)| !RESERVED_HEADERS.contains(name))
             .map(|(n, v)| (n.clone(), v.clone()))
             .collect()
@@ -291,7 +297,10 @@ fn headers_to_add(
             .flat_map(|rule| match rule {
                 HttpHeader::Propagate { name } => {
                     #[allow(clippy::manual_map)]
-                    match incoming_headers.get(name) {
+                    match incoming_supergraph_headers
+                        .get(name)
+                        .or(incoming_subgraph_headers.get(name))
+                    {
                         Some(value) => Some((name.clone(), value.clone())),
                         None => None, // TODO log?
                     }
@@ -302,7 +311,10 @@ fn headers_to_add(
                     new_name,
                 } => {
                     #[allow(clippy::manual_map)]
-                    match incoming_headers.get(original_name) {
+                    match incoming_supergraph_headers
+                        .get(original_name)
+                        .or(incoming_subgraph_headers.get(original_name))
+                    {
                         Some(value) => Some((new_name.clone(), value.clone())),
                         None => None, // TODO log?
                     }
@@ -435,7 +447,7 @@ mod tests {
 
     #[test]
     fn test_headers_to_add_no_directives() {
-        let incoming_headers: HeaderMap<HeaderValue> = vec![
+        let incoming_supergraph_headers: HeaderMap<HeaderValue> = vec![
             (
                 "x-propagate".parse().unwrap(),
                 "propagated".parse().unwrap(),
@@ -446,7 +458,13 @@ mod tests {
         .into_iter()
         .collect();
 
-        let results = headers_to_add(&incoming_headers, &vec![]);
+        let incoming_subgraph_headers: HeaderMap<HeaderValue> = vec![].into_iter().collect();
+
+        let results = headers_to_add(
+            &incoming_supergraph_headers,
+            &incoming_subgraph_headers,
+            &vec![],
+        );
         assert_eq!(
             results,
             vec![
@@ -462,7 +480,7 @@ mod tests {
 
     #[test]
     fn test_headers_to_add_with_config() {
-        let incoming_headers: HeaderMap<HeaderValue> = vec![
+        let incoming_supergraph_headers: HeaderMap<HeaderValue> = vec![
             (
                 "x-propagate".parse().unwrap(),
                 "propagated".parse().unwrap(),
@@ -472,6 +490,8 @@ mod tests {
         ]
         .into_iter()
         .collect();
+
+        let incoming_subgraph_headers: HeaderMap<HeaderValue> = vec![].into_iter().collect();
 
         let config = vec![
             HttpHeader::Propagate {
@@ -487,7 +507,11 @@ mod tests {
             },
         ];
 
-        let results = headers_to_add(&incoming_headers, &config);
+        let results = headers_to_add(
+            &incoming_supergraph_headers,
+            &incoming_subgraph_headers,
+            &config,
+        );
         assert_eq!(
             results,
             vec![

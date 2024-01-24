@@ -96,6 +96,13 @@ pub enum Telemetry {
 #[buildstructor]
 impl IntegrationTest {
     #[builder]
+    // A lifetime is required here because
+    // buildstructor will generate an IntegrationTestBuilder
+    // that contains config: Option<&str>
+    //
+    // while it's not necessary to declare an explicit lifetime in the `new` function,
+    // it becomes important for the builder structure.
+    #[allow(clippy::needless_lifetimes)]
     pub async fn new<'a>(
         config: &'a str,
         telemetry: Option<Telemetry>,

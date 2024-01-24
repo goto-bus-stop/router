@@ -446,17 +446,21 @@ pub(super) async fn handle_responses(
             .get::<ResponseParams>()
             .ok_or_else(|| MissingResponseParams)?;
 
-        let url = parts
-            .extensions
-            .get::<Uri>()
-            .map(std::string::ToString::to_string)
-            .unwrap_or_else(|| "UNKNOWN".to_string());
-
-        let method = parts
-            .extensions
-            .get::<Method>()
-            .map(std::string::ToString::to_string)
-            .unwrap_or_else(|| "UNKNOWN".to_string());
+        let (url, method) = (display_headers || display_body)
+            .then(|| {
+                let extensions = &parts.extensions;
+                (
+                    extensions
+                        .get::<Uri>()
+                        .map(std::string::ToString::to_string)
+                        .unwrap_or_else(|| "UNKNOWN".to_string()),
+                    extensions
+                        .get::<Method>()
+                        .map(std::string::ToString::to_string)
+                        .unwrap_or_else(|| "UNKNOWN".to_string()),
+                )
+            })
+            .unwrap_or_else(|| (Default::default(), Default::default()));
 
         if display_headers {
             tracing::info!(http.response.headers = ?parts.headers, url.full = %url, method = %method, "Response headers received from REST endpoint");

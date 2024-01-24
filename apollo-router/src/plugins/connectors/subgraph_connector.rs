@@ -138,10 +138,12 @@ impl HTTPConnector {
         let display_body = request
             .context
             .get(LOGGING_DISPLAY_BODY)
+            .unwrap_or_default()
             .unwrap_or_default();
         let display_headers = request
             .context
             .get(LOGGING_DISPLAY_HEADERS)
+            .unwrap_or_default()
             .unwrap_or_default();
         let connector_name = connector.to_string();
 

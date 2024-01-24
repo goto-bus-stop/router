@@ -1,10 +1,11 @@
-use std::borrow::Cow;
 use std::sync::Arc;
 
 use apollo_compiler::executable::Selection;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Schema;
+use http::Method;
+use http::Uri;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tower::BoxError;
@@ -18,6 +19,8 @@ use super::response_formatting::execute;
 use super::response_formatting::JsonMap;
 use super::Connector;
 use crate::json_ext::Object;
+use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
+use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::Context;
@@ -28,7 +31,7 @@ const ENTITIES: &str = "_entities";
 #[derive(Debug)]
 pub(crate) struct ResponseParams {
     key: ResponseKey,
-    source_api_name: Cow<'static, str>,
+    source_api_name: Arc<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -426,6 +429,15 @@ pub(super) async fn handle_responses(
     let mut data = serde_json_bytes::Map::new();
     let mut errors = Vec::new();
 
+    let display_body = context
+        .get(LOGGING_DISPLAY_BODY)
+        .unwrap_or_default()
+        .unwrap_or_default();
+    let display_headers = context
+        .get(LOGGING_DISPLAY_HEADERS)
+        .unwrap_or_default()
+        .unwrap_or_default();
+
     for response in responses {
         let (parts, body) = response.into_parts();
 
@@ -434,19 +446,45 @@ pub(super) async fn handle_responses(
             .get::<ResponseParams>()
             .ok_or_else(|| MissingResponseParams)?;
 
+        let (url, method) = (display_headers || display_body)
+            .then(|| {
+                let extensions = &parts.extensions;
+                (
+                    extensions
+                        .get::<Uri>()
+                        .map(std::string::ToString::to_string)
+                        .unwrap_or_else(|| "UNKNOWN".to_string()),
+                    extensions
+                        .get::<Method>()
+                        .map(std::string::ToString::to_string)
+                        .unwrap_or_else(|| "UNKNOWN".to_string()),
+                )
+            })
+            .unwrap_or_default();
+
+        if display_headers {
+            tracing::info!(http.response.headers = ?parts.headers, url.full = %url, method = %method, "Response headers received from REST endpoint");
+        }
+
+        let api_name = Arc::clone(&response_params.source_api_name);
         u64_counter!(
             "apollo.router.operations.source.rest",
             "rest source api calls",
             1,
-            rest.response.api = response_params.source_api_name.clone(),
+            rest.response.api = api_name.to_string(),
             rest.response.status_code = parts.status.as_u16() as i64
         );
 
+        let body = &hyper::body::to_bytes(body)
+            .await
+            .map_err(|_| InvalidResponseBody("couldn't retrieve http response body".into()))?;
+
+        if display_body {
+            tracing::info!(http.response.body = ?String::from_utf8_lossy(body), url.full = %url, method = %method, "Response body received from REST endpoint");
+        }
+
         if parts.status.is_success() {
-            let json_data: Value =
-                serde_json::from_slice(&hyper::body::to_bytes(body).await.map_err(|_| {
-                    InvalidResponseBody("couldn't retrieve http response body".into())
-                })?)
+            let json_data: Value = serde_json::from_slice(body)
                 .map_err(|_| InvalidResponseBody("couldn't deserialize response body".into()))?;
 
             let mut res_data = match connector.transport {
@@ -634,7 +672,6 @@ fn inject_typename(data: &mut Value, typename: &str, key_type_map: &Option<KeyTy
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Cow;
     use std::sync::Arc;
 
     use apollo_compiler::name;
@@ -919,7 +956,7 @@ mod tests {
 
         let api = SourceAPI {
             graph: "B".to_string(),
-            name: "API".to_string(),
+            name: Arc::new("API".to_string()),
             http: Some(HTTPSourceAPI {
                 base_url: "http://localhost/api".to_string(),
                 default: true,
@@ -1063,7 +1100,7 @@ mod tests {
 
         let api = SourceAPI {
             graph: "B".to_string(),
-            name: "API".to_string(),
+            name: Arc::new("API".to_string()),
             http: Some(HTTPSourceAPI {
                 base_url: "http://localhost/api".to_string(),
                 default: true,
@@ -1137,7 +1174,7 @@ mod tests {
     async fn handle_requests() {
         let api = SourceAPI {
             graph: "B".to_string(),
-            name: "API".to_string(),
+            name: Arc::new("API".to_string()),
             http: Some(HTTPSourceAPI {
                 base_url: "http://localhost/api".to_string(),
                 default: true,
@@ -1145,7 +1182,7 @@ mod tests {
             }),
         };
 
-        let source_api_name = "API";
+        let source_api_name = Arc::new("API".to_string());
 
         let directive = SourceField {
             graph: Arc::new("B".to_string()),
@@ -1176,7 +1213,7 @@ mod tests {
                     name: "hello".to_string(),
                     typename: super::ResponseTypeName::Concrete("String".to_string()),
                 },
-                source_api_name: Cow::from(source_api_name),
+                source_api_name: Arc::clone(&source_api_name),
             })
             .body(hyper::Body::from(r#"{"data":"world"}"#))
             .expect("response builder");
@@ -1187,7 +1224,7 @@ mod tests {
                     name: "hello2".to_string(),
                     typename: super::ResponseTypeName::Concrete("String".to_string()),
                 },
-                source_api_name: Cow::from(source_api_name),
+                source_api_name: Arc::clone(&source_api_name),
             })
             .body(hyper::Body::from(r#"{"data":"world"}"#))
             .expect("response builder");

@@ -345,7 +345,7 @@ impl Source {
 #[derive(Debug, Serialize, Clone)]
 pub(super) struct SourceAPI {
     pub(crate) graph: String,
-    pub(crate) name: String,
+    pub(crate) name: Arc<String>,
     pub(crate) http: Option<HTTPSourceAPI>,
 }
 
@@ -407,22 +407,23 @@ impl SourceAPI {
         directive_name: &str,
         args: &HashMap<Name, Node<apollo_compiler::ast::Value>>,
     ) -> Result<Self, ConnectorDirectiveError> {
-        let name = args
-            .get(&name!("name"))
-            .ok_or_else(|| {
-                ConnectorDirectiveError::MissingAttributeForType(
-                    "name".to_string(),
-                    directive_name.to_string(),
-                )
-            })?
-            .as_str()
-            .ok_or_else(|| {
-                ConnectorDirectiveError::MissingAttributeForType(
-                    "name".to_string(),
-                    directive_name.to_string(),
-                )
-            })?
-            .to_string();
+        let name = Arc::new(
+            args.get(&name!("name"))
+                .ok_or_else(|| {
+                    ConnectorDirectiveError::MissingAttributeForType(
+                        "name".to_string(),
+                        directive_name.to_string(),
+                    )
+                })?
+                .as_str()
+                .ok_or_else(|| {
+                    ConnectorDirectiveError::MissingAttributeForType(
+                        "name".to_string(),
+                        directive_name.to_string(),
+                    )
+                })?
+                .to_string(),
+        );
 
         let http = args
             .get(&name!("http"))

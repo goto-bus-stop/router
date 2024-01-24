@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Display;
@@ -58,7 +57,7 @@ pub(super) enum ConnectorTransport {
 }
 
 impl ConnectorTransport {
-    pub(super) fn source_api_name(&self) -> Cow<'static, str> {
+    pub(super) fn source_api_name(&self) -> Arc<String> {
         match self {
             Self::HttpJson(transport) => transport.source_api_name.clone(),
         }
@@ -222,7 +221,7 @@ mod tests {
 
         let api = SourceAPI {
             graph: "B".to_string(),
-            name: "API".to_string(),
+            name: Arc::new("API".to_string()),
             http: Some(HTTPSourceAPI {
                 base_url: "http://localhost/api".to_string(),
                 default: true,

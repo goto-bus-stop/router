@@ -655,7 +655,7 @@ impl FetchNode {
                 "replaced with operation(magic finder field={magic_finder_field:?}): {operation}"
             );
             match planner
-                .plan(operation, self.operation_name.clone())
+                .plan(operation, self.operation_name.clone(), Default::default())
                 .await
                 .map_err(QueryPlannerError::RouterBridgeError)?
                 .into_result()

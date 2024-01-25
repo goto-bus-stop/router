@@ -535,7 +535,11 @@ impl BridgeQueryPlanner {
 
         let planner_result = match self
             .planner
-            .plan(filtered_query.clone(), operation.clone())
+            .plan(
+                filtered_query.clone(),
+                operation.clone(),
+                Default::default(),
+            )
             .await
             .map_err(QueryPlannerError::RouterBridgeError)?
             .into_result()
@@ -657,7 +661,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
         } = req;
 
         let metadata = context
-            .private_entries
+            .extensions()
             .lock()
             .get::<CacheKeyMetadata>()
             .cloned()
@@ -666,7 +670,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
         let fut = async move {
             let start = Instant::now();
 
-            let mut doc = match context.private_entries.lock().get::<ParsedDocument>() {
+            let mut doc = match context.extensions().lock().get::<ParsedDocument>() {
                 None => return Err(QueryPlannerError::SpecError(SpecError::UnknownFileId)),
                 Some(d) => d.clone(),
             };
@@ -693,7 +697,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                         validation_errors: doc.validation_errors.clone(),
                     });
                     context
-                        .private_entries
+                        .extensions()
                         .lock()
                         .insert::<ParsedDocument>(doc.clone());
                 }
@@ -722,12 +726,12 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     match &e {
                         QueryPlannerError::PlanningErrors(pe) => {
                             context
-                                .private_entries
+                                .extensions()
                                 .lock()
                                 .insert(pe.usage_reporting.clone());
                         }
                         QueryPlannerError::SpecError(e) => {
-                            context.private_entries.lock().insert(UsageReporting {
+                            context.extensions().lock().insert(UsageReporting {
                                 stats_report_key: e.get_error_key().to_string(),
                                 referenced_fields_by_type: HashMap::new(),
                             });

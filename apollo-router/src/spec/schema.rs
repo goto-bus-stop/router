@@ -143,9 +143,7 @@ impl Schema {
             }
         }
 
-        let mut hasher = Sha256::new();
-        hasher.update(sdl.as_bytes());
-        let schema_id = Some(format!("{:x}", hasher.finalize()));
+        let schema_id = Some(Self::schema_id(sdl));
         tracing::info!(
             histogram.apollo.router.schema.load.duration = start.elapsed().as_secs_f64()
         );
@@ -166,6 +164,12 @@ impl Schema {
             subgraph_definition_and_names,
             source,
         })
+    }
+
+    pub(crate) fn schema_id(sdl: &str) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(sdl.as_bytes());
+        format!("{:x}", hasher.finalize())
     }
 
     pub(crate) fn create_api_schema(&self) -> String {

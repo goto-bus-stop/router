@@ -120,3 +120,56 @@ async fn display_headers_and_body_works_for_subgraph_and_source_api() {
         router.graceful_shutdown().await;
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn connector_response_diagnostic_logging() {
+    if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
+        let config = json!({});
+        let yaml = serde_yaml::to_string(&config).unwrap();
+
+        let mut router = IntegrationTest::builder()
+            .config(yaml.as_str())
+            .log_level("error,apollo_router=debug")
+            .build()
+            .await;
+
+        router
+            .start_with_schema_path(PathBuf::from_iter([
+                "..",
+                "examples",
+                "connectors",
+                "supergraph-with-issue.graphql",
+            ]))
+            .await;
+
+        // TODO: probably perf low hanging fruits in the way schemas are parsed / generated.
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        router.assert_started().await;
+
+        let result = router
+            .execute_query(
+                &json!({"query":"query Query { me { weather { temp } } }","variables":{}}),
+            )
+            .await
+            .1;
+
+        insta::assert_json_snapshot!(result.json::<graphql::Response>().await.unwrap(), @r###"
+        {
+          "data": {
+            "me": {
+              "weather": {
+                "temp": 298.48
+              }
+            }
+          }
+        }
+        "###);
+
+        router
+            .assert_log_contains("Response field notARealField not found")
+            .await;
+        router.graceful_shutdown().await;
+    } else {
+        println!("Skipping test, missing TEST_APOLLO_KEY and/or TEST_APOLLO_GRAPH_REF");
+    }
+}

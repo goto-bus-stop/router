@@ -29,6 +29,7 @@ use super::directives::SourceType;
 use super::join_spec_helpers::parameters_to_selection_set;
 use super::join_spec_helpers::selection_set_to_string;
 use super::selection_parser::ApplyTo;
+use super::selection_parser::ApplyToError;
 use super::selection_parser::Selection as JSONSelection;
 use super::url_path_parser::URLPathTemplate;
 use crate::error::ConnectorDirectiveError;
@@ -132,7 +133,7 @@ impl HttpJsonTransport {
         original_request: &SubgraphRequest,
     ) -> Result<http::Request<hyper::Body>, HttpJsonTransportError> {
         let body = if let Some(ref sel) = self.body_mapper {
-            let (body, _todo) = sel.apply_to(&inputs);
+            let (body, _) = sel.apply_to(&inputs);
             hyper::Body::from(
                 serde_json::to_vec(&body).map_err(HttpJsonTransportError::BodySerialization)?,
             )
@@ -173,8 +174,13 @@ impl HttpJsonTransport {
         append_path(self.base_uri.clone(), &path)
     }
 
-    pub(super) fn map_response(&self, response: Value) -> Result<Value, HttpJsonTransportError> {
-        let (mapped, _todo) = self.response_mapper.apply_to(&response);
+    pub(super) fn map_response(
+        &self,
+        response: Value,
+        diagnostics: &mut Vec<ApplyToError>,
+    ) -> Result<Value, HttpJsonTransportError> {
+        let (mapped, new_diagnostics) = self.response_mapper.apply_to(&response);
+        diagnostics.extend(new_diagnostics);
         Ok(mapped.unwrap_or(Value::Null))
     }
 
@@ -186,6 +192,10 @@ impl HttpJsonTransport {
         let selection_set = parameters_to_selection_set(&required);
         let selection_set_string = selection_set_to_string(&selection_set);
         (selection_set, selection_set_string)
+    }
+
+    pub(super) fn debug_name(&self) -> String {
+        format!("http: {{ {}: {} }}", self.method, self.path_template)
     }
 }
 

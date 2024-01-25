@@ -976,9 +976,7 @@ async fn basic_errors() {
 
     insta::assert_json_snapshot!(response, @r###"
     {
-      "data": {
-        "hello": null
-      },
+      "data": null,
       "errors": [
         {
           "message": "http error: 404 Not Found",

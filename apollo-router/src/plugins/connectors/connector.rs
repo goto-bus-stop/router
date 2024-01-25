@@ -62,6 +62,12 @@ impl ConnectorTransport {
             Self::HttpJson(transport) => transport.source_api_name.clone(),
         }
     }
+
+    pub(super) fn debug_name(&self) -> String {
+        match self {
+            Self::HttpJson(transport) => transport.debug_name().clone(),
+        }
+    }
 }
 
 /// The list of the subgraph names that should use the inner query planner
@@ -179,6 +185,48 @@ impl Connector {
     pub(crate) fn override_base_url(&mut self, url: url::Url) {
         match &mut self.transport {
             ConnectorTransport::HttpJson(transport) => transport.base_uri = url,
+        }
+    }
+
+    pub(super) fn schema_coordinate(&self) -> String {
+        match &self.kind {
+            ConnectorKind::RootField {
+                parent_type_name,
+                field_name,
+                ..
+            } => format!("{}.{}", parent_type_name, field_name),
+            ConnectorKind::Entity { type_name, .. } => type_name.to_string(),
+            ConnectorKind::EntityField {
+                type_name,
+                field_name,
+                ..
+            } => format!("{}.{}", type_name, field_name),
+        }
+    }
+
+    pub(super) fn debug_name(&self) -> String {
+        match &self.kind {
+            ConnectorKind::RootField { .. } => format!(
+                "[{}] {} @sourceField(api: {}, {})",
+                self.origin_subgraph,
+                self.schema_coordinate(),
+                self.api,
+                self.transport.debug_name(),
+            ),
+            ConnectorKind::Entity { .. } => format!(
+                "[{}] {} @sourceType(api: {}, {})",
+                self.origin_subgraph,
+                self.schema_coordinate(),
+                self.api,
+                self.transport.debug_name(),
+            ),
+            ConnectorKind::EntityField { .. } => format!(
+                "[{}] {} @sourceField(api: {}, {})",
+                self.origin_subgraph,
+                self.schema_coordinate(),
+                self.api,
+                self.transport.debug_name(),
+            ),
         }
     }
 }

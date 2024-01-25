@@ -2,6 +2,7 @@ use std::hash::Hash;
 use std::hash::Hasher;
 
 use indexmap::IndexSet;
+use itertools::Itertools;
 use nom::branch::alt;
 use nom::character::complete::char;
 use nom::character::complete::multispace0;
@@ -417,6 +418,21 @@ impl ApplyToError {
         }
         panic!("invalid ApplyToError JSON: {:?}", json);
     }
+
+    pub(super) fn message(&self) -> Option<&str> {
+        self.0
+            .as_object()
+            .and_then(|v| v.get("message"))
+            .and_then(|s| s.as_str())
+    }
+
+    pub(super) fn path(&self) -> Option<String> {
+        self.0
+            .as_object()
+            .and_then(|v| v.get("path"))
+            .and_then(|p| p.as_array())
+            .map(|l| l.iter().filter_map(|v| v.as_str()).join("."))
+    }
 }
 
 impl ApplyTo for Selection {
@@ -486,7 +502,7 @@ impl ApplyTo for NamedSelection {
                 }
             } else {
                 errors.insert(ApplyToError::new(
-                    format!("{:?} not found", name).as_str(),
+                    format!("Response field {} not found", name).as_str(),
                     input_path,
                 ));
             }
@@ -534,10 +550,20 @@ impl ApplyTo for PathSelection {
 
         match self {
             Self::Path(head, tail) => {
-                if !data.is_object() {
-                    errors.insert(ApplyToError::new("not an object", input_path));
-                    return None;
-                }
+                match data {
+                    JSON::Object(_) => {}
+                    _ => {
+                        errors.insert(ApplyToError::new(
+                            format!(
+                                "Expected an object in response, received {}",
+                                json_type_name(data)
+                            )
+                            .as_str(),
+                            input_path,
+                        ));
+                        return None;
+                    }
+                };
 
                 input_path.push(head.clone());
                 if let Some(child) = match head {
@@ -550,9 +576,9 @@ impl ApplyTo for PathSelection {
                     result
                 } else {
                     let message = match head {
-                        Property::Field(name) => format!("{:?} not found", name),
-                        Property::Quoted(name) => format!("{:?} not found", name),
-                        Property::Index(index) => format!("{:?} not found", index),
+                        Property::Field(name) => format!("Response field {} not found", name),
+                        Property::Quoted(name) => format!("Response field {} not found", name),
+                        Property::Index(index) => format!("Response field {} not found", index),
                     };
                     errors.insert(ApplyToError::new(message.as_str(), input_path));
                     input_path.pop();
@@ -584,7 +610,14 @@ impl ApplyTo for SubSelection {
             JSON::Array(array) => return self.apply_to_array(array, input_path, errors),
             JSON::Object(data_map) => data_map,
             _ => {
-                errors.insert(ApplyToError::new("not an object", input_path));
+                errors.insert(ApplyToError::new(
+                    format!(
+                        "Expected an object in response, received {}",
+                        json_type_name(data)
+                    )
+                    .as_str(),
+                    input_path,
+                ));
                 return None;
             }
         };
@@ -684,6 +717,17 @@ impl ApplyTo for SubSelection {
         };
 
         Some(JSON::Object(output))
+    }
+}
+
+fn json_type_name(v: &JSON) -> &str {
+    match v {
+        JSON::Array(_) => "array",
+        JSON::Object(_) => "object",
+        JSON::String(_) => "string",
+        JSON::Number(_) => "number",
+        JSON::Bool(_) => "boolean",
+        JSON::Null => "null",
     }
 }
 
@@ -1914,7 +1958,7 @@ mod tests {
             (
                 Some(json!({})),
                 vec![ApplyToError::from_json(&json!({
-                    "message": "\"yellow\" not found",
+                    "message": "Response field yellow not found",
                     "path": ["yellow"],
                 })),],
             )
@@ -1930,7 +1974,7 @@ mod tests {
             (
                 None,
                 vec![ApplyToError::from_json(&json!({
-                    "message": "\"yellow\" not found",
+                    "message": "Response field yellow not found",
                     "path": ["nested", "yellow"],
                 })),],
             )
@@ -1944,11 +1988,11 @@ mod tests {
                 })),
                 vec![
                     ApplyToError::from_json(&json!({
-                        "message": "\"hola\" not found",
+                        "message": "Response field hola not found",
                         "path": ["nested", "hola"],
                     })),
                     ApplyToError::from_json(&json!({
-                        "message": "\"yellow\" not found",
+                        "message": "Response field yellow not found",
                         "path": ["nested", "yellow"],
                     })),
                 ],
@@ -1967,11 +2011,11 @@ mod tests {
                 })),
                 vec![
                     ApplyToError::from_json(&json!({
-                        "message": "\"goodbye\" not found",
+                        "message": "Response field goodbye not found",
                         "path": ["array", 1, "goodbye"],
                     })),
                     ApplyToError::from_json(&json!({
-                        "message": "\"goodbye\" not found",
+                        "message": "Response field goodbye not found",
                         "path": ["array", 2, "goodbye"],
                     })),
                 ],
@@ -1995,11 +2039,11 @@ mod tests {
                 })),
                 vec![
                     ApplyToError::from_json(&json!({
-                        "message": "\"smello\" not found",
+                        "message": "Response field smello not found",
                         "path": ["array", 0, "smello"],
                     })),
                     ApplyToError::from_json(&json!({
-                        "message": "\"smello\" not found",
+                        "message": "Response field smello not found",
                         "path": ["array", 1, "smello"],
                     })),
                 ],
@@ -2018,11 +2062,11 @@ mod tests {
                 })),
                 vec![
                     ApplyToError::from_json(&json!({
-                        "message": "\"smello\" not found",
+                        "message": "Response field smello not found",
                         "path": ["array", 0, "smello"],
                     })),
                     ApplyToError::from_json(&json!({
-                        "message": "\"smello\" not found",
+                        "message": "Response field smello not found",
                         "path": ["array", 1, "smello"],
                     })),
                 ],
@@ -2039,7 +2083,7 @@ mod tests {
                     },
                 })),
                 vec![ApplyToError::from_json(&json!({
-                    "message": "\"smelly\" not found",
+                    "message": "Response field smelly not found",
                     "path": ["nested", "smelly"],
                 })),],
             )
@@ -2057,7 +2101,7 @@ mod tests {
                     },
                 })),
                 vec![ApplyToError::from_json(&json!({
-                    "message": "\"smelly\" not found",
+                    "message": "Response field smelly not found",
                     "path": ["nested", "smelly"],
                 })),],
             )
@@ -2097,11 +2141,11 @@ mod tests {
                 Some(json!([[0], [1, 1, 1], [2, 2], [], [null, 4, 4, null, 4],])),
                 vec![
                     ApplyToError::from_json(&json!({
-                        "message": "not an object",
+                        "message": "Expected an object in response, received null",
                         "path": ["arrayOfArrays", 4, 0],
                     })),
                     ApplyToError::from_json(&json!({
-                        "message": "not an object",
+                        "message": "Expected an object in response, received null",
                         "path": ["arrayOfArrays", 4, 3],
                     })),
                 ],
@@ -2120,15 +2164,15 @@ mod tests {
                 ])),
                 vec![
                     ApplyToError::from_json(&json!({
-                        "message": "not an object",
+                        "message": "Expected an object in response, received null",
                         "path": ["arrayOfArrays", 4, 0],
                     })),
                     ApplyToError::from_json(&json!({
-                        "message": "\"y\" not found",
+                        "message": "Response field y not found",
                         "path": ["arrayOfArrays", 4, 2, "y"],
                     })),
                     ApplyToError::from_json(&json!({
-                        "message": "not an object",
+                        "message": "Expected an object in response, received null",
                         "path": ["arrayOfArrays", 4, 3],
                     })),
                 ],
@@ -2164,15 +2208,15 @@ mod tests {
                 })),
                 vec![
                     ApplyToError::from_json(&json!({
-                        "message": "not an object",
+                        "message": "Expected an object in response, received null",
                         "path": ["arrayOfArrays", 4, 0],
                     })),
                     ApplyToError::from_json(&json!({
-                        "message": "\"y\" not found",
+                        "message": "Response field y not found",
                         "path": ["arrayOfArrays", 4, 2, "y"],
                     })),
                     ApplyToError::from_json(&json!({
-                        "message": "not an object",
+                        "message": "Expected an object in response, received null",
                         "path": ["arrayOfArrays", 4, 3],
                     })),
                 ],
@@ -2200,18 +2244,18 @@ mod tests {
                 })),
                 vec![
                     ApplyToError::from_json(&json!({
-                        "message": "not an object",
+                        "message": "Expected an object in response, received null",
                         "path": ["arrayOfArrays", 4, 0],
                     })),
                     ApplyToError::from_json(&json!({
-                        "message": "\"y\" not found",
+                        "message": "Response field y not found",
                         "path": ["arrayOfArrays", 4, 2, "y"],
                     })),
                     ApplyToError::from_json(&json!({
                         // Reversing the order of "path" and "message" here to make
                         // sure that doesn't affect the deduplication logic.
                         "path": ["arrayOfArrays", 4, 3],
-                        "message": "not an object",
+                        "message": "Expected an object in response, received null",
                     })),
                     // These errors have already been reported along different paths, above.
                     // ApplyToError::from_json(&json!({

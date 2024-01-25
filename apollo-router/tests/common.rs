@@ -61,6 +61,7 @@ pub struct IntegrationTest {
     collect_stdio: Option<(tokio::sync::oneshot::Sender<String>, regex::Regex)>,
     _subgraphs: wiremock::MockServer,
     subscriber: Option<Dispatch>,
+    log_level: String,
 }
 
 struct TracedResponder(pub(crate) ResponseTemplate);
@@ -108,6 +109,7 @@ impl IntegrationTest {
         telemetry: Option<Telemetry>,
         responder: Option<ResponseTemplate>,
         collect_stdio: Option<tokio::sync::oneshot::Sender<String>>,
+        log_level: Option<String>,
     ) -> Self {
         // Prevent multiple integration tests from running at the same time
         let lock = LOCK
@@ -175,6 +177,7 @@ impl IntegrationTest {
             collect_stdio,
             _subgraphs: subgraphs,
             subscriber,
+            log_level: log_level.unwrap_or("error,apollo_router=info".to_string()),
         }
     }
 
@@ -213,7 +216,7 @@ impl IntegrationTest {
                 "--supergraph",
                 &path.to_string_lossy(),
                 "--log",
-                "error,apollo_router=info",
+                self.log_level.as_str(),
             ])
             .stdout(Stdio::piped());
 

@@ -15,6 +15,8 @@ use tracing::Span;
 use super::configuration::SourceApiConfiguration;
 use super::request_response::handle_responses;
 use super::request_response::make_requests;
+use super::request_response::HandleResponseError;
+use super::request_response::MakeRequestError;
 use super::Connector;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
@@ -145,28 +147,22 @@ impl HTTPConnector {
             .get(LOGGING_DISPLAY_HEADERS)
             .unwrap_or_default()
             .unwrap_or_default();
-        let connector_name = connector.to_string();
-
-        let requests =
-            make_requests(request, &connector, schema.clone()).map_err(|e| -> BoxError {
-                format!(
-                    "Failed to create requests for connector `{}`: {}",
-                    connector.name, e
-                )
-                .into()
-            })?;
+        let connector_name = format!("{}", &connector);
 
         let connector_fetch_span = tracing::info_span!(
             CONNECTOR_FETCH,
             "connector.name" = %connector_name,
         );
 
-        let tasks = requests.into_iter().map(|( req, res_params)| {
+        let requests = make_requests(request, &connector, schema.clone())
+            .map_err(|e| make_requests_error(&connector, e))?;
+
+        let tasks = requests.into_iter().map(|(req, res_params)| {
             let url = req.uri().clone();
             let method = req.method().clone();
             let url_str = url.to_string();
 
-            let connector_request_span = tracing::info_span!(
+            let http_request_span = tracing::info_span!(
                 CONNECTOR_HTTP_REQUEST,
                 "connector.name" = %connector_name,
                 "url.full" = %url_str,
@@ -182,8 +178,7 @@ impl HTTPConnector {
             if display_body {
                 tracing::info!(http.request.body = ?req.body(), url.full = ?url_str, method = ?req.method().to_string(), "Request body sent to REST endpoint");
             }
-            connector_request_span.record("url.full", &url_str);
-            connector_request_span.record("http.request.method", method.as_str());
+
             async {
                 let span = Span::current();
                 let mut res = match client.request(req).await {
@@ -202,7 +197,7 @@ impl HTTPConnector {
                 extensions.insert(method);
                 Ok::<_, BoxError>(res)
             }
-            .instrument(connector_request_span)
+            .instrument(http_request_span)
         });
 
         let results = futures::future::try_join_all(tasks)
@@ -214,18 +209,40 @@ impl HTTPConnector {
             Err(e) => return Err(BoxError::from(e)),
         };
 
-        let subgraph_response = handle_responses(&schema, document, context, &connector, responses)
-            .await
-            .map_err(|e| -> BoxError {
-                format!(
-                    "Failed to map responses for connector `{}`: {}",
-                    connector.name, e
-                )
-                .into()
-            })?;
+        let mut response_diagnostics = Vec::new();
+        let subgraph_response = handle_responses(
+            &schema,
+            document,
+            context,
+            &connector,
+            responses,
+            &mut response_diagnostics,
+        )
+        .await
+        .map_err(|e| handle_responses_error(&connector, e))?;
+
+        for diagnostic in response_diagnostics {
+            diagnostic.log();
+        }
 
         Ok(subgraph_response)
     }
+}
+
+fn make_requests_error(connector: &Connector, err: MakeRequestError) -> BoxError {
+    format!(
+        "Failed to create requests for connector `{}`: {}",
+        connector, err
+    )
+    .into()
+}
+
+fn handle_responses_error(connector: &Connector, err: HandleResponseError) -> BoxError {
+    format!(
+        "Failed to map responses for connector `{}`: {}",
+        connector, err
+    )
+    .into()
 }
 
 #[cfg(test)]

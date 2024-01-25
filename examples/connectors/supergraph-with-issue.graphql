@@ -1,0 +1,138 @@
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  @link(
+    url: "https://specs.apollo.dev/source/v0.1"
+    import: ["@sourceAPI", "@sourceType", "@sourceField"]
+  )
+  @join__directive(
+    graphs: [NETWORK]
+    name: "sourceAPI"
+    args: {
+      name: "weather"
+      http: { baseURL: "https://weather.demo.starstuff.dev" }
+    }
+  ) {
+  query: Query
+}
+
+directive @join__schema(
+  graph: join__Graph
+  directives: join__FieldSet
+) repeatable on SCHEMA
+
+directive @join__directive(
+  graphs: [join__Graph!]
+  name: String!
+  args: join__DirectiveArguments
+) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+scalar join__DirectiveArguments
+  @specifiedBy(url: "http://just-to-avoid-valiadation-warnings")
+
+directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar join__FieldSet
+  @specifiedBy(url: "http://just-to-avoid-valiadation-warnings")
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(
+  graph: join__Graph
+  requires: join__FieldSet
+  provides: join__FieldSet
+  type: String
+  external: Boolean
+  override: String
+  usedOverridden: Boolean
+  directives: join__FieldSet
+) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(
+  graph: join__Graph!
+  interface: String!
+) repeatable on OBJECT | INTERFACE
+
+directive @join__type(
+  graph: join__Graph!
+  key: join__FieldSet
+  extension: Boolean! = false
+  resolvable: Boolean! = true
+  isInterfaceObject: Boolean! = false
+  directives: join__FieldSet
+) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(
+  graph: join__Graph!
+  member: String!
+) repeatable on UNION
+
+directive @link(
+  url: String
+  as: String
+  for: link__Purpose
+  import: [link__Import]
+) repeatable on SCHEMA
+
+scalar link__Import
+  @specifiedBy(url: "http://just-to-avoid-valiadation-warnings")
+
+enum join__Graph {
+  ACCOUNTS
+    @join__graph(name: "accounts", url: "https://accounts.demo.starstuff.dev")
+  NETWORK @join__graph(name: "network", url: "http://network-subgraph")
+}
+
+type Query @join__type(graph: ACCOUNTS) {
+  me: User @join__field(graph: ACCOUNTS)
+}
+
+type User
+  @join__type(graph: ACCOUNTS, key: "id")
+  @join__type(graph: NETWORK, key: "id") {
+  id: ID!
+  name: String @join__field(graph: ACCOUNTS)
+
+  # This selection has a minor issue that will trigger a debug log.
+  weather: Weather
+    @join__field(graph: NETWORK)
+    @join__directive(
+      graphs: [NETWORK]
+      name: "sourceField"
+      args: {
+        api: "weather"
+        http: { GET: "/data/2.5/weather" }
+        selection: """
+        temp: .main.temp
+        details: .weather {
+          name: main
+          notARealField
+        }
+        """
+      }
+    )
+}
+
+type Weather @join__type(graph: NETWORK) @join__type(graph: ACCOUNTS) {
+  temp: Float
+  details: [WeatherDetails]
+}
+
+type WeatherDetails @join__type(graph: NETWORK) @join__type(graph: ACCOUNTS) {
+  name: String
+  notARealField: Int
+}

@@ -6,6 +6,7 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Schema;
 use http::Method;
 use http::Uri;
+use itertools::Itertools;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tower::BoxError;
@@ -16,7 +17,9 @@ use super::directives::KeyTypeMap;
 use super::http_json_transport::HttpJsonTransportError;
 use super::request_inputs::RequestInputs;
 use super::response_formatting::execute;
+use super::response_formatting::response::FormattingDiagnostic;
 use super::response_formatting::JsonMap;
+use super::selection_parser::ApplyToError;
 use super::Connector;
 use crate::json_ext::Object;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
@@ -64,20 +67,15 @@ pub(super) fn make_requests(
     connector: &Connector,
     schema: Arc<Valid<Schema>>,
 ) -> Result<Vec<(http::Request<hyper::Body>, ResponseParams)>, MakeRequestError> {
-    match connector.kind {
-        ConnectorKind::RootField { .. } => {
-            let parts = root_fields(&request, schema)?;
-            Ok(request_params_to_requests(connector, parts, &request)?)
-        }
-        ConnectorKind::Entity { .. } => {
-            let parts = entities_from_request(&request, schema)?;
-            Ok(request_params_to_requests(connector, parts, &request)?)
-        }
+    let parts = match connector.kind {
+        ConnectorKind::RootField { .. } => root_fields(&request, schema)?,
+        ConnectorKind::Entity { .. } => entities_from_request(&request, schema)?,
         ConnectorKind::EntityField { .. } => {
-            let parts = entities_with_fields_from_request(&request, schema, connector)?;
-            Ok(request_params_to_requests(connector, parts, &request)?)
+            entities_with_fields_from_request(&request, schema, connector)?
         }
-    }
+    };
+
+    request_params_to_requests(connector, parts, &request)
 }
 
 fn request_params_to_requests(
@@ -104,6 +102,64 @@ fn request_params_to_requests(
             Ok((request, response_params))
         })
         .collect::<Result<Vec<_>, _>>()
+}
+
+// --- DIAGNOSTICS -------------------------------------------------------------
+
+#[derive(Debug)]
+pub(super) enum Diagnostic {
+    Response {
+        connector: String,
+        message: String,
+        path: String,
+    },
+}
+
+impl Diagnostic {
+    fn from_response_selection(connector: &Connector, err: ApplyToError) -> Self {
+        Self::Response {
+            connector: connector.debug_name(),
+            message: err
+                .message()
+                .unwrap_or("issue applying response selection")
+                .to_string(),
+            path: err.path().unwrap_or_default(),
+        }
+    }
+
+    fn from_response_formatting(connector: &Connector, err: FormattingDiagnostic) -> Self {
+        use super::response_formatting::response::ResponseDataPathElement::*;
+
+        Self::Response {
+            connector: connector.debug_name(),
+            message: err.message,
+            path: err
+                .path
+                .iter()
+                .map(|p| match p {
+                    Field(name) => name.as_str().to_string(),
+                    ListIndex(i) => format!("{}", i),
+                })
+                .join("."),
+        }
+    }
+
+    pub(super) fn log(&self) {
+        match self {
+            Diagnostic::Response {
+                connector,
+                message,
+                path,
+            } => {
+                tracing::debug!(
+                    connector = connector.as_str(),
+                    message = message.as_str(),
+                    path = path.as_str(),
+                    "connector response/selection mismatch"
+                );
+            }
+        }
+    }
 }
 
 // --- ERRORS ------------------------------------------------------------------
@@ -140,8 +196,8 @@ pub(super) enum HandleResponseError {
     /// Merge error: {0}
     MergeError(String),
 
-    /// ResponseFormattingError
-    ResponseFormattingError,
+    /// ResponseFormattingError: {0}
+    ResponseFormattingError(String),
 }
 
 // --- ROOT FIELDS -------------------------------------------------------------
@@ -415,16 +471,17 @@ pub(super) async fn handle_responses(
     context: Context,
     connector: &Connector,
     responses: Vec<http::Response<hyper::Body>>,
+    diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<SubgraphResponse, HandleResponseError> {
     use HandleResponseError::*;
 
     // If the query plan fetch used the "magic finder" field, we'll stick the
     // response data under that key so we can apply the GraphQL selection
     // set to handle aliases and type names.
-    let (document, magic_response_key) =
-        handle_magic_finder(document, connector, schema).map_err(|_| ResponseFormattingError)?;
+    let (document, magic_response_key) = handle_magic_finder(document, connector, schema)
+        .map_err(|e| ResponseFormattingError(e.to_string()))?;
     let original_magic_response_key = magic_response_key.clone();
-    let response_key = magic_response_key.unwrap_or(ENTITIES.into());
+    let entity_response_key = magic_response_key.unwrap_or(ENTITIES.into());
 
     let mut data = serde_json_bytes::Map::new();
     let mut errors = Vec::new();
@@ -488,9 +545,18 @@ pub(super) async fn handle_responses(
                 .map_err(|_| InvalidResponseBody("couldn't deserialize response body".into()))?;
 
             let mut res_data = match connector.transport {
-                ConnectorTransport::HttpJson(ref transport) => transport
-                    .map_response(json_data)
-                    .map_err(MapResponseError)?,
+                ConnectorTransport::HttpJson(ref transport) => {
+                    let mut selection_diagnostics = Vec::new();
+                    let res = transport
+                        .map_response(json_data, &mut selection_diagnostics)
+                        .map_err(MapResponseError)?;
+
+                    for diagnostic in selection_diagnostics {
+                        diagnostics
+                            .push(Diagnostic::from_response_selection(connector, diagnostic));
+                    }
+                    res
+                }
             };
 
             match response_params.key {
@@ -516,7 +582,7 @@ pub(super) async fn handle_responses(
                     }
 
                     let entities = data
-                        .entry(response_key.clone())
+                        .entry(entity_response_key.clone())
                         .or_insert(Value::Array(vec![]));
                     entities
                         .as_array_mut()
@@ -532,7 +598,7 @@ pub(super) async fn handle_responses(
                     ref typename,
                 } => {
                     let entities = data
-                        .entry(response_key.clone())
+                        .entry(entity_response_key.clone())
                         .or_insert(Value::Array(vec![]))
                         .as_array_mut()
                         .ok_or_else(|| MergeError("entities is not an array".into()))?;
@@ -565,19 +631,27 @@ pub(super) async fn handle_responses(
     }
 
     // Apply the GraphQL operation's selection set to the result to handle
-    // aliases and type names.
-    let mut data = format_response(schema, &document, data);
+    // aliases and type names. Don't bother formatting if the response is
+    // empty because that may produce confusing diagnostics.
+    let data = if !data.is_empty() {
+        let mut data = format_response(schema, &document, data, connector, diagnostics);
 
-    // Before we return the response, we ensure that the entity data is under
-    // the `_entities` key. The execution service knows how to merge that data
-    // correctly (it doesn't know anything about "magic finder" fields).
-    if let Some(response_key) = original_magic_response_key {
-        let entities = data.remove(&response_key).ok_or(ResponseFormattingError)?;
-        data.insert(ENTITIES, entities);
-    }
+        // Before we return the response, we ensure that the entity data is under
+        // the `_entities` key. The execution service knows how to merge that data
+        // correctly (it doesn't know anything about "magic finder" fields).
+        if let Some(response_key) = original_magic_response_key {
+            let entities = data.remove(&response_key).ok_or(ResponseFormattingError(
+                "could not handle _entities response key, this shouldn't happen".into(),
+            ))?;
+            data.insert(ENTITIES, entities);
+        }
+        Some(Value::Object(data))
+    } else {
+        None
+    };
 
     let response = SubgraphResponse::builder()
-        .data(Value::Object(data))
+        .and_data(data)
         .errors(errors)
         .context(context)
         // .headers(parts.headers)
@@ -624,13 +698,13 @@ fn format_response(
     schema: &Valid<Schema>,
     document: &Valid<ExecutableDocument>,
     data: JsonMap,
+    connector: &Connector,
+    diagnostics: &mut Vec<Diagnostic>,
 ) -> JsonMap {
-    let mut diagnostics = vec![];
-    let result = execute(schema, document, diagnostics.as_mut(), data);
-    if !diagnostics.is_empty() {
-        for diagnostic in diagnostics {
-            tracing::debug!("{:?}", diagnostic);
-        }
+    let mut new_diagnostics = vec![];
+    let result = execute(schema, document, new_diagnostics.as_mut(), data);
+    for diagnostic in new_diagnostics {
+        diagnostics.push(Diagnostic::from_response_formatting(connector, diagnostic));
     }
     result
 }
@@ -675,6 +749,7 @@ mod tests {
     use std::sync::Arc;
 
     use apollo_compiler::name;
+    use apollo_compiler::validation::Valid;
     use apollo_compiler::Schema;
     use insta::assert_debug_snapshot;
 
@@ -1245,6 +1320,7 @@ mod tests {
             Context::default(),
             &connector,
             vec![response1, response2],
+            Vec::new().as_mut(),
         )
         .await
         .unwrap();
@@ -1270,6 +1346,139 @@ mod tests {
             created_at: None,
             incremental: [],
         }
+        "###);
+    }
+
+    async fn handle_requests_helper(
+        schema: &Valid<Schema>,
+        operation: String,
+        selection: &str,
+        responses: Vec<http::Response<hyper::Body>>,
+    ) -> (crate::services::SubgraphResponse, Vec<super::Diagnostic>) {
+        let connector = Connector::new_from_source_field(
+            Arc::new("CONNECTOR_QUERY_FIELDB".to_string()),
+            &SourceAPI {
+                graph: "B".to_string(),
+                name: Arc::from("API".to_string()),
+                http: Some(HTTPSourceAPI {
+                    base_url: "http://localhost/api".to_string(),
+                    default: true,
+                    headers: vec![],
+                }),
+            },
+            SourceField {
+                graph: Arc::new("B".to_string()),
+                parent_type_name: name!("Query"),
+                field_name: name!("field"),
+                output_type_name: name!("String"),
+                api: "API".to_string(),
+                http: Some(HTTPSource {
+                    method: http::Method::GET,
+                    path_template: URLPathTemplate::parse("/path").unwrap(),
+                    body: None,
+                    headers: vec![],
+                }),
+                selection: JSONSelection::parse(selection).unwrap().1,
+                on_interface_object: false,
+            },
+        )
+        .unwrap();
+
+        let mut diagnostics = Vec::new();
+        let res = super::handle_responses(
+            schema,
+            Some(operation),
+            Context::default(),
+            &connector,
+            responses,
+            &mut diagnostics,
+        )
+        .await
+        .unwrap();
+
+        (res, diagnostics)
+    }
+
+    #[tokio::test]
+    async fn test_response_diagnostics() {
+        let (_, diagnostics) = handle_requests_helper(
+            &Schema::parse_and_validate(
+                "type Query { field: [T] }
+                type T { a: Int b: Int c: Int d: D f: Int i: Int j: Int }
+                type D { e: Int }",
+                "schema.graphql",
+            )
+            .unwrap(),
+            "query { field { a b c d { e } f i j } }".to_string(),
+            "a
+            b
+            c             # missing
+            d { e }       # wrong type
+            f             # wrong type
+            # h           # unused — TODO does not result in a diagnostic
+            i: .i.ii.iii  # missing
+            j: .j.jj.jjj  # wrong type",
+            vec![http::Response::builder()
+                .extension(super::ResponseParams {
+                    key: super::ResponseKey::RootField {
+                        name: "field".to_string(),
+                        typename: super::ResponseTypeName::Concrete("T".to_string()),
+                    },
+                    source_api_name: Arc::from("API".to_string()),
+                })
+                .body(hyper::Body::from(
+                    r#"[
+                        {"a": 1, "b": 2, "d": 4, "f": { "g": 7 }, "h": 8, "i": { "ii": { "iii": 9 } }, "j": { "jj": { "jjj": 10 } } },
+                        {"a": 1, "b": 2, "d": 4, "f": { "g": 7 }, "h": 8, "i": { "ii": { "xxx": 9 } }, "j": 10 }
+                    ]"#,
+                ))
+                .expect("response builder")],
+        )
+        .await;
+
+        assert_debug_snapshot!(diagnostics, @r###"
+        [
+            Response {
+                connector: "[B] Query.field @sourceField(api: API, http: { GET: /path })",
+                message: "Response field c not found",
+                path: "c",
+            },
+            Response {
+                connector: "[B] Query.field @sourceField(api: API, http: { GET: /path })",
+                message: "Expected an object in response, received number",
+                path: "d",
+            },
+            Response {
+                connector: "[B] Query.field @sourceField(api: API, http: { GET: /path })",
+                message: "Response field c not found",
+                path: "c",
+            },
+            Response {
+                connector: "[B] Query.field @sourceField(api: API, http: { GET: /path })",
+                message: "Expected an object in response, received number",
+                path: "d",
+            },
+            Response {
+                connector: "[B] Query.field @sourceField(api: API, http: { GET: /path })",
+                message: "Response field iii not found",
+                path: "i.ii.iii",
+            },
+            Response {
+                connector: "[B] Query.field @sourceField(api: API, http: { GET: /path })",
+                message: "Expected an object in response, received number",
+                path: "j",
+            },
+            Response {
+                connector: "[B] Query.field @sourceField(api: API, http: { GET: /path })",
+                message: "Type Int is not a composite type",
+                path: "field.0.f",
+            },
+            Response {
+                connector: "[B] Query.field @sourceField(api: API, http: { GET: /path })",
+                message: "Type Int is not a composite type",
+                path: "field.1.f",
+            },
+        ]
         "###);
     }
 }

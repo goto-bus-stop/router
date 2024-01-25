@@ -83,10 +83,7 @@ pub(super) fn execute_selection_set<'a>(
         // Indexing should not panic: `collect_fields` only creates a `Vec` to push to it
         let field_name = &fields[0].name;
         let Ok(field_def) = schema.type_field(object_type_name, field_name) else {
-            diagnostics.push(FormattingDiagnostic::for_path(
-                format!("Field '{}' not found", field_name),
-                path,
-            ));
+            // emitting a diagnostic here would be redundant with Selection::apply_to
             continue;
         };
         let value = if field_name == TYPENAME {
@@ -222,10 +219,7 @@ fn execute_field(
             fields,
         ),
         None => {
-            diagnostics.push(FormattingDiagnostic::for_path(
-                format!("Field '{}' not found", field.name),
-                path,
-            ));
+            // emitting a diagnostic here would be redundant with Selection::apply_to
             JsonValue::Null
         }
     };

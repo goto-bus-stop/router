@@ -1,8 +1,12 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::ast::Selection as GraphQLSelection;
 use displaydoc::Display;
+use http::header::ACCEPT;
+use http::header::ACCEPT_ENCODING;
 use http::header::CONNECTION;
+use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
 use http::header::HOST;
@@ -15,7 +19,6 @@ use http::header::UPGRADE;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
-use lazy_static::lazy_static;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use thiserror::Error;
@@ -36,27 +39,27 @@ use crate::error::ConnectorDirectiveError;
 use crate::services::SubgraphRequest;
 
 // Copied from plugins::headers
-lazy_static! {
-    // Headers from https://datatracker.ietf.org/doc/html/rfc2616#section-13.5.1
-    // These are not propagated by default using a regex match as they will not make sense for the
-    // second hop.
-    // In addition because our requests are not regular proxy requests content-type, content-length
-    // and host are also in the exclude list.
-    static ref RESERVED_HEADERS: Vec<HeaderName> = [
-        CONNECTION,
-        PROXY_AUTHENTICATE,
-        PROXY_AUTHORIZATION,
-        TE,
-        TRAILER,
-        TRANSFER_ENCODING,
-        UPGRADE,
-        CONTENT_LENGTH,
-        CONTENT_TYPE,
-        HOST,
-        HeaderName::from_static("keep-alive")
-    ]
-    .into();
-}
+// Headers from https://datatracker.ietf.org/doc/html/rfc2616#section-13.5.1
+// These are not propagated by default using a regex match as they will not make sense for the
+// second hop.
+// In addition because our requests are not regular proxy requests content-type, content-length
+// and host are also in the exclude list.
+static RESERVED_HEADERS: [HeaderName; 14] = [
+    CONNECTION,
+    PROXY_AUTHENTICATE,
+    PROXY_AUTHORIZATION,
+    TE,
+    TRAILER,
+    TRANSFER_ENCODING,
+    UPGRADE,
+    CONTENT_LENGTH,
+    CONTENT_TYPE,
+    CONTENT_ENCODING,
+    HOST,
+    ACCEPT,
+    ACCEPT_ENCODING,
+    HeaderName::from_static("keep-alive"),
+];
 
 #[derive(Clone, Debug)]
 pub(super) struct HttpJsonTransport {
@@ -67,6 +70,7 @@ pub(super) struct HttpJsonTransport {
     pub(super) path_template: URLPathTemplate,
     pub(super) response_mapper: JSONSelection,
     pub(super) body_mapper: Option<JSONSelection>,
+    reserved_headers: Arc<HashSet<&'static HeaderName>>,
 }
 
 impl HttpJsonTransport {
@@ -96,6 +100,7 @@ impl HttpJsonTransport {
             response_mapper: directive.selection.clone(),
             body_mapper: http.body.clone(),
             source_api_name: Arc::clone(&api.name),
+            reserved_headers: Arc::new(RESERVED_HEADERS.iter().collect()),
         })
     }
 
@@ -124,6 +129,7 @@ impl HttpJsonTransport {
             response_mapper: directive.selection.clone(),
             body_mapper: http.body.clone(),
             source_api_name: Arc::clone(&api.name),
+            reserved_headers: Arc::new(RESERVED_HEADERS.iter().collect()),
         })
     }
 
@@ -157,6 +163,7 @@ impl HttpJsonTransport {
             original_request.supergraph_request.headers(),
             // headers inserted in router config appear here
             original_request.subgraph_request.headers(),
+            self.reserved_headers.clone(),
             &self.headers,
         ) {
             request.headers_mut().append(name, value.clone());
@@ -292,13 +299,14 @@ fn append_path(base_uri: Url, path: &str) -> Result<Url, ConnectorDirectiveError
 fn headers_to_add(
     incoming_supergraph_headers: &HeaderMap<HeaderValue>,
     incoming_subgraph_headers: &HeaderMap<HeaderValue>,
+    reserved_headers: Arc<HashSet<&'static HeaderName>>,
     config: &Vec<HttpHeader>,
 ) -> Vec<(HeaderName, HeaderValue)> {
     if config.is_empty() {
         incoming_supergraph_headers
             .iter()
             .chain(incoming_subgraph_headers.iter())
-            .filter(|(name, _)| !RESERVED_HEADERS.contains(name))
+            .filter(|(name, _)| !reserved_headers.contains(name))
             .map(|(n, v)| (n.clone(), v.clone()))
             .collect()
     } else {
@@ -332,7 +340,7 @@ fn headers_to_add(
 
                 HttpHeader::Inject { name, value } => Some((name.clone(), value.clone())),
             })
-            .filter(|(name, _)| !RESERVED_HEADERS.contains(name))
+            .filter(|(name, _)| !reserved_headers.contains(name))
             .collect()
     }
 }
@@ -395,11 +403,15 @@ pub(crate) enum HttpJsonTransportError {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use http::header::CONTENT_ENCODING;
     use http::HeaderMap;
     use http::HeaderValue;
 
     use super::headers_to_add;
     use super::HttpHeader;
+    use super::RESERVED_HEADERS;
 
     #[test]
     fn append_path_test() {
@@ -464,6 +476,7 @@ mod tests {
             ),
             ("x-rename".parse().unwrap(), "renamed".parse().unwrap()),
             ("x-ignore".parse().unwrap(), "ignored".parse().unwrap()),
+            (CONTENT_ENCODING, "gzip".parse().unwrap()),
         ]
         .into_iter()
         .collect();
@@ -473,6 +486,7 @@ mod tests {
         let results = headers_to_add(
             &incoming_supergraph_headers,
             &incoming_subgraph_headers,
+            Arc::new(RESERVED_HEADERS.iter().collect()),
             &vec![],
         );
         assert_eq!(
@@ -497,6 +511,7 @@ mod tests {
             ),
             ("x-rename".parse().unwrap(), "renamed".parse().unwrap()),
             ("x-ignore".parse().unwrap(), "ignored".parse().unwrap()),
+            (CONTENT_ENCODING, "gzip".parse().unwrap()),
         ]
         .into_iter()
         .collect();
@@ -520,6 +535,7 @@ mod tests {
         let results = headers_to_add(
             &incoming_supergraph_headers,
             &incoming_subgraph_headers,
+            Arc::new(RESERVED_HEADERS.iter().collect()),
             &config,
         );
         assert_eq!(

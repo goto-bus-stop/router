@@ -20,6 +20,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::connectors::Connector;
 use crate::spec::Query;
 
 /// A planner key.
@@ -394,14 +395,21 @@ impl PlanNode {
     // generates a query plan for each connector fetch node in the main query plan
     pub(crate) fn generate_connector_plan<'a>(
         &'a mut self,
+        schema: &'a apollo_compiler::Schema,
         subgraph_planners: &'a HashMap<Arc<String>, Arc<Planner<QueryPlanResult>>>,
         connector_urls: &'a HashMap<Arc<String>, String>,
+        connectors: &'a Arc<HashMap<Arc<String>, Connector>>,
     ) -> future::BoxFuture<Result<(), QueryPlannerError>> {
         Box::pin(async move {
             match self {
                 PlanNode::Fetch(fetch_node) => {
                     if let Some((plan, magic_finder_field)) = fetch_node
-                        .generate_connector_plan(subgraph_planners, connector_urls)
+                        .generate_connector_plan(
+                            schema,
+                            subgraph_planners,
+                            connector_urls,
+                            connectors,
+                        )
                         .await?
                     {
                         // replace leaf with connector root
@@ -427,34 +435,59 @@ impl PlanNode {
                 }
                 PlanNode::Sequence { nodes, .. } => {
                     for node in nodes.iter_mut() {
-                        node.generate_connector_plan(subgraph_planners, connector_urls)
-                            .await?;
+                        node.generate_connector_plan(
+                            schema,
+                            subgraph_planners,
+                            connector_urls,
+                            connectors,
+                        )
+                        .await?;
                     }
                     Ok(())
                 }
                 PlanNode::Parallel { nodes } => {
                     for node in nodes.iter_mut() {
-                        node.generate_connector_plan(subgraph_planners, connector_urls)
-                            .await?;
+                        node.generate_connector_plan(
+                            schema,
+                            subgraph_planners,
+                            connector_urls,
+                            connectors,
+                        )
+                        .await?;
                     }
                     Ok(())
                 }
                 PlanNode::Flatten(flatten) => {
                     flatten
                         .node
-                        .generate_connector_plan(subgraph_planners, connector_urls)
+                        .generate_connector_plan(
+                            schema,
+                            subgraph_planners,
+                            connector_urls,
+                            connectors,
+                        )
                         .await
                 }
                 PlanNode::Defer { primary, deferred } => {
                     if let Some(node) = primary.node.as_mut() {
-                        node.generate_connector_plan(subgraph_planners, connector_urls)
-                            .await?;
+                        node.generate_connector_plan(
+                            schema,
+                            subgraph_planners,
+                            connector_urls,
+                            connectors,
+                        )
+                        .await?;
                     }
                     for deferred_node in deferred {
                         if let Some(node) = deferred_node.node.take() {
                             let mut new_node = (*node).clone();
                             new_node
-                                .generate_connector_plan(subgraph_planners, connector_urls)
+                                .generate_connector_plan(
+                                    schema,
+                                    subgraph_planners,
+                                    connector_urls,
+                                    connectors,
+                                )
                                 .await?;
                             deferred_node.node = Some(Arc::new(new_node));
                         }
@@ -463,8 +496,13 @@ impl PlanNode {
                 }
                 PlanNode::Subscription { primary: _, rest } => {
                     if let Some(node) = rest.as_mut() {
-                        node.generate_connector_plan(subgraph_planners, connector_urls)
-                            .await?;
+                        node.generate_connector_plan(
+                            schema,
+                            subgraph_planners,
+                            connector_urls,
+                            connectors,
+                        )
+                        .await?;
                     }
                     Ok(())
                 }
@@ -474,12 +512,22 @@ impl PlanNode {
                     else_clause,
                 } => {
                     if let Some(node) = if_clause.as_mut() {
-                        node.generate_connector_plan(subgraph_planners, connector_urls)
-                            .await?;
+                        node.generate_connector_plan(
+                            schema,
+                            subgraph_planners,
+                            connector_urls,
+                            connectors,
+                        )
+                        .await?;
                     }
                     if let Some(node) = else_clause.as_mut() {
-                        node.generate_connector_plan(subgraph_planners, connector_urls)
-                            .await?;
+                        node.generate_connector_plan(
+                            schema,
+                            subgraph_planners,
+                            connector_urls,
+                            connectors,
+                        )
+                        .await?;
                     }
                     Ok(())
                 }

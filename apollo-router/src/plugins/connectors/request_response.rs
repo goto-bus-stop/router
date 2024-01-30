@@ -478,8 +478,9 @@ pub(super) async fn handle_responses(
     // If the query plan fetch used the "magic finder" field, we'll stick the
     // response data under that key so we can apply the GraphQL selection
     // set to handle aliases and type names.
-    let (document, magic_response_key) = handle_magic_finder(document, connector, schema)
-        .map_err(|e| ResponseFormattingError(e.to_string()))?;
+    let (document, magic_response_key, result_uses_entities) =
+        handle_magic_finder(document, connector, schema)
+            .map_err(|e| ResponseFormattingError(e.to_string()))?;
     let original_magic_response_key = magic_response_key.clone();
     let entity_response_key = magic_response_key.unwrap_or(ENTITIES.into());
 
@@ -639,11 +640,13 @@ pub(super) async fn handle_responses(
         // Before we return the response, we ensure that the entity data is under
         // the `_entities` key. The execution service knows how to merge that data
         // correctly (it doesn't know anything about "magic finder" fields).
-        if let Some(response_key) = original_magic_response_key {
-            let entities = data.remove(&response_key).ok_or(ResponseFormattingError(
-                "could not handle _entities response key, this shouldn't happen".into(),
-            ))?;
-            data.insert(ENTITIES, entities);
+        if result_uses_entities {
+            if let Some(response_key) = original_magic_response_key.clone() {
+                let entities = data.remove(&response_key).ok_or(ResponseFormattingError(
+                    "could not handle _entities response key, this shouldn't happen".into(),
+                ))?;
+                data.insert(ENTITIES, entities);
+            }
         }
         Some(Value::Object(data))
     } else {
@@ -675,12 +678,14 @@ fn handle_magic_finder(
     document: Option<String>,
     connector: &Connector,
     schema: &Valid<Schema>,
-) -> Result<(Valid<ExecutableDocument>, Option<ByteString>), BoxError> {
+) -> Result<(Valid<ExecutableDocument>, Option<ByteString>, bool), BoxError> {
     let mut document = document.ok_or("missing document")?;
     let mut magic_response_key = None;
+    let mut result_uses_entities = false;
 
     if let Some(finder_field_name) = connector.finder_field_name() {
         if document.contains("_entities") {
+            result_uses_entities = true;
             document = document.replace("_entities", finder_field_name.as_str());
             magic_response_key = Some(finder_field_name);
         } else if document.contains(finder_field_name.as_str()) {
@@ -691,7 +696,7 @@ fn handle_magic_finder(
     let document = ExecutableDocument::parse_and_validate(schema, document, "document.graphql")
         .map_err(|_| "failed to parse document")?;
 
-    Ok((document, magic_response_key))
+    Ok((document, magic_response_key, result_uses_entities))
 }
 
 fn format_response(

@@ -33,6 +33,7 @@ use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::plugins::connectors::connector_subgraph_names;
+use crate::plugins::connectors::Connector;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
@@ -63,6 +64,7 @@ pub(crate) struct BridgeQueryPlanner {
     enable_authorization_directives: bool,
     subgraph_schemas: Arc<HashMap<String, Arc<Schema>>>,
     subgraph_planners: Arc<HashMap<Arc<String>, Arc<Planner<QueryPlanResult>>>>,
+    connectors: Option<Arc<HashMap<Arc<String>, Connector>>>,
     connector_urls: HashMap<Arc<String>, String>,
 }
 
@@ -199,6 +201,11 @@ impl BridgeQueryPlanner {
 
         let schema = Arc::new(schema.with_api_schema(api_schema));
 
+        let connectors = schema
+            .source
+            .as_ref()
+            .map(|source| source.connectors().clone());
+
         let (subgraph_planners, connector_urls) = if let Some(source) = &schema.source {
             let connector_supergraph = source.supergraph();
             let connectors = source.connectors();
@@ -277,6 +284,7 @@ impl BridgeQueryPlanner {
             configuration,
             subgraph_schemas: Arc::new(subgraph_schemas),
             subgraph_planners: Arc::new(subgraph_planners),
+            connectors,
             connector_urls,
         })
     }
@@ -321,6 +329,11 @@ impl BridgeQueryPlanner {
 
         let schema = Arc::new(Schema::parse(&schema, &configuration)?.with_api_schema(api_schema));
 
+        let connectors = schema
+            .source
+            .as_ref()
+            .map(|source| source.connectors().clone());
+
         let (subgraph_planners, connector_urls) = if let Some(source) = &schema.source {
             let connector_supergraph = source.supergraph();
             let connectors = source.connectors();
@@ -399,6 +412,7 @@ impl BridgeQueryPlanner {
             configuration,
             subgraph_schemas: Arc::new(subgraph_schemas),
             subgraph_planners: Arc::new(subgraph_planners),
+            connectors,
             connector_urls,
         })
     }
@@ -547,8 +561,13 @@ impl BridgeQueryPlanner {
             Ok(mut plan) => {
                 if let Some(node) = plan.data.query_plan.node.as_mut() {
                     node.extract_authorization_metadata(&self.schema.definitions, &key);
-                    node.generate_connector_plan(&self.subgraph_planners, &self.connector_urls)
-                        .await?;
+                    node.generate_connector_plan(
+                        &self.schema.definitions,
+                        &self.subgraph_planners,
+                        &self.connector_urls,
+                        &self.connectors.clone().unwrap_or_default(),
+                    )
+                    .await?;
                 }
                 tracing::debug!(
                     query = original_query,

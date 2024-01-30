@@ -205,7 +205,7 @@ impl TryFrom<&Node<apollo_compiler::ast::Value>> for DirectiveAsObject {
     }
 }
 
-// --- @sourceAPI --------------------------------------------------------------
+// --- Source wrapper struct ---------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub(crate) struct Source {
@@ -341,6 +341,8 @@ impl Source {
             .map_err(ConnectorSupergraphError::InvalidInnerSupergraph)
     }
 }
+
+// --- @sourceAPI --------------------------------------------------------------
 
 #[derive(Debug, Serialize, Clone)]
 pub(super) struct SourceAPI {

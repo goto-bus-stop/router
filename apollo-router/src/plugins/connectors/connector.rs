@@ -10,6 +10,7 @@ use super::directives::KeyTypeMap;
 use super::directives::SourceAPI;
 use super::directives::SourceField;
 use super::directives::SourceType;
+use super::finder_fields::finder_field_for_connector;
 use super::http_json_transport::HttpJsonTransport;
 use crate::error::ConnectorDirectiveError;
 
@@ -171,15 +172,7 @@ impl Connector {
     }
 
     pub(super) fn finder_field_name(&self) -> Option<serde_json_bytes::ByteString> {
-        match &self.kind {
-            ConnectorKind::RootField { .. } => None,
-            ConnectorKind::Entity { type_name, .. } => {
-                Some(format!("_{}_finder", type_name).into())
-            }
-            ConnectorKind::EntityField { type_name, .. } => {
-                Some(format!("_{}_finder", type_name).into())
-            }
-        }
+        finder_field_for_connector(self).map(|f| serde_json_bytes::ByteString::from(f.as_str()))
     }
 
     pub(crate) fn override_base_url(&mut self, url: url::Url) {

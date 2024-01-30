@@ -86,20 +86,23 @@ pub(super) fn make_changes(
             type_name,
             key,
             is_interface_object,
+            ..
         } => {
-            let mut changes = vec![
-                Change::Type {
-                    name: type_name.clone(),
-                    graph: Arc::clone(&graph),
-                    key: Some(key.clone()),
-                    is_interface_object: *is_interface_object,
-                    implements: None,
-                },
-                Change::MagicFinder {
+            let mut changes = vec![Change::Type {
+                name: type_name.clone(),
+                graph: Arc::clone(&graph),
+                key: Some(key.clone()),
+                is_interface_object: *is_interface_object,
+                implements: None,
+            }];
+
+            if let Some(finder_field) = connector.finder_field_name() {
+                changes.push(Change::MagicFinder {
                     type_name: type_name.clone(),
+                    field_name: Name::new_unchecked(finder_field.as_str().into()),
                     graph: Arc::clone(&graph),
-                },
-            ];
+                });
+            }
 
             changes.extend(recurse_selection(
                 origin_subgraph_name,
@@ -140,6 +143,7 @@ pub(super) fn make_changes(
             output_type_name,
             key,
             on_interface_object,
+            ..
         } => {
             let mut changes = vec![
                 Change::Type {
@@ -154,11 +158,15 @@ pub(super) fn make_changes(
                     field_name: field_name.clone(),
                     graph: Arc::clone(&graph),
                 },
-                Change::MagicFinder {
-                    type_name: type_name.clone(),
-                    graph: Arc::clone(&graph),
-                },
             ];
+
+            if let Some(finder_field) = connector.finder_field_name() {
+                changes.push(Change::MagicFinder {
+                    type_name: type_name.clone(),
+                    field_name: Name::new_unchecked(finder_field.as_str().into()),
+                    graph: Arc::clone(&graph),
+                });
+            }
 
             changes.extend(recurse_selection(
                 origin_subgraph_name,
@@ -228,7 +236,11 @@ pub(super) enum Change {
         graph: Arc<String>,
     },
     /// Add a special field to Query that we can use instead of `_entities`
-    MagicFinder { type_name: Name, graph: Arc<String> },
+    MagicFinder {
+        type_name: Name,
+        field_name: Name,
+        graph: Arc<String>,
+    },
     /// Add an enum value
     EnumValue {
         enum_name: Name,
@@ -284,7 +296,11 @@ impl Change {
                 add_input_join_field_directive(field, graph);
             }
 
-            Change::MagicFinder { type_name, graph } => {
+            Change::MagicFinder {
+                type_name,
+                graph,
+                field_name,
+            } => {
                 {
                     let arg_ty = add_type(schema, "_Any", make_any_scalar())?;
                     add_join_type_directive(arg_ty, graph, None, None);
@@ -293,12 +309,7 @@ impl Change {
                 let ty = upsert_type(original_schema, schema, "Query")?;
                 add_join_type_directive(ty, graph, None, None);
 
-                add_entities_field(
-                    ty,
-                    graph,
-                    format!("_{}_finder", type_name).as_str(),
-                    type_name,
-                );
+                add_entities_field(ty, graph, field_name, type_name);
             }
 
             Change::EnumValue {
@@ -968,22 +979,21 @@ mod tests {
         [
             "CONNECTOR_ENTITYACROSSBOTH_0",
             "CONNECTOR_ENTITYACROSSBOTH_E_0",
+            "CONNECTOR_ENTITYACROSSBOTH_F_1",
             "CONNECTOR_ENTITYINTERFACE_1",
             "CONNECTOR_HELLO_2",
-            "CONNECTOR_HELLO_RELATED_2",
-            "CONNECTOR_HELLO_WORLD_1",
-            "CONNECTOR_MUTATION_MUTATION_3",
-            "CONNECTOR_QUERY_HELLOS_6",
-            "CONNECTOR_QUERY_HELLOWITHHEADERS_7",
-            "CONNECTOR_QUERY_HELLO_5",
-            "CONNECTOR_QUERY_INTERFACES_8",
-            "CONNECTOR_QUERY_INTERNAL_DEPENDENCIES_10",
-            "CONNECTOR_QUERY_UNIONS_9",
-            "CONNECTOR_QUERY_WITHARGUMENTS_4",
+            "CONNECTOR_HELLO_RELATED_3",
+            "CONNECTOR_HELLO_WORLD_2",
+            "CONNECTOR_MUTATION_MUTATION_4",
+            "CONNECTOR_QUERY_HELLOS_7",
+            "CONNECTOR_QUERY_HELLOWITHHEADERS_8",
+            "CONNECTOR_QUERY_HELLO_6",
+            "CONNECTOR_QUERY_INTERFACES_9",
+            "CONNECTOR_QUERY_UNIONS_10",
+            "CONNECTOR_QUERY_WITHARGUMENTS_5",
             "CONNECTOR_TESTINGINTERFACEOBJECT_3",
             "CONNECTOR_TESTINGINTERFACEOBJECT_D_11",
-            "CONNECTOR_TESTINTERNALDEPENDENCY_C_12",
-            "CONNECTOR_TESTREQUIRES_SHIPPINGCOST_13",
+            "CONNECTOR_TESTREQUIRES_SHIPPINGCOST_12",
         ]
         "###
         );

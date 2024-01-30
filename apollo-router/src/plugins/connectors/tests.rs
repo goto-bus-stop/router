@@ -122,6 +122,14 @@ mod mock_api {
             })))
     }
 
+    pub(super) fn entity_f() -> Mock {
+        Mock::given(method("GET"))
+            .and(path_template("/v1/entity/{d}"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+              "data": "f"
+            })))
+    }
+
     pub(super) fn interface_object_id() -> Mock {
         Mock::given(method("GET"))
             .and(path_template("/v1/interface-object/{id}"))
@@ -224,6 +232,7 @@ mod mock_api {
             mutation(),
             entity(),
             entity_e(),
+            entity_f(),
             interface_object_id(),
             interface_object_id_d(),
             entity_interface_a(),
@@ -355,14 +364,6 @@ async fn test_root_field_plus_entity() {
     )
     .await;
 
-    req_asserts::matches(
-        &mock_server.received_requests().await.unwrap(),
-        vec![
-            Matcher::new().method("GET").path("/v1/hello").build(),
-            Matcher::new().method("GET").path("/v1/hello/42").build(),
-        ],
-    );
-
     insta::assert_json_snapshot!(response, @r###"
     {
       "data": {
@@ -374,6 +375,14 @@ async fn test_root_field_plus_entity() {
       }
     }
     "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new().method("GET").path("/v1/hello").build(),
+            Matcher::new().method("GET").path("/v1/hello/42").build(),
+        ],
+    );
 }
 
 #[tokio::test]
@@ -499,10 +508,11 @@ async fn test_entity_join() {
 
     // Query.startJoin from subgraph
     // @sourceType on EntityAcrossBoth
-    // @sourceField on EntityAcrossBoth.e
+    // @sourceField on EntityAcrossBoth.e (parallel)
+    // @sourceField on EntityAcrossBoth.f (sequence)
     let response = execute(
         &mock_server.uri(),
-        "query { startJoin { a b c d e } }",
+        "query { startJoin { a b c d e f } }",
         None,
     )
     .await;
@@ -522,6 +532,7 @@ async fn test_entity_join() {
                 .method("GET")
                 .path("/v1/entity/a/b/e")
                 .build(),
+            Matcher::new().method("GET").path("/v1/entity/d").build(),
         ],
     );
 
@@ -533,7 +544,8 @@ async fn test_entity_join() {
           "b": "b",
           "c": "c",
           "d": "d",
-          "e": "e"
+          "e": "e",
+          "f": "f"
         }
       }
     }
@@ -697,6 +709,29 @@ async fn test_interface_object() {
     )
     .await;
 
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "interfaceObject": [
+          {
+            "__typename": "IOa",
+            "id": "a-1",
+            "a": "a1",
+            "c": "c: 1",
+            "d": "d: 1"
+          },
+          {
+            "__typename": "IOb",
+            "id": "b-2",
+            "b": "b102",
+            "c": "c: 1",
+            "d": "d: 1"
+          }
+        ]
+      }
+    }
+    "###);
+
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
         vec![
@@ -725,29 +760,6 @@ async fn test_interface_object() {
                 .build(),
         ],
     );
-
-    insta::assert_json_snapshot!(response, @r###"
-    {
-      "data": {
-        "interfaceObject": [
-          {
-            "__typename": "IOa",
-            "id": "a-1",
-            "a": "a1",
-            "c": "c: 1",
-            "d": "d: 1"
-          },
-          {
-            "__typename": "IOb",
-            "id": "b-2",
-            "b": "b102",
-            "c": "c: 1",
-            "d": "d: 1"
-          }
-        ]
-      }
-    }
-    "###);
 }
 
 #[tokio::test]
@@ -1004,6 +1016,16 @@ async fn test_requires() {
     )
     .await;
 
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "requires": {
+          "shippingCost": 100
+        }
+      }
+    }
+    "###);
+
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
         vec![
@@ -1021,19 +1043,10 @@ async fn test_requires() {
                 .build(),
         ],
     );
-
-    insta::assert_json_snapshot!(response, @r###"
-    {
-      "data": {
-        "requires": {
-          "shippingCost": 100
-        }
-      }
-    }
-    "###);
 }
 
 #[tokio::test]
+#[ignore] // Composition doesn't currently allow adding a sourceField on a non-entity type.
 async fn test_internal_dependencies() {
     let mock_server = MockServer::start().await;
 
@@ -1291,6 +1304,8 @@ async fn test_request_deduping() {
         None,
     )
     .await;
+
+    assert_eq!(response.as_object().unwrap().get("errors"), None);
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),

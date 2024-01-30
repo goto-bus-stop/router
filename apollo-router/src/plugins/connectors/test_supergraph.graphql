@@ -1,6 +1,6 @@
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
-  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION)
   @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY)
   @join__directive(
     graphs: [KITCHEN_SINK]
@@ -41,7 +41,7 @@ directive @join__directive(
   graphs: [join__Graph!]
   name: String!
   args: join__DirectiveArguments
-) repeatable on SCHEMA | OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR | FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
 
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
@@ -53,6 +53,7 @@ directive @join__field(
   external: Boolean
   override: String
   usedOverridden: Boolean
+  overrideLabel: String
 ) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
@@ -123,6 +124,13 @@ type EntityAcrossBoth
       graphs: [KITCHEN_SINK]
       name: "sourceField"
       args: { api: "a", http: { GET: "/entity/{a}/{b}/e" }, selection: ".data" }
+    )
+  f: String
+    @join__field(graph: KITCHEN_SINK)
+    @join__directive(
+      graphs: [KITCHEN_SINK]
+      name: "sourceField"
+      args: { api: "a", http: { GET: "/entity/{d}" }, selection: ".data" }
     )
   c: String @join__field(graph: NORMAL)
 }
@@ -259,7 +267,7 @@ enum join__Graph {
 
 input KeyTypeMap @join__type(graph: KITCHEN_SINK) {
   key: String!
-  typeMap: source__JSON
+  typeMap: source__TypenameKeyMap
 }
 
 scalar link__Import
@@ -414,17 +422,6 @@ type Query @join__type(graph: KITCHEN_SINK) @join__type(graph: NORMAL) {
         selection: ".data { z y nested { x w } }"
       }
     )
-  internal_dependencies: TestInternalDependency
-    @join__field(graph: KITCHEN_SINK)
-    @join__directive(
-      graphs: [KITCHEN_SINK]
-      name: "sourceField"
-      args: {
-        api: "a"
-        http: { GET: "/internal_dependency" }
-        selection: ".data {\n  a\n  b\n}"
-      }
-    )
   fieldBackedByRealResolver: TypeWithResolver @join__field(graph: NORMAL)
   startJoin: EntityAcrossBoth @join__field(graph: NORMAL)
   interfaceObject: [TestingInterfaceObject] @join__field(graph: NORMAL)
@@ -437,9 +434,9 @@ type Related @join__type(graph: KITCHEN_SINK) {
   field: String
 }
 
-scalar source__JSON @join__type(graph: KITCHEN_SINK)
-
 scalar source__JSONSelection @join__type(graph: KITCHEN_SINK)
+
+scalar source__TypenameKeyMap @join__type(graph: KITCHEN_SINK)
 
 scalar source__URLPathTemplate @join__type(graph: KITCHEN_SINK)
 
@@ -483,21 +480,6 @@ union TestingUnion
   @join__unionMember(graph: KITCHEN_SINK, member: "UnionB") =
     UnionA
   | UnionB
-
-type TestInternalDependency @join__type(graph: KITCHEN_SINK) {
-  a: Int
-  b: Int
-  c: Int
-    @join__directive(
-      graphs: [KITCHEN_SINK]
-      name: "sourceField"
-      args: {
-        api: "a"
-        http: { GET: "/internal_dependency/c?a={a!}&b={b!}" }
-        selection: ".data"
-      }
-    )
-}
 
 type TestRequires
   @join__type(graph: KITCHEN_SINK, key: "id")

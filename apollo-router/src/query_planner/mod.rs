@@ -16,7 +16,7 @@ mod execution;
 pub(crate) mod fetch;
 mod plan;
 pub(crate) mod rewrites;
-mod selection;
+pub(crate) mod selection;
 pub(crate) mod subscription;
 pub use plan::*;
 mod labeler;

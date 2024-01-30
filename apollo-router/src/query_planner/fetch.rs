@@ -33,11 +33,12 @@ use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::connectors::finder_field_for_fetch_node;
+use crate::plugins::connectors::Connector;
 use crate::services::SubgraphRequest;
 use crate::spec::query::change::QueryHashVisitor;
 use crate::spec::query::traverse;
 use crate::spec::Schema;
-use crate::spec::SpecError;
 
 /// GraphQL operation type.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -565,7 +566,7 @@ impl FetchNode {
         };
 
         let path = Path::default();
-        let (value, errors) = connector_node
+        let (mut value, errors) = connector_node
             .execute_recursively(&subparameters, &path, data, sender)
             .instrument(tracing::info_span!(
                 "connector",
@@ -574,6 +575,20 @@ impl FetchNode {
                 "otel.kind" = "INTERNAL"
             ))
             .await;
+
+        let magic_finder = match self.protocol.as_ref() {
+            Protocol::RestWrapper(wrapper) => wrapper.magic_finder_field.as_ref(),
+            _ => None,
+        };
+
+        if let Some(magic_finder) = magic_finder {
+            let magic_finder = serde_json_bytes::ByteString::from(magic_finder.as_str());
+            if let Value::Object(ref mut obj) = value {
+                if let Some(v) = obj.remove(&magic_finder) {
+                    obj.insert("_entities", v);
+                }
+            }
+        }
 
         let response = graphql::Response::builder()
             .data(value)
@@ -635,8 +650,10 @@ impl FetchNode {
 
     pub(crate) async fn generate_connector_plan(
         &mut self,
+        schema: &apollo_compiler::Schema,
         subgraph_planners: &HashMap<Arc<String>, Arc<Planner<QueryPlanResult>>>,
         connector_urls: &HashMap<Arc<String>, String>,
+        connectors: &Arc<HashMap<Arc<String>, Connector>>,
     ) -> Result<Option<(PlanSuccess<QueryPlanResult>, Option<String>)>, QueryPlannerError> {
         if let Some(planner) = subgraph_planners.get(&self.service_name) {
             tracing::debug!(
@@ -645,11 +662,27 @@ impl FetchNode {
                 self.operation
             );
 
-            let (operation, magic_finder_field) =
-                match convert_entities_field_to_magic_finder(&self.operation)? {
-                    Some((op, magic)) => (op, Some(magic)),
-                    None => (self.operation.clone(), None),
-                };
+            let connectors_in_subgraph = connectors
+                .iter()
+                .filter_map(|(_, connector)| {
+                    if *connector.origin_subgraph == self.service_name {
+                        Some(connector)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let (operation, magic_finder_field) = if let Some(magic_finder_field) =
+                finder_field_for_fetch_node(schema, &connectors_in_subgraph, &self.requires)
+            {
+                (
+                    self.operation.replace("_entities", &magic_finder_field),
+                    Some(magic_finder_field),
+                )
+            } else {
+                (self.operation.clone(), None)
+            };
 
             tracing::debug!(
                 "replaced with operation(magic finder field={magic_finder_field:?}): {operation}"
@@ -665,7 +698,7 @@ impl FetchNode {
                         node.update_connector_plan(&self.service_name, connector_urls);
                     }
 
-                    return Ok(Some((plan, magic_finder_field)));
+                    return Ok(Some((plan, magic_finder_field.map(|s| s.to_string()))));
                 }
                 Err(err) => {
                     return Err(QueryPlannerError::from(err));
@@ -691,71 +724,4 @@ impl FetchNode {
             parent_service_name,
         }))
     }
-}
-
-fn convert_entities_field_to_magic_finder(
-    operation: &str,
-) -> Result<Option<(String, String)>, QueryPlannerError> {
-    if let Some(entities_field) = find_entities_field(operation)? {
-        let type_conditions = collect_type_conditions(&entities_field.selection_set);
-
-        let magic_finder_field = apollo_compiler::ast::Name::new(format!(
-            "_{}_finder",
-            type_conditions
-                .first()
-                .map(|s| (*s).to_string())
-                .unwrap_or_default()
-        ))
-        .map_err(|e| SpecError::ParsingError(e.to_string()))?;
-
-        let operation = operation.replace("_entities", &magic_finder_field);
-
-        Ok(Some((operation, magic_finder_field.to_string())))
-    } else {
-        Ok(None)
-    }
-}
-
-fn find_entities_field(
-    query: &str,
-) -> Result<Option<apollo_compiler::Node<apollo_compiler::ast::Field>>, QueryPlannerError> {
-    let doc = apollo_compiler::ast::Document::parse(query.to_owned(), "op.graphql")
-        .map_err(|e| SpecError::ParsingError(e.to_string()))?;
-
-    // Because this operation comes from the query planner, we can assume a single operation
-    let op = doc
-        .definitions
-        .iter()
-        .find_map(|def| match def {
-            apollo_compiler::ast::Definition::OperationDefinition(op) => Some(op),
-            _ => None,
-        })
-        .ok_or_else(|| SpecError::ParsingError("cannot find root operation".to_string()))?;
-
-    Ok(op
-        .selection_set
-        .first()
-        .and_then(|s| match s {
-            apollo_compiler::ast::Selection::Field(f) => {
-                if f.name == "_entities" {
-                    Some(f)
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        })
-        .cloned())
-}
-
-fn collect_type_conditions(
-    selection_set: &[apollo_compiler::ast::Selection],
-) -> Vec<&apollo_compiler::ast::Name> {
-    selection_set
-        .iter()
-        .filter_map(|s| match s {
-            apollo_compiler::ast::Selection::InlineFragment(f) => f.type_condition.as_ref(),
-            _ => None,
-        })
-        .collect()
 }

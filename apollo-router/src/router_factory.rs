@@ -33,6 +33,7 @@ use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
+use crate::services::http::HttpClientServiceFactory;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
@@ -394,14 +395,23 @@ pub(crate) fn create_subgraph_services(
 
     let mut subgraph_services = IndexMap::new();
     for (name, _) in schema.subgraphs() {
+        let http_service = crate::services::http::HttpClientService::from_config(
+            name,
+            configuration,
+            &tls_root_store,
+            shaping.enable_subgraph_http2(name),
+        )?;
+
+        let http_service_factory =
+            HttpClientServiceFactory::new(Arc::new(http_service), Arc::new(IndexMap::new()));
+
         let subgraph_service = shaping.subgraph_service_internal(
             name,
             SubgraphService::from_config(
                 name,
                 configuration,
-                &tls_root_store,
-                shaping.enable_subgraph_http2(name),
                 subscription_plugin_conf.clone(),
+                http_service_factory,
             )?,
         );
         subgraph_services.insert(name.clone(), subgraph_service);
@@ -655,7 +665,8 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("override_subgraph_url");
     add_optional_apollo_plugin!("authorization");
     add_optional_apollo_plugin!("authentication");
-    add_optional_apollo_plugin!("experimental_entity_cache");
+    add_optional_apollo_plugin!("preview_entity_cache");
+    add_mandatory_apollo_plugin!("progressive_override");
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
     add_optional_apollo_plugin!("rhai");

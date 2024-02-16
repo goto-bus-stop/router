@@ -374,6 +374,7 @@ impl SourceAPI {
             schema,
             SOURCE_DIRECTIVE_URL,
             SOURCE_API_DIRECTIVE_NAME,
+            "sourceAPI",
         )
         .unwrap_or_else(|| SOURCE_API_DIRECTIVE_NAME.to_string());
 
@@ -586,6 +587,7 @@ impl SourceType {
             schema,
             SOURCE_DIRECTIVE_URL,
             SOURCE_TYPE_DIRECTIVE_NAME,
+            "sourceType",
         )
         .unwrap_or_else(|| SOURCE_TYPE_DIRECTIVE_NAME.to_string());
 
@@ -796,6 +798,7 @@ impl SourceField {
             schema,
             SOURCE_DIRECTIVE_URL,
             SOURCE_FIELD_DIRECTIVE_NAME,
+            "sourceField",
         )
         .unwrap_or_else(|| SOURCE_FIELD_DIRECTIVE_NAME.to_string());
 

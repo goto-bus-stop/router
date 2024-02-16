@@ -27,6 +27,7 @@ use crate::json_ext::Object;
 pub(crate) const JOIN_DIRECTIVE_NAME: &str = "join__directive";
 pub(crate) const LINK_URL_ARGUMENT: &str = "url";
 pub(crate) const ARGS_ARGUMENT: &str = "args";
+pub(crate) const LINK_AS_ARGUMENT: &str = "as";
 
 /// GraphQL parsing errors.
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]

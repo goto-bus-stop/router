@@ -61,7 +61,8 @@ fn match_possible_type<'a>(
     match ty {
         ExtendedType::Interface(i) => {
             if let Some(possible_types) = impls.get(&i.name) {
-                let match_scores = rank_possible_choices(schema, possible_types, &field_names);
+                let match_scores =
+                    rank_possible_choices(schema, possible_types.iter(), &field_names);
                 return match_scores.first().map(|(_, name)| name.to_string());
             }
         }
@@ -73,7 +74,7 @@ fn match_possible_type<'a>(
                 .cloned()
                 .map(|c| c.name)
                 .collect::<HashSet<Name>>();
-            let match_scores = rank_possible_choices(schema, &possible_types, &field_names);
+            let match_scores = rank_possible_choices(schema, possible_types.iter(), &field_names);
             return match_scores.first().map(|(_, name)| name.to_string());
         }
 
@@ -84,11 +85,10 @@ fn match_possible_type<'a>(
 
 fn rank_possible_choices<'a>(
     schema: &'a Schema,
-    possible_types: &'a HashSet<Name>,
+    possible_types: impl Iterator<Item = &'a Name>,
     field_names: &'a HashSet<Name>,
 ) -> Vec<(i32, &'a Name)> {
     possible_types
-        .iter()
         .map(|name| {
             schema
                 .get_object(name)

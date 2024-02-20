@@ -1,6 +1,7 @@
 //! Router errors.
 use std::sync::Arc;
 
+use apollo_federation::error::FederationError;
 use displaydoc::Display;
 use lazy_static::__Deref;
 use router_bridge::introspect::IntrospectionError;
@@ -97,13 +98,6 @@ pub(crate) enum FetchError {
 
     /// could not find path: {reason}
     ExecutionPathNotFound { reason: String },
-    /// could not compress request: {reason}
-    CompressionError {
-        /// The service that failed.
-        service: String,
-        /// The reason the compression failed.
-        reason: String,
-    },
 }
 
 impl FetchError {
@@ -132,8 +126,7 @@ impl FetchError {
                 }
                 FetchError::SubrequestMalformedResponse { service, .. }
                 | FetchError::SubrequestUnexpectedPatchResponse { service }
-                | FetchError::SubrequestWsError { service, .. }
-                | FetchError::CompressionError { service, .. } => {
+                | FetchError::SubrequestWsError { service, .. } => {
                     extensions
                         .entry("service")
                         .or_insert_with(|| service.clone().into());
@@ -176,7 +169,6 @@ impl ErrorExtension for FetchError {
             FetchError::SubrequestHttpError { .. } => "SUBREQUEST_HTTP_ERROR",
             FetchError::SubrequestWsError { .. } => "SUBREQUEST_WEBSOCKET_ERROR",
             FetchError::ExecutionPathNotFound { .. } => "EXECUTION_PATH_NOT_FOUND",
-            FetchError::CompressionError { .. } => "COMPRESSION_ERROR",
             FetchError::MalformedRequest { .. } => "MALFORMED_REQUEST",
             FetchError::MalformedResponse { .. } => "MALFORMED_RESPONSE",
         }
@@ -222,6 +214,9 @@ pub(crate) enum ServiceBuildError {
     /// couldn't build Router Service: {0}
     QueryPlannerError(QueryPlannerError),
 
+    /// API schema generation failed: {0}
+    ApiSchemaError(FederationError),
+
     /// schema error: {0}
     Schema(SchemaError),
 
@@ -238,6 +233,12 @@ impl From<ConnectorDirectiveError> for ServiceBuildError {
 impl From<SchemaError> for ServiceBuildError {
     fn from(err: SchemaError) -> Self {
         ServiceBuildError::Schema(err)
+    }
+}
+
+impl From<FederationError> for ServiceBuildError {
+    fn from(err: FederationError) -> Self {
+        ServiceBuildError::ApiSchemaError(err)
     }
 }
 
@@ -614,7 +615,7 @@ impl IntoGraphQLErrors for ValidationErrors {
             .iter()
             .map(|diagnostic| {
                 Error::builder()
-                    .message(diagnostic.message().to_string())
+                    .message(diagnostic.error.to_string())
                     .locations(
                         diagnostic
                             .get_line_column()
@@ -640,15 +641,9 @@ impl std::fmt::Display for ValidationErrors {
                 f.write_str("\n")?;
             }
             if let Some(location) = error.get_line_column() {
-                write!(
-                    f,
-                    "[{}:{}] {}",
-                    location.line,
-                    location.column,
-                    error.message()
-                )?;
+                write!(f, "[{}:{}] {}", location.line, location.column, error.error)?;
             } else {
-                write!(f, "{}", error.message())?;
+                write!(f, "{}", error.error)?;
             }
         }
         Ok(())

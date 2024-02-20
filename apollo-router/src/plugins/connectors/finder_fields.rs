@@ -170,7 +170,10 @@ fn output_type_from_requires(schema: &Schema, requires: &[Selection]) -> Option<
             .implementers_map()
             .iter()
             .find_map(|(abstract_type, implementing_types)| {
-                if type_names.iter().all(|t| implementing_types.contains(t)) {
+                if type_names
+                    .iter()
+                    .all(|t| implementing_types.iter().contains(t))
+                {
                     Some(abstract_type.clone())
                 } else {
                     None

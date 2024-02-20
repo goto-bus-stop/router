@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/plugins/progressive_override/tests.rs
-assertion_line: 253
 expression: query_plan
 ---
 {
@@ -24,7 +23,8 @@ expression: query_plan
             "is_authenticated": false,
             "scopes": [],
             "policies": []
-          }
+          },
+          "protocol": "graphQL"
         }
       },
       "text": "QueryPlan {\n  Fetch(service: \"Subgraph2\") {\n    {\n      percent0 {\n        foo\n      }\n    }\n  },\n}"

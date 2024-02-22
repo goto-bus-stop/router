@@ -81,17 +81,16 @@ async fn display_headers_and_body_works_for_subgraph_and_source_api() {
 
         let mut router = IntegrationTest::builder()
             .config(yaml.as_str())
-            .build()
-            .await;
-
-        router
-            .start_with_schema_path(PathBuf::from_iter([
+            .supergraph(PathBuf::from_iter([
                 "..",
                 "examples",
                 "connectors",
                 "supergraph.graphql",
             ]))
+            .build()
             .await;
+
+        router.start().await;
 
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         router.assert_started().await;
@@ -129,18 +128,17 @@ async fn connector_response_diagnostic_logging() {
 
         let mut router = IntegrationTest::builder()
             .config(yaml.as_str())
-            .log_level("error,apollo_router=debug")
-            .build()
-            .await;
-
-        router
-            .start_with_schema_path(PathBuf::from_iter([
+            .supergraph(PathBuf::from_iter([
                 "..",
                 "examples",
                 "connectors",
                 "supergraph-with-issue.graphql",
             ]))
+            .log_level("error,apollo_router=debug")
+            .build()
             .await;
+
+        router.start().await;
 
         // TODO: probably perf low hanging fruits in the way schemas are parsed / generated.
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;

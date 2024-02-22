@@ -11,6 +11,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
 use tokio::task::JoinError;
+use tower::BoxError;
 
 pub(crate) use crate::configuration::ConfigurationError;
 pub(crate) use crate::graphql::Error;
@@ -211,7 +212,7 @@ impl From<QueryPlannerError> for CacheResolverError {
 /// Error types for service building.
 #[derive(Error, Debug, Display)]
 pub(crate) enum ServiceBuildError {
-    /// couldn't build Router Service: {0}
+    /// couldn't build Query Planner Service: {0}
     QueryPlannerError(QueryPlannerError),
 
     /// API schema generation failed: {0}
@@ -222,6 +223,9 @@ pub(crate) enum ServiceBuildError {
 
     /// subgraph instanciation error: {0}
     SubgraphConnector(ConnectorDirectiveError),
+
+    /// couldn't build Router service: {0}
+    ServiceError(BoxError),
 }
 
 impl From<ConnectorDirectiveError> for ServiceBuildError {
@@ -229,7 +233,6 @@ impl From<ConnectorDirectiveError> for ServiceBuildError {
         Self::SubgraphConnector(err)
     }
 }
-
 impl From<SchemaError> for ServiceBuildError {
     fn from(err: SchemaError) -> Self {
         ServiceBuildError::Schema(err)
@@ -251,6 +254,12 @@ impl From<Vec<PlannerError>> for ServiceBuildError {
 impl From<router_bridge::error::Error> for ServiceBuildError {
     fn from(error: router_bridge::error::Error) -> Self {
         ServiceBuildError::QueryPlannerError(error.into())
+    }
+}
+
+impl From<BoxError> for ServiceBuildError {
+    fn from(err: BoxError) -> Self {
+        ServiceBuildError::ServiceError(err)
     }
 }
 

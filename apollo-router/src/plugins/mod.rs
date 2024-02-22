@@ -33,6 +33,7 @@ pub(crate) mod connectors;
 mod coprocessor;
 pub(crate) mod csrf;
 mod expose_query_plan;
+pub(crate) mod file_uploads;
 mod forbid_mutations;
 mod headers;
 mod include_subgraph_errors;

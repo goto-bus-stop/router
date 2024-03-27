@@ -1,21 +1,22 @@
-
 schema
-  @core(feature: "https://specs.apollo.dev/core/v0.2"),
-  @core(feature: "https://specs.apollo.dev/join/v0.1", for: EXECUTION)
+  @link(feature: "https://specs.apollo.dev/link/v1.0")
+  @link(feature: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
 {
   query: Query
   mutation: Mutation
 }
 
-directive @core(as: String, feature: String!, for: core__Purpose) repeatable on SCHEMA
-
-directive @join__field(graph: join__Graph, provides: join__FieldSet, requires: join__FieldSet) on FIELD_DEFINITION
-
+directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-directive @join__owner(graph: join__Graph!) on INTERFACE | OBJECT
-
-directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on INTERFACE | OBJECT
+scalar link__Import
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
 
 type Mutation {
   createProduct(name: String, upc: ID!): Product @join__field(graph: PRODUCTS)

@@ -64,8 +64,8 @@ features = ["docs_rs"]
 askama = "0.12.1"
 access-json = "0.1.0"
 anyhow = "1.0.80"
-apollo-compiler = "=1.0.0-beta.13"
-apollo-federation = "=0.0.6"
+apollo-compiler = "=1.0.0-beta.16"
+apollo-federation = { git = "https://github.com/apollographql/federation-next", branch = "connectors" }
 arc-swap = "1.6.0"
 async-compression = { version = "0.4.6", features = [
     "tokio",
@@ -185,6 +185,7 @@ reqwest = { version = "0.11.24", default-features = false, features = [
     "json",
     "stream",
 ] }
+
 # note: this dependency should _always_ be pinned, prefix the version with an `=`
 router-bridge = "=0.5.16+v2.7.1"
 rust-embed = "8.2.0"

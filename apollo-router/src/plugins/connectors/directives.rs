@@ -12,14 +12,14 @@ use apollo_compiler::schema::Value;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
+use apollo_federation::sources::connect::Selection as JSONSelection;
+use apollo_federation::sources::connect::URLPathTemplate;
 use http::Method;
 use indexmap::IndexMap;
 use itertools::Itertools;
 use serde::Serialize;
-use apollo_federation::sources::connect::URLPathTemplate;
 
 use super::join_spec_helpers::*;
-use apollo_federation::sources::connect::Selection as JSONSelection;
 use super::supergraph::*;
 use super::Connector;
 use crate::error::ConnectorDirectiveError;

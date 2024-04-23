@@ -241,13 +241,13 @@ mod tests {
 
     use apollo_compiler::name;
     use apollo_compiler::Schema;
+    use apollo_federation::sources::connect::Selection as JSONSelection;
+    use apollo_federation::sources::connect::URLPathTemplate;
 
     use super::*;
     use crate::plugins::connectors::directives::HTTPSource;
     use crate::plugins::connectors::directives::HTTPSourceAPI;
     use crate::plugins::connectors::request_response::make_requests;
-    use apollo_federation::sources::connect::Selection as JSONSelection;
-    use apollo_federation::sources::connect::URLPathTemplate;
     use crate::services::subgraph;
 
     #[test]

@@ -4,6 +4,7 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Schema;
+use apollo_federation::sources::connect::ApplyToError;
 use http::Method;
 use http::Uri;
 use itertools::Itertools;
@@ -19,7 +20,6 @@ use super::request_inputs::RequestInputs;
 use super::response_formatting::execute;
 use super::response_formatting::response::FormattingDiagnostic;
 use super::response_formatting::JsonMap;
-use apollo_federation::sources::connect::ApplyToError;
 use super::Connector;
 use crate::json_ext::Object;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
@@ -756,6 +756,8 @@ mod tests {
     use apollo_compiler::name;
     use apollo_compiler::validation::Valid;
     use apollo_compiler::Schema;
+    use apollo_federation::sources::connect::Selection as JSONSelection;
+    use apollo_federation::sources::connect::URLPathTemplate;
     use insta::assert_debug_snapshot;
 
     use crate::plugins::connectors::connector::Connector;
@@ -763,8 +765,6 @@ mod tests {
     use crate::plugins::connectors::directives::HTTPSourceAPI;
     use crate::plugins::connectors::directives::SourceAPI;
     use crate::plugins::connectors::directives::SourceField;
-    use apollo_federation::sources::connect::Selection as JSONSelection;
-    use apollo_federation::sources::connect::URLPathTemplate;
     use crate::Context;
 
     #[test]

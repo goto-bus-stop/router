@@ -2,6 +2,9 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::ast::Selection as GraphQLSelection;
+use apollo_federation::sources::connect::ApplyTo;
+use apollo_federation::sources::connect::ApplyToError;
+use apollo_federation::sources::connect::Selection as JSONSelection;
 use apollo_federation::sources::connect::URLPathTemplate;
 use displaydoc::Display;
 use http::header::ACCEPT;
@@ -32,9 +35,6 @@ use super::directives::SourceField;
 use super::directives::SourceType;
 use super::join_spec_helpers::parameters_to_selection_set;
 use super::join_spec_helpers::selection_set_to_string;
-use apollo_federation::sources::connect::ApplyTo;
-use apollo_federation::sources::connect::ApplyToError;
-use apollo_federation::sources::connect::Selection as JSONSelection;
 use crate::error::ConnectorDirectiveError;
 use crate::services::SubgraphRequest;
 

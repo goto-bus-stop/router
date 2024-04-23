@@ -1,7 +1,7 @@
 #[cfg(all(target_os = "linux", target_arch = "x86_64", test))]
 mod test {
     use apollo_router::plugin::test::MockSubgraph;
-    use apollo_router::services::execution::QueryPlan;
+    use apollo_router::query_planner::plan::QueryPlan;
     use apollo_router::services::router;
     use apollo_router::services::supergraph;
     use apollo_router::Context;

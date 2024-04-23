@@ -221,6 +221,7 @@ dependencies = [
 [[package]]
 name = "apollo-federation"
 version = "0.0.11"
+source = "git+https://github.com/apollographql/federation-next?rev=82f2de2#82f2de26933b48bd017066191ab7d621c538b9d3"
 dependencies = [
  "apollo-compiler",
  "derive_more",

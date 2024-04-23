@@ -3,7 +3,8 @@ use std::fmt::Display;
 use std::mem;
 use std::sync::Arc;
 
-use apollo_compiler::ast::Document;
+use apollo_compiler::validation::Valid;
+use apollo_compiler::ExecutableDocument;
 use indexmap::IndexSet;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
@@ -37,7 +38,6 @@ use crate::plugins::connectors::finder_field_for_fetch_node;
 use crate::plugins::connectors::Connector;
 use crate::services::SubgraphRequest;
 use crate::spec::query::change::QueryHashVisitor;
-use crate::spec::query::traverse;
 use crate::spec::Schema;
 
 /// GraphQL operation type.
@@ -163,7 +163,7 @@ pub(crate) struct RestFetchNode {
     parent_service_name: String,
 }
 
-#[derive(Clone, Default, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Default, Hash, PartialEq, Eq, Deserialize, Serialize)]
 pub(crate) struct QueryHash(#[serde(with = "hex")] pub(crate) Vec<u8>);
 
 impl std::fmt::Debug for QueryHash {
@@ -171,6 +171,12 @@ impl std::fmt::Debug for QueryHash {
         f.debug_tuple("QueryHash")
             .field(&hex::encode(&self.0))
             .finish()
+    }
+}
+
+impl Display for QueryHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", hex::encode(&self.0))
     }
 }
 
@@ -627,14 +633,13 @@ impl FetchNode {
         &self.operation_kind
     }
 
-    pub(crate) fn hash_subquery(&mut self, schema: &apollo_compiler::Schema) {
-        let doc = Document::parse(&self.operation, "query.graphql")
+    pub(crate) fn hash_subquery(&mut self, schema: &Valid<apollo_compiler::Schema>) {
+        let doc = ExecutableDocument::parse(schema, &self.operation, "query.graphql")
             .expect("subgraph queries should be valid");
 
-        let mut visitor = QueryHashVisitor::new(schema, &doc);
-        visitor.subgraph_query = !self.requires.is_empty();
-        if traverse::document(&mut visitor, &doc).is_ok() {
-            self.schema_aware_hash = Arc::new(QueryHash(visitor.finish()));
+        if let Ok(hash) = QueryHashVisitor::hash_query(schema, &doc, self.operation_name.as_deref())
+        {
+            self.schema_aware_hash = Arc::new(QueryHash(hash));
         }
     }
 
@@ -643,11 +648,19 @@ impl FetchNode {
         schema: &apollo_compiler::Schema,
         global_authorisation_cache_key: &CacheKeyMetadata,
     ) {
-        let doc = Document::parse(&self.operation, "query.graphql")
-            // Assume query planing creates a valid document: ignore parse errors
-            .unwrap_or_else(|invalid| invalid.partial);
-        let subgraph_query_cache_key =
-            AuthorizationPlugin::generate_cache_metadata(&doc, schema, !self.requires.is_empty());
+        let doc = ExecutableDocument::parse(
+            Valid::assume_valid_ref(schema),
+            &self.operation,
+            "query.graphql",
+        )
+        // Assume query planing creates a valid document: ignore parse errors
+        .unwrap_or_else(|invalid| invalid.partial);
+        let subgraph_query_cache_key = AuthorizationPlugin::generate_cache_metadata(
+            &doc,
+            self.operation_name.as_deref(),
+            schema,
+            !self.requires.is_empty(),
+        );
 
         // we need to intersect the cache keys because the global key already takes into account
         // the scopes and policies from the client request

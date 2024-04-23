@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use http::header;
+use http::header::CACHE_CONTROL;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -15,6 +16,7 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
+use tracing::Instrument;
 use tracing::Level;
 
 use super::cache_control::CacheControl;
@@ -73,7 +75,8 @@ pub(crate) struct Config {
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct Subgraph {
-    /// expiration for all keys
+    /// expiration for all keys for this subgraph, unless overriden by the `Cache-Control` header in subgraph responses
+    #[serde(default)]
     pub(crate) ttl: Option<Ttl>,
 
     /// activates caching for this subgraph, overrides the global configuration
@@ -113,7 +116,10 @@ impl Plugin for EntityCache {
         Self: Sized,
     {
         let required_to_start = init.config.redis.required_to_start;
-        let storage = match RedisCacheStorage::new(init.config.redis).await {
+        // we need to explicitely disable TTL reset because it is managed directly by this plugin
+        let mut redis_config = init.config.redis.clone();
+        redis_config.reset_ttl = false;
+        let storage = match RedisCacheStorage::new(redis_config).await {
             Ok(storage) => Some(storage),
             Err(e) => {
                 tracing::error!(
@@ -128,6 +134,14 @@ impl Plugin for EntityCache {
             }
         };
 
+        if init.config.redis.ttl.is_none()
+            && init.config.subgraphs.values().any(|s| s.ttl.is_none())
+        {
+            return Err("a TTL must be configured for all subgraphs or globally"
+                .to_string()
+                .into());
+        }
+
         Ok(Self {
             storage,
             enabled: init.config.enabled,
@@ -139,9 +153,11 @@ impl Plugin for EntityCache {
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         ServiceBuilder::new()
             .map_response(|mut response: supergraph::Response| {
-                if let Some(cache_control) =
-                    response.context.extensions().lock().get::<CacheControl>()
-                {
+                if let Some(cache_control) = {
+                    let lock = response.context.extensions().lock();
+                    let cache_control = lock.get::<CacheControl>().cloned();
+                    cache_control
+                } {
                     let _ = cache_control.to_headers(response.response.headers_mut());
                 }
 
@@ -254,13 +270,23 @@ impl InnerCacheService {
             .contains_key(REPRESENTATIONS)
         {
             if request.operation_kind == OperationKind::Query {
-                match cache_lookup_root(self.name, self.storage.clone(), request).await? {
+                match cache_lookup_root(self.name, self.storage.clone(), request)
+                    .instrument(tracing::info_span!("cache_lookup"))
+                    .await?
+                {
                     ControlFlow::Break(response) => Ok(response),
                     ControlFlow::Continue((request, root_cache_key)) => {
                         let response = self.service.call(request).await?;
 
                         let cache_control =
-                            CacheControl::new(response.response.headers(), self.storage.ttl)?;
+                            if response.response.headers().contains_key(CACHE_CONTROL) {
+                                CacheControl::new(response.response.headers(), self.storage.ttl)?
+                            } else {
+                                let mut c = CacheControl::default();
+                                c.no_store = true;
+                                c
+                            };
+
                         update_cache_control(&response.context, &cache_control);
 
                         cache_store_root_from_response(
@@ -279,13 +305,21 @@ impl InnerCacheService {
                 self.service.call(request).await
             }
         } else {
-            match cache_lookup_entities(self.name, self.storage.clone(), request).await? {
+            match cache_lookup_entities(self.name, self.storage.clone(), request)
+                .instrument(tracing::info_span!("cache_lookup"))
+                .await?
+            {
                 ControlFlow::Break(response) => Ok(response),
                 ControlFlow::Continue((request, cache_result)) => {
                     let mut response = self.service.call(request).await?;
 
-                    let cache_control =
-                        CacheControl::new(response.response.headers(), self.storage.ttl)?;
+                    let cache_control = if response.response.headers().contains_key(CACHE_CONTROL) {
+                        CacheControl::new(response.response.headers(), self.storage.ttl)?
+                    } else {
+                        let mut c = CacheControl::default();
+                        c.no_store = true;
+                        c
+                    };
                     update_cache_control(&response.context, &cache_control);
 
                     cache_store_entities_from_response(
@@ -428,16 +462,21 @@ async fn cache_store_root_from_response(
             .or(subgraph_ttl);
 
         if response.response.body().errors.is_empty() && cache_control.should_store() {
-            cache
-                .insert(
-                    RedisKey(cache_key),
-                    RedisValue(CacheEntry {
-                        control: cache_control,
-                        data: data.clone(),
-                    }),
-                    ttl,
-                )
-                .await;
+            let span = tracing::info_span!("cache_store");
+            let data = data.clone();
+            tokio::spawn(async move {
+                cache
+                    .insert(
+                        RedisKey(cache_key),
+                        RedisValue(CacheEntry {
+                            control: cache_control,
+                            data,
+                        }),
+                        ttl,
+                    )
+                    .instrument(span)
+                    .await;
+            });
         }
     }
 
@@ -467,7 +506,7 @@ async fn cache_store_entities_from_response(
                     reason: "expected an array of entities".to_string(),
                 })?,
             &response.response.body().errors,
-            &cache,
+            cache,
             subgraph_ttl,
             cache_control,
             &mut result_from_cache,
@@ -719,7 +758,7 @@ fn filter_representations(
 async fn insert_entities_in_result(
     entities: &mut Vec<Value>,
     errors: &[Error],
-    cache: &RedisCacheStorage,
+    cache: RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
     cache_control: CacheControl,
     result: &mut Vec<IntermediateResult>,
@@ -801,7 +840,14 @@ async fn insert_entities_in_result(
     }
 
     if !to_insert.is_empty() {
-        cache.insert_multiple(&to_insert, ttl).await;
+        let span = tracing::info_span!("cache_store");
+
+        tokio::spawn(async move {
+            cache
+                .insert_multiple(&to_insert, ttl)
+                .instrument(span)
+                .await;
+        });
     }
 
     for (ty, nb) in inserted_types {

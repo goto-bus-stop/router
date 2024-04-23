@@ -27,7 +27,7 @@ use apollo_compiler::Schema;
 use itertools::Itertools;
 
 use super::Connector;
-use crate::query_planner::selection::Selection;
+use crate::query_planner::Selection;
 
 // --- finder fields for connectors --------------------------------------------
 

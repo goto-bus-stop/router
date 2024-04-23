@@ -2,23 +2,22 @@
 
 #![allow(missing_docs)] // FIXME
 
-//pub(crate) use bridge_query_planner::*;
-pub(crate) use bridge_query_planner::BridgeQueryPlanner;
-pub(crate) use bridge_query_planner::FilteredQuery;
-pub(crate) use bridge_query_planner::QueryPlanResult;
+pub(crate) use bridge_query_planner::*;
+pub(crate) use bridge_query_planner_pool::*;
 pub(crate) use caching_query_planner::*;
 
 pub use self::fetch::OperationKind;
-
+pub(crate) use self::selection::Selection;
 mod bridge_query_planner;
+mod bridge_query_planner_pool;
 mod caching_query_planner;
 mod execution;
 pub(crate) mod fetch;
-mod plan;
+pub(crate) mod plan;
 pub(crate) mod rewrites;
-pub(crate) mod selection;
+mod selection;
 pub(crate) mod subscription;
-pub use plan::*;
+pub(crate) use plan::*;
 mod labeler;
 
 pub(crate) const FETCH_SPAN_NAME: &str = "fetch";

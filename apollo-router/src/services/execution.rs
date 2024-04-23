@@ -18,7 +18,7 @@ pub type ServiceResult = Result<Response, BoxError>;
 
 // Reachable from Request
 use super::SubscriptionTaskParams;
-pub use crate::query_planner::QueryPlan;
+use crate::query_planner::QueryPlan;
 
 assert_impl_all!(Request: Send);
 #[non_exhaustive]

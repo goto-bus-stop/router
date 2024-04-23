@@ -342,6 +342,7 @@ mod tests {
         use crate::router_factory::RouterSuperServiceFactory;
         let router_creator = factory
             .create(
+                false,
                 Arc::new(
                     serde_json::from_value(serde_json::json!({
                         "include_subgraph_errors": { "all": true },

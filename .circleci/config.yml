@@ -24,20 +24,21 @@ executors:
       - image: cimg/base:stable
       - image: cimg/redis:7.2.4
       - image: jaegertracing/all-in-one:1.54.0
+      - image: openzipkin/zipkin:2.23.2
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
       RUST_TEST_THREADS: 6
   arm_linux_build: &arm_linux_build_executor
     machine:
-      image: ubuntu-2004:2022.04.1
+      image: ubuntu-2004:2024.01.1
     resource_class: arm.large
     environment:
       CARGO_BUILD_JOBS: 8
       RUST_TEST_THREADS: 8
   arm_linux_test: &arm_linux_test_executor
     machine:
-      image: ubuntu-2004:2022.04.1
+      image: ubuntu-2004:2024.01.1
     resource_class: arm.xlarge
     environment:
       CARGO_BUILD_JOBS: 8
@@ -237,7 +238,7 @@ commands:
             - run:
                 name: Install CMake
                 command: |
-                  choco install cmake -y
+                  choco install cmake.install -y
                   echo 'export PATH="/c/Program Files/CMake/bin:$PATH"' >> "$BASH_ENV"
                   exit $LASTEXITCODE
       - when:
@@ -593,7 +594,9 @@ jobs:
           platform: << parameters.platform >>
       - when:
           condition:
-            equal: [ *macos_build_executor, << parameters.platform >> ]
+            or:
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
+
           steps:
             - when:
                 condition:

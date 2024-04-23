@@ -28,7 +28,6 @@ include_subgraph_errors:
   all: true # Propagate errors from all subgraphs
 plugins:
   experimental.expose_query_plan: true
-experimental_graphql_validation_mode: both
 # useful for troubleshooting
 # uncomment the following lines if you would like to see
 # verbose logs

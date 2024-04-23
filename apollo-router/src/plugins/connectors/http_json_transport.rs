@@ -300,7 +300,7 @@ fn headers_to_add(
     incoming_supergraph_headers: &HeaderMap<HeaderValue>,
     incoming_subgraph_headers: &HeaderMap<HeaderValue>,
     reserved_headers: Arc<HashSet<&'static HeaderName>>,
-    config: &Vec<HttpHeader>,
+    config: &[HttpHeader],
 ) -> Vec<(HeaderName, HeaderValue)> {
     if config.is_empty() {
         incoming_supergraph_headers
@@ -487,7 +487,7 @@ mod tests {
             &incoming_supergraph_headers,
             &incoming_subgraph_headers,
             Arc::new(RESERVED_HEADERS.iter().collect()),
-            &vec![],
+            &[],
         );
         assert_eq!(
             results,

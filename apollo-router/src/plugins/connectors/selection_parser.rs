@@ -349,7 +349,7 @@ pub(crate) trait ApplyTo {
     // element of the array, producing a new array.
     fn apply_to_array(
         &self,
-        data_array: &Vec<JSON>,
+        data_array: &[JSON],
         input_path: &mut Vec<Property>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {

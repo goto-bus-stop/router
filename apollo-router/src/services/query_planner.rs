@@ -3,6 +3,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_compiler::validation::Valid;
+use apollo_compiler::Schema;
 use async_trait::async_trait;
 use derivative::Derivative;
 use serde::Deserialize;
@@ -12,7 +14,6 @@ use static_assertions::assert_impl_all;
 use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::query_planner::QueryPlan;
-use crate::spec::Schema;
 use crate::Context;
 
 assert_impl_all!(Request: Send);
@@ -83,7 +84,7 @@ pub(crate) enum QueryPlannerContent {
     Plan {
         plan: Arc<QueryPlan>,
         #[serde(skip)]
-        relevant_subgraph_schemas: Arc<HashMap<String, Arc<Schema>>>,
+        relevant_subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
     },
     Response {
         response: Box<graphql::Response>,

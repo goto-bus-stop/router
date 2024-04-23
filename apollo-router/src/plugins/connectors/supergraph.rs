@@ -948,7 +948,6 @@ mod tests {
 
     use crate::plugins::connectors::Source;
     use crate::spec::Schema as RouterSchema;
-    use crate::Configuration;
 
     const SCHEMA: &str = include_str!("./test_supergraph.graphql");
 
@@ -960,11 +959,7 @@ mod tests {
         let inner = source.supergraph();
 
         // new supergraph can be parsed into subgraphs
-        let result = RouterSchema::parse(
-            inner.serialize().to_string().as_str(),
-            &Configuration::fake_builder().build().unwrap(),
-        )
-        .unwrap();
+        let result = RouterSchema::parse(inner.serialize().to_string().as_str()).unwrap();
 
         assert_snapshot!(inner.serialize().to_string());
 

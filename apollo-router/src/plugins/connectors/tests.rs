@@ -1394,6 +1394,7 @@ async fn execute(uri: &str, query: &str, config: Option<serde_json::Value>) -> s
 
     let router_creator = factory
         .create(
+            false,
             Arc::new(serde_json::from_value(config).unwrap()),
             SCHEMA.to_string(),
             None,

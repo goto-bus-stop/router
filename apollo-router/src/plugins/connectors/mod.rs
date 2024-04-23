@@ -5,7 +5,6 @@ mod directives;
 mod finder_fields;
 pub(crate) use finder_fields::finder_field_for_fetch_node;
 mod join_spec_helpers;
-mod selection_parser;
 pub(crate) mod subgraph_connector;
 mod supergraph;
 pub(crate) use supergraph::ConnectorSupergraphError;
@@ -16,7 +15,6 @@ mod http_json_transport;
 mod request_inputs;
 mod request_response;
 mod response_formatting;
-mod url_path_parser;
 
 #[cfg(test)]
 mod tests;

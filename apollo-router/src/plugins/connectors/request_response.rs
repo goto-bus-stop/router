@@ -19,7 +19,7 @@ use super::request_inputs::RequestInputs;
 use super::response_formatting::execute;
 use super::response_formatting::response::FormattingDiagnostic;
 use super::response_formatting::JsonMap;
-use super::selection_parser::ApplyToError;
+use apollo_federation::sources::connect::ApplyToError;
 use super::Connector;
 use crate::json_ext::Object;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
@@ -763,8 +763,8 @@ mod tests {
     use crate::plugins::connectors::directives::HTTPSourceAPI;
     use crate::plugins::connectors::directives::SourceAPI;
     use crate::plugins::connectors::directives::SourceField;
-    use crate::plugins::connectors::selection_parser::Selection as JSONSelection;
-    use crate::plugins::connectors::url_path_parser::URLPathTemplate;
+    use apollo_federation::sources::connect::Selection as JSONSelection;
+    use apollo_federation::sources::connect::URLPathTemplate;
     use crate::Context;
 
     #[test]

@@ -246,8 +246,8 @@ mod tests {
     use crate::plugins::connectors::directives::HTTPSource;
     use crate::plugins::connectors::directives::HTTPSourceAPI;
     use crate::plugins::connectors::request_response::make_requests;
-    use crate::plugins::connectors::selection_parser::Selection as JSONSelection;
-    use crate::plugins::connectors::url_path_parser::URLPathTemplate;
+    use apollo_federation::sources::connect::Selection as JSONSelection;
+    use apollo_federation::sources::connect::URLPathTemplate;
     use crate::services::subgraph;
 
     #[test]

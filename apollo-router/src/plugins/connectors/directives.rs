@@ -16,11 +16,11 @@ use http::Method;
 use indexmap::IndexMap;
 use itertools::Itertools;
 use serde::Serialize;
+use apollo_federation::sources::connect::URLPathTemplate;
 
 use super::join_spec_helpers::*;
-use super::selection_parser::Selection as JSONSelection;
+use apollo_federation::sources::connect::Selection as JSONSelection;
 use super::supergraph::*;
-use super::url_path_parser::URLPathTemplate;
 use super::Connector;
 use crate::error::ConnectorDirectiveError;
 

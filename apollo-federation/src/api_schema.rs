@@ -4,16 +4,17 @@ use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::DirectiveLocation;
 use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::ty;
+use apollo_compiler::validation::Valid;
 use apollo_compiler::Node;
 
 use crate::error::FederationError;
 use crate::link::inaccessible_spec_definition::InaccessibleSpecDefinition;
 use crate::schema::position;
-use crate::schema::FederationSchema;
-use crate::schema::ValidFederationSchema;
+use crate::schema::ApiSchema;
+use crate::schema::SupergraphSchema;
 
 /// Remove types and directives imported by `@link`.
-fn remove_core_feature_elements(schema: &mut FederationSchema) -> Result<(), FederationError> {
+fn remove_core_feature_elements(schema: &mut ReferencerSchema) -> Result<(), FederationError> {
     let Some(metadata) = schema.metadata() else {
         return Ok(());
     };
@@ -123,11 +124,11 @@ pub struct ApiSchemaOptions {
 }
 
 pub fn to_api_schema(
-    schema: ValidFederationSchema,
+    schema: Valid<SupergraphSchema>,
     options: ApiSchemaOptions,
-) -> Result<ValidFederationSchema, FederationError> {
+) -> Result<ApiSchema, FederationError> {
     // Create a whole new federation schema that we can mutate.
-    let mut api_schema = FederationSchema::new(schema.schema().clone().into_inner())?;
+    let (mut api_schema, links) = schema.into_parts();
 
     // As we compute the API schema of a supergraph, we want to ignore explicit definitions of `@defer` and `@stream` because
     // those correspond to the merging of potential definitions from the subgraphs, but whether the supergraph API schema
@@ -139,14 +140,14 @@ pub fn to_api_schema(
         stream.remove(&mut api_schema)?;
     }
 
-    if let Some(inaccessible_spec) = InaccessibleSpecDefinition::get_from_schema(&api_schema)? {
+    if let Some(inaccessible_spec) = InaccessibleSpecDefinition::get_from_schema(&links)? {
         inaccessible_spec.validate_inaccessible(&api_schema)?;
         inaccessible_spec.remove_inaccessible_elements(&mut api_schema)?;
     }
 
     remove_core_feature_elements(&mut api_schema)?;
 
-    let schema = api_schema.schema_mut();
+    let mut schema = api_schema.into_inner();
 
     if options.include_defer {
         schema
@@ -160,9 +161,9 @@ pub fn to_api_schema(
             .insert(name!("stream"), stream_definition());
     }
 
-    crate::compat::make_print_schema_compatible(schema);
+    crate::compat::make_print_schema_compatible(&mut schema);
 
-    api_schema.validate()
+    Ok(ApiSchema::new(schema.validate()?))
 }
 
 fn defer_definition() -> Node<DirectiveDefinition> {

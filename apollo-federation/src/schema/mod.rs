@@ -1,3 +1,4 @@
+//! Schema types with federation-specific features.
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::ops::Deref;
@@ -8,7 +9,6 @@ use apollo_compiler::schema::Name;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
 use indexmap::IndexSet;
-use referencer::Referencers;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
@@ -24,6 +24,7 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
+use crate::schema::referencer::Referencers;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 
 pub(crate) mod argument_composition_strategies;
@@ -56,6 +57,75 @@ pub struct FederationSchema {
     /// This is only populated for valid subgraphs, and can only be accessed if you have a
     /// `ValidFederationSchema`.
     subgraph_metadata: Option<Box<SubgraphMetadata>>,
+}
+
+/// A GraphQL schema with reference tracking.
+// XXX(@goto-bus-stop): this should only be modified through using Position types,
+// or other methods that guarantee that the Referencers stay up to date. So, the
+// schema and referencers should not be accessed mutably outside this module.
+pub(crate) struct ReferencerSchema {
+    schema: Schema,
+    referencers: Referencers,
+}
+
+impl ReferencerSchema {
+    pub(crate) fn into_inner(self) -> Schema {
+        self.schema
+    }
+
+    pub(crate) fn get_directive_definition(
+        &self,
+        name: &Name,
+    ) -> Option<DirectiveDefinitionPosition> {
+        self.schema
+            .directive_definitions
+            .contains_key(name)
+            .then(|| DirectiveDefinitionPosition {
+                directive_name: name.clone(),
+            })
+    }
+}
+
+/// A GraphQL schema representing a subgraph.
+pub struct SubgraphSchema {
+    name: String,
+    url: String,
+    schema: ReferencerSchema,
+    links_metadata: Option<Box<LinksMetadata>>,
+    subgraph_metadata: Option<Box<SubgraphMetadata>>,
+}
+
+/// A GraphQL schema representing a supergraph.
+pub struct SupergraphSchema {
+    schema: ReferencerSchema,
+    links_metadata: Option<Box<LinksMetadata>>,
+}
+
+impl SupergraphSchema {
+    pub(crate) fn into_inner(self) -> ReferencerSchema {
+        self.schema
+    }
+
+    pub(crate) fn into_parts(self) -> (ReferencerSchema, Option<Box<LinksMetadata>>) {
+        (self.schema, self.links_metadata)
+    }
+}
+
+/// Represents an API schema.
+///
+/// API schemas are always known to be valid.
+pub struct ApiSchema {
+    schema: Valid<Schema>,
+}
+
+impl ApiSchema {
+    pub fn new(schema: Valid<Schema>) -> Self {
+        Self { schema }
+    }
+
+    pub fn schema(&self) -> &Valid<Schema> {
+        &self.schema
+    }
 }
 
 impl FederationSchema {
@@ -114,6 +184,8 @@ impl FederationSchema {
             })
     }
 
+    /// Returns the appropriate type position for a type name, or an error if the type does not
+    /// exist.
     pub(crate) fn get_type(
         &self,
         type_name: Name,
@@ -135,6 +207,7 @@ impl FederationSchema {
         })
     }
 
+    /// Returns the appropriate type position for a type name, or `None` if the type does not exist.
     pub(crate) fn try_get_type(&self, type_name: Name) -> Option<TypeDefinitionPosition> {
         self.get_type(type_name).ok()
     }

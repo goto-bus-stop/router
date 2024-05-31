@@ -1,16 +1,16 @@
 schema
-  @core(feature: "https://specs.apollo.dev/core/v0.2")
-  @core(feature: "https://specs.apollo.dev/join/v0.2", for: EXECUTION) {
+  @link(feature: "https://specs.apollo.dev/link/v1.0")
+  @link(feature: "https://specs.apollo.dev/join/v0.2", for: EXECUTION) {
   query: Query
 }
 
 directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
 directive @include(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
 
-directive @core(
+directive @link(
   feature: String!
   as: String
-  for: core__Purpose
+  for: link__Purpose
 ) repeatable on SCHEMA
 
 directive @join__field(
@@ -35,7 +35,7 @@ directive @join__type(
   resolvable: Boolean! = true
 ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
 
-enum core__Purpose {
+enum link__Purpose {
   """
   `SECURITY` features provide metadata necessary to securely resolve fields.
   """

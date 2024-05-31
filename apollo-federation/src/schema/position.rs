@@ -1162,7 +1162,7 @@ impl SchemaDefinitionPosition {
             self.insert_directive_name_references(referencers, &directive_reference.name)?;
         }
         for root_kind in SchemaRootDefinitionKind::iter() {
-            let child = SchemaRootDefinitionPosition { root_kind };
+            let child = SchemaRootDefinitionPosition::new(root_kind);
             match root_kind {
                 SchemaRootDefinitionKind::Query => {
                     if let Some(root_type) = &schema_definition.query {
@@ -1262,6 +1262,17 @@ pub(crate) struct SchemaRootDefinitionPosition {
 }
 
 impl SchemaRootDefinitionPosition {
+    pub const QUERY: SchemaRootDefinitionPosition =
+        SchemaRootDefinitionPosition::new(SchemaRootDefinitionKind::Query);
+    pub const MUTATION: SchemaRootDefinitionPosition =
+        SchemaRootDefinitionPosition::new(SchemaRootDefinitionKind::Mutation);
+    pub const SUBSCRIPTION: SchemaRootDefinitionPosition =
+        SchemaRootDefinitionPosition::new(SchemaRootDefinitionKind::Subscription);
+
+    pub const fn new(root_kind: SchemaRootDefinitionKind) -> Self {
+        Self { root_kind }
+    }
+
     pub(crate) fn parent(&self) -> SchemaDefinitionPosition {
         SchemaDefinitionPosition
     }
@@ -1416,10 +1427,8 @@ impl SchemaRootDefinitionPosition {
             })?;
         object_type_referencers.schema_roots.insert(self.clone());
         if self.root_kind == SchemaRootDefinitionKind::Query {
-            ObjectTypeDefinitionPosition {
-                type_name: root_type.name.clone(),
-            }
-            .insert_root_query_references(schema, referencers)?;
+            ObjectTypeDefinitionPosition::new(root_type.name.clone())
+                .insert_root_query_references(schema, referencers)?;
         }
         Ok(())
     }
@@ -1431,10 +1440,8 @@ impl SchemaRootDefinitionPosition {
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if self.root_kind == SchemaRootDefinitionKind::Query {
-            ObjectTypeDefinitionPosition {
-                type_name: root_type.name.clone(),
-            }
-            .remove_root_query_references(schema, referencers)?;
+            ObjectTypeDefinitionPosition::new(root_type.name.clone())
+                .remove_root_query_references(schema, referencers)?;
         }
         let Some(object_type_referencers) = referencers.object_types.get_mut(root_type.deref())
         else {
@@ -1457,6 +1464,10 @@ pub(crate) struct ScalarTypeDefinitionPosition {
 }
 
 impl ScalarTypeDefinitionPosition {
+    pub const fn new(type_name: Name) -> Self {
+        Self { type_name }
+    }
+
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
@@ -1774,7 +1785,7 @@ pub(crate) struct ObjectTypeDefinitionPosition {
 }
 
 impl ObjectTypeDefinitionPosition {
-    pub(crate) fn new(type_name: Name) -> Self {
+    pub const fn new(type_name: Name) -> Self {
         Self { type_name }
     }
 
@@ -2090,11 +2101,7 @@ impl ObjectTypeDefinitionPosition {
             referencers,
             true,
         )?;
-        if let Some(root_query_type) = (SchemaRootDefinitionPosition {
-            root_kind: SchemaRootDefinitionKind::Query,
-        })
-        .try_get(schema)
-        {
+        if let Some(root_query_type) = SchemaRootDefinitionPosition::QUERY.try_get(schema) {
             // Note that when inserting an object type that's the root query type, it's possible for
             // the root query type to have been set before this insertion. During that set, while
             // we would call insert_root_query_references(), it would ultimately do nothing since
@@ -2134,11 +2141,7 @@ impl ObjectTypeDefinitionPosition {
             referencers,
             true,
         )?;
-        if let Some(root_query_type) = (SchemaRootDefinitionPosition {
-            root_kind: SchemaRootDefinitionKind::Query,
-        })
-        .try_get(schema)
-        {
+        if let Some(root_query_type) = SchemaRootDefinitionPosition::QUERY.try_get(schema) {
             // Note that when removing an object type that's the root query type, it will eventually
             // call SchemaRootDefinitionPosition.remove() to unset the root query type, and there's
             // code there to call remove_root_query_references(). However, that code won't find the
@@ -2263,6 +2266,13 @@ pub(crate) struct ObjectFieldDefinitionPosition {
 }
 
 impl ObjectFieldDefinitionPosition {
+    pub const fn new(type_name: Name, field_name: Name) -> Self {
+        Self {
+            type_name,
+            field_name,
+        }
+    }
+
     pub(crate) fn is_introspection_typename_field(&self) -> bool {
         self.field_name == *INTROSPECTION_TYPENAME_FIELD_NAME
     }
@@ -2709,6 +2719,14 @@ pub(crate) struct ObjectFieldArgumentDefinitionPosition {
 }
 
 impl ObjectFieldArgumentDefinitionPosition {
+    pub const fn new(type_name: Name, field_name: Name, argument_name: Name) -> Self {
+        Self {
+            type_name,
+            field_name,
+            argument_name,
+        }
+    }
+
     pub(crate) fn parent(&self) -> ObjectFieldDefinitionPosition {
         ObjectFieldDefinitionPosition {
             type_name: self.type_name.clone(),
@@ -3088,7 +3106,7 @@ pub(crate) struct InterfaceTypeDefinitionPosition {
 }
 
 impl InterfaceTypeDefinitionPosition {
-    pub(crate) fn new(type_name: Name) -> Self {
+    pub const fn new(type_name: Name) -> Self {
         Self { type_name }
     }
 
@@ -3500,6 +3518,13 @@ pub(crate) struct InterfaceFieldDefinitionPosition {
 }
 
 impl InterfaceFieldDefinitionPosition {
+    pub const fn new(type_name: Name, field_name: Name) -> Self {
+        Self {
+            type_name,
+            field_name,
+        }
+    }
+
     pub(crate) fn is_introspection_typename_field(&self) -> bool {
         self.field_name == *INTROSPECTION_TYPENAME_FIELD_NAME
     }
@@ -3945,6 +3970,14 @@ pub(crate) struct InterfaceFieldArgumentDefinitionPosition {
 }
 
 impl InterfaceFieldArgumentDefinitionPosition {
+    pub const fn new(type_name: Name, field_name: Name, argument_name: Name) -> Self {
+        Self {
+            type_name,
+            field_name,
+            argument_name,
+        }
+    }
+
     pub(crate) fn parent(&self) -> InterfaceFieldDefinitionPosition {
         InterfaceFieldDefinitionPosition {
             type_name: self.type_name.clone(),
@@ -4325,7 +4358,7 @@ pub(crate) struct UnionTypeDefinitionPosition {
 }
 
 impl UnionTypeDefinitionPosition {
-    pub(crate) fn new(type_name: Name) -> Self {
+    pub const fn new(type_name: Name) -> Self {
         Self { type_name }
     }
 
@@ -4779,6 +4812,10 @@ pub(crate) struct EnumTypeDefinitionPosition {
 }
 
 impl EnumTypeDefinitionPosition {
+    pub const fn new(type_name: Name) -> Self {
+        Self { type_name }
+    }
+
     pub(crate) fn value(&self, value_name: Name) -> EnumValueDefinitionPosition {
         EnumValueDefinitionPosition {
             type_name: self.type_name.clone(),
@@ -5106,6 +5143,13 @@ pub(crate) struct EnumValueDefinitionPosition {
 }
 
 impl EnumValueDefinitionPosition {
+    pub const fn new(type_name: Name, value_name: Name) -> Self {
+        Self {
+            type_name,
+            value_name,
+        }
+    }
+
     pub(crate) fn parent(&self) -> EnumTypeDefinitionPosition {
         EnumTypeDefinitionPosition {
             type_name: self.type_name.clone(),
@@ -5349,6 +5393,10 @@ pub(crate) struct InputObjectTypeDefinitionPosition {
 }
 
 impl InputObjectTypeDefinitionPosition {
+    pub const fn new(type_name: Name) -> Self {
+        Self { type_name }
+    }
+
     pub(crate) fn field(&self, field_name: Name) -> InputObjectFieldDefinitionPosition {
         InputObjectFieldDefinitionPosition {
             type_name: self.type_name.clone(),
@@ -5679,6 +5727,13 @@ pub(crate) struct InputObjectFieldDefinitionPosition {
 }
 
 impl InputObjectFieldDefinitionPosition {
+    pub const fn new(type_name: Name, field_name: Name) -> Self {
+        Self {
+            type_name,
+            field_name,
+        }
+    }
+
     pub(crate) fn parent(&self) -> InputObjectTypeDefinitionPosition {
         InputObjectTypeDefinitionPosition {
             type_name: self.type_name.clone(),
@@ -6046,6 +6101,10 @@ pub(crate) struct DirectiveDefinitionPosition {
 }
 
 impl DirectiveDefinitionPosition {
+    pub const fn new(directive_name: Name) -> Self {
+        Self { directive_name }
+    }
+
     pub(crate) fn argument(&self, argument_name: Name) -> DirectiveArgumentDefinitionPosition {
         DirectiveArgumentDefinitionPosition {
             directive_name: self.directive_name.clone(),
@@ -6288,6 +6347,13 @@ pub(crate) struct DirectiveArgumentDefinitionPosition {
 }
 
 impl DirectiveArgumentDefinitionPosition {
+    pub const fn new(directive_name: Name, argument_name: Name) -> Self {
+        Self {
+            directive_name,
+            argument_name,
+        }
+    }
+
     pub(crate) fn parent(&self) -> DirectiveDefinitionPosition {
         DirectiveDefinitionPosition {
             directive_name: self.directive_name.clone(),
@@ -6795,48 +6861,46 @@ impl FederationSchema {
         for (type_name, type_) in schema.types.iter() {
             match type_ {
                 ExtendedType::Scalar(type_) => {
-                    ScalarTypeDefinitionPosition {
-                        type_name: type_name.clone(),
-                    }
-                    .insert_references(type_, &mut referencers)?;
+                    ScalarTypeDefinitionPosition::new(type_name.clone())
+                        .insert_references(type_, &mut referencers)?;
                 }
                 ExtendedType::Object(type_) => {
-                    ObjectTypeDefinitionPosition {
-                        type_name: type_name.clone(),
-                    }
-                    .insert_references(type_, &schema, &mut referencers)?;
+                    ObjectTypeDefinitionPosition::new(type_name.clone()).insert_references(
+                        type_,
+                        &schema,
+                        &mut referencers,
+                    )?;
                 }
                 ExtendedType::Interface(type_) => {
-                    InterfaceTypeDefinitionPosition {
-                        type_name: type_name.clone(),
-                    }
-                    .insert_references(type_, &schema, &mut referencers)?;
+                    InterfaceTypeDefinitionPosition::new(type_name.clone()).insert_references(
+                        type_,
+                        &schema,
+                        &mut referencers,
+                    )?;
                 }
                 ExtendedType::Union(type_) => {
-                    UnionTypeDefinitionPosition {
-                        type_name: type_name.clone(),
-                    }
-                    .insert_references(type_, &mut referencers)?;
+                    UnionTypeDefinitionPosition::new(type_name.clone())
+                        .insert_references(type_, &mut referencers)?;
                 }
                 ExtendedType::Enum(type_) => {
-                    EnumTypeDefinitionPosition {
-                        type_name: type_name.clone(),
-                    }
-                    .insert_references(type_, &mut referencers)?;
+                    EnumTypeDefinitionPosition::new(type_name.clone())
+                        .insert_references(type_, &mut referencers)?;
                 }
                 ExtendedType::InputObject(type_) => {
-                    InputObjectTypeDefinitionPosition {
-                        type_name: type_name.clone(),
-                    }
-                    .insert_references(type_, &schema, &mut referencers)?;
+                    InputObjectTypeDefinitionPosition::new(type_name.clone()).insert_references(
+                        type_,
+                        &schema,
+                        &mut referencers,
+                    )?;
                 }
             }
         }
         for (directive_name, directive) in schema.directive_definitions.iter() {
-            DirectiveDefinitionPosition {
-                directive_name: directive_name.clone(),
-            }
-            .insert_references(directive, &schema, &mut referencers)?;
+            DirectiveDefinitionPosition::new(directive_name.clone()).insert_references(
+                directive,
+                &schema,
+                &mut referencers,
+            )?;
         }
 
         Ok(FederationSchema {

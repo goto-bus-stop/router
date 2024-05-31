@@ -3544,6 +3544,7 @@ mod tests {
     use std::sync::Arc;
 
     use apollo_compiler::executable::DirectiveList;
+    use apollo_compiler::name;
     use apollo_compiler::schema::Name;
     use apollo_compiler::NodeStr;
     use apollo_compiler::Schema;
@@ -3581,10 +3582,7 @@ mod tests {
         let graph = build_query_graph(name, schema.clone()).unwrap();
         let path = OpGraphPath::new(Arc::new(graph), NodeIndex::new(0)).unwrap();
         assert_eq!(path.to_string(), "_");
-        let pos = ObjectFieldDefinitionPosition {
-            type_name: Name::new("T").unwrap(),
-            field_name: Name::new("t").unwrap(),
-        };
+        let pos = ObjectFieldDefinitionPosition::new(name!("T"), name!("t"));
         let data = FieldData {
             schema: schema.clone(),
             field_position: FieldDefinitionPosition::Object(pos),
@@ -3606,10 +3604,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(path.to_string(), "Query(S1)* --[t]--> T(S1) (types: [T])");
-        let pos = ObjectFieldDefinitionPosition {
-            type_name: Name::new("ID").unwrap(),
-            field_name: Name::new("id").unwrap(),
-        };
+        let pos = ObjectFieldDefinitionPosition::new(name!("ID"), name!("id"));
         let data = FieldData {
             schema,
             field_position: FieldDefinitionPosition::Object(pos),

@@ -89,15 +89,15 @@ impl FederationSchema {
             .map(|(type_name, type_)| {
                 let type_name = type_name.clone();
                 match type_ {
-                    ExtendedType::Scalar(_) => ScalarTypeDefinitionPosition { type_name }.into(),
-                    ExtendedType::Object(_) => ObjectTypeDefinitionPosition { type_name }.into(),
+                    ExtendedType::Scalar(_) => ScalarTypeDefinitionPosition::new(type_name).into(),
+                    ExtendedType::Object(_) => ObjectTypeDefinitionPosition::new(type_name).into(),
                     ExtendedType::Interface(_) => {
-                        InterfaceTypeDefinitionPosition { type_name }.into()
+                        InterfaceTypeDefinitionPosition::new(type_name).into()
                     }
-                    ExtendedType::Union(_) => UnionTypeDefinitionPosition { type_name }.into(),
-                    ExtendedType::Enum(_) => EnumTypeDefinitionPosition { type_name }.into(),
+                    ExtendedType::Union(_) => UnionTypeDefinitionPosition::new(type_name).into(),
+                    ExtendedType::Enum(_) => EnumTypeDefinitionPosition::new(type_name).into(),
                     ExtendedType::InputObject(_) => {
-                        InputObjectTypeDefinitionPosition { type_name }.into()
+                        InputObjectTypeDefinitionPosition::new(type_name).into()
                     }
                 }
             })
@@ -109,9 +109,8 @@ impl FederationSchema {
         self.schema
             .directive_definitions
             .keys()
-            .map(|name| DirectiveDefinitionPosition {
-                directive_name: name.clone(),
-            })
+            .cloned()
+            .map(DirectiveDefinitionPosition::new)
     }
 
     pub(crate) fn get_type(
@@ -126,12 +125,14 @@ impl FederationSchema {
                     message: format!("Schema has no type \"{}\"", type_name),
                 })?;
         Ok(match type_ {
-            ExtendedType::Scalar(_) => ScalarTypeDefinitionPosition { type_name }.into(),
-            ExtendedType::Object(_) => ObjectTypeDefinitionPosition { type_name }.into(),
-            ExtendedType::Interface(_) => InterfaceTypeDefinitionPosition { type_name }.into(),
-            ExtendedType::Union(_) => UnionTypeDefinitionPosition { type_name }.into(),
-            ExtendedType::Enum(_) => EnumTypeDefinitionPosition { type_name }.into(),
-            ExtendedType::InputObject(_) => InputObjectTypeDefinitionPosition { type_name }.into(),
+            ExtendedType::Scalar(_) => ScalarTypeDefinitionPosition::new(type_name).into(),
+            ExtendedType::Object(_) => ObjectTypeDefinitionPosition::new(type_name).into(),
+            ExtendedType::Interface(_) => InterfaceTypeDefinitionPosition::new(type_name).into(),
+            ExtendedType::Union(_) => UnionTypeDefinitionPosition::new(type_name).into(),
+            ExtendedType::Enum(_) => EnumTypeDefinitionPosition::new(type_name).into(),
+            ExtendedType::InputObject(_) => {
+                InputObjectTypeDefinitionPosition::new(type_name).into()
+            }
         })
     }
 
@@ -154,9 +155,7 @@ impl FederationSchema {
                 .get(self.schema())?
                 .members
                 .iter()
-                .map(|t| ObjectTypeDefinitionPosition {
-                    type_name: t.name.clone(),
-                })
+                .map(|t| ObjectTypeDefinitionPosition::new(t.name.clone()))
                 .collect::<IndexSet<_>>(),
         })
     }
@@ -191,9 +190,7 @@ impl FederationSchema {
         self.schema
             .directive_definitions
             .contains_key(name)
-            .then(|| DirectiveDefinitionPosition {
-                directive_name: name.clone(),
-            })
+            .then(|| DirectiveDefinitionPosition::new(name.clone()))
     }
 
     /// Note that a subgraph may have no "entities" and so no `_Entity` type.
@@ -205,9 +202,9 @@ impl FederationSchema {
         //    in order to maintain backwards compatibility with Fed 1.
         // 2. Its presence is optional; if absent, it means the subgraph has no resolvable keys.
         match self.schema.types.get(&FEDERATION_ENTITY_TYPE_NAME_IN_SPEC) {
-            Some(ExtendedType::Union(_)) => Ok(Some(UnionTypeDefinitionPosition {
-                type_name: FEDERATION_ENTITY_TYPE_NAME_IN_SPEC,
-            })),
+            Some(ExtendedType::Union(_)) => Ok(Some(UnionTypeDefinitionPosition::new(
+                FEDERATION_ENTITY_TYPE_NAME_IN_SPEC,
+            ))),
             Some(_) => Err(FederationError::internal(format!(
                 "Unexpectedly found non-union for federation spec's `{}` type definition",
                 FEDERATION_ENTITY_TYPE_NAME_IN_SPEC

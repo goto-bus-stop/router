@@ -251,10 +251,8 @@ fn validate_inaccessible_in_default_value(
                 let Some(field) = type_.fields.get(field_name) else {
                     return Ok(());
                 };
-                let input_field_position = InputObjectFieldDefinitionPosition {
-                    type_name: type_.name.clone(),
-                    field_name: field_name.clone(),
-                };
+                let input_field_position =
+                    InputObjectFieldDefinitionPosition::new(type_.name.clone(), field_name.clone());
                 if input_field_position.is_inaccessible(schema, inaccessible_directive)? {
                     errors.push(SingleFederationError::DefaultValueUsesInaccessible {
                         message: format!("Input field `{input_field_position}` is @inaccessible but is used in the default value of `{value_position}`, which is in the API schema."),
@@ -303,10 +301,8 @@ fn validate_inaccessible_in_default_value(
             let Some(enum_value) = type_.values.get(&value) else {
                 return Ok(());
             };
-            let enum_value_position = EnumValueDefinitionPosition {
-                type_name: type_.name.clone(),
-                value_name: enum_value.value.clone(),
-            };
+            let enum_value_position =
+                EnumValueDefinitionPosition::new(type_.name.clone(), enum_value.value.clone());
             if enum_value_position.is_inaccessible(schema, inaccessible_directive)? {
                 errors.push(SingleFederationError::DefaultValueUsesInaccessible {
                     message: format!("Enum value `{enum_value_position}` is @inaccessible but is used in the default value of `{value_position}`, which is in the API schema."),
@@ -388,10 +384,10 @@ fn validate_inaccessible_in_fields(
                 if super_field.directives.has(inaccessible_directive) {
                     return None;
                 }
-                Some(InterfaceFieldDefinitionPosition {
-                    type_name: super_type.name.clone(),
-                    field_name: super_field.name.clone(),
-                })
+                Some(InterfaceFieldDefinitionPosition::new(
+                    super_type.name.clone(),
+                    super_field.name.clone(),
+                ))
             });
 
             for super_position in accessible_super_references {
@@ -424,11 +420,11 @@ fn validate_inaccessible_in_fields(
                     if super_argument.directives.has(inaccessible_directive) {
                         return None;
                     }
-                    Some(InterfaceFieldArgumentDefinitionPosition {
-                        type_name: super_type.name.clone(),
-                        field_name: super_field.name.clone(),
-                        argument_name: super_argument.name.clone(),
-                    })
+                    Some(InterfaceFieldArgumentDefinitionPosition::new(
+                        super_type.name.clone(),
+                        super_field.name.clone(),
+                        super_argument.name.clone(),
+                    ))
                 });
 
                 if arg_inaccessible {
@@ -470,11 +466,11 @@ fn validate_inaccessible_in_fields(
                             if !super_argument.directives.has(inaccessible_directive) {
                                 return None;
                             }
-                            Some(InterfaceFieldArgumentDefinitionPosition {
-                                type_name: super_type.name.clone(),
-                                field_name: super_field.name.clone(),
-                                argument_name: super_argument.name.clone(),
-                            })
+                            Some(InterfaceFieldArgumentDefinitionPosition::new(
+                                super_type.name.clone(),
+                                super_field.name.clone(),
+                                super_argument.name.clone(),
+                            ))
                         });
 
                     for inaccessible_reference in inaccessible_super_references {

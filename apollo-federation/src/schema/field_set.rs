@@ -107,18 +107,15 @@ pub(crate) fn collect_target_fields_from_field_set(
             ));
         };
         let parent_type_position: CompositeTypeDefinitionPosition = match parent_type {
-            ExtendedType::Object(_) => ObjectTypeDefinitionPosition {
-                type_name: selection_set.ty.clone(),
+            ExtendedType::Object(_) => {
+                ObjectTypeDefinitionPosition::new(selection_set.ty.clone()).into()
             }
-            .into(),
-            ExtendedType::Interface(_) => InterfaceTypeDefinitionPosition {
-                type_name: selection_set.ty.clone(),
+            ExtendedType::Interface(_) => {
+                InterfaceTypeDefinitionPosition::new(selection_set.ty.clone()).into()
             }
-            .into(),
-            ExtendedType::Union(_) => UnionTypeDefinitionPosition {
-                type_name: selection_set.ty.clone(),
+            ExtendedType::Union(_) => {
+                UnionTypeDefinitionPosition::new(selection_set.ty.clone()).into()
             }
-            .into(),
             _ => {
                 return Err(FederationError::internal(
                     "Unexpectedly encountered non-composite type for selection set.",

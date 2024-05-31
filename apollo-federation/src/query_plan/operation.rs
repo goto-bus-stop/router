@@ -2383,10 +2383,9 @@ impl SelectionSet {
         &mut self,
         interface_types_with_interface_objects: &IndexSet<InterfaceTypeDefinitionPosition>,
     ) -> Result<(), FederationError> {
-        let is_interface_object =
-            interface_types_with_interface_objects.contains(&InterfaceTypeDefinitionPosition {
-                type_name: self.type_position.type_name().clone(),
-            });
+        let is_interface_object = interface_types_with_interface_objects.contains(
+            &InterfaceTypeDefinitionPosition::new(self.type_position.type_name().clone()),
+        );
         let mut typename_field_key: Option<SelectionKey> = None;
         let mut sibling_field_key: Option<SelectionKey> = None;
 
@@ -6277,9 +6276,7 @@ scalar FieldSet
             parse_schema_and_operation(operation_with_intf_object_typename);
         if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
             let mut interface_objects: IndexSet<InterfaceTypeDefinitionPosition> = IndexSet::new();
-            interface_objects.insert(InterfaceTypeDefinitionPosition {
-                type_name: name!("Foo"),
-            });
+            interface_objects.insert(InterfaceTypeDefinitionPosition::new(name!("Foo")));
 
             let normalized_operation = normalize_operation(
                 operation,
@@ -6610,9 +6607,7 @@ type T implements I {
             if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
                 let mut interface_objects: IndexSet<InterfaceTypeDefinitionPosition> =
                     IndexSet::new();
-                interface_objects.insert(InterfaceTypeDefinitionPosition {
-                    type_name: name!("I"),
-                });
+                interface_objects.insert(InterfaceTypeDefinitionPosition::new(name!("I")));
                 let normalized_operation = normalize_operation(
                     operation,
                     NamedFragments::new(&executable_document.fragments, &schema),

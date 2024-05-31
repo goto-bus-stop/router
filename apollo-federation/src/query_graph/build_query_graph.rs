@@ -266,7 +266,7 @@ impl SchemaQueryGraphBuilder {
         // PORT_NOTE: Note that most of the JS code's buildGraphInternal() logic was moved into this
         // build() method.
         for root_kind in SchemaRootDefinitionKind::iter() {
-            let pos = SchemaRootDefinitionPosition { root_kind };
+            let pos = SchemaRootDefinitionPosition::new(root_kind);
             if pos
                 .try_get(self.base.query_graph.schema()?.schema())
                 .is_some()
@@ -688,14 +688,12 @@ impl SchemaQueryGraphBuilder {
         let mut abstract_types_with_runtime_types = Vec::new();
         for (type_name, type_) in &self.base.query_graph.schema()?.schema().types {
             let pos: AbstractTypeDefinitionPosition = match type_ {
-                ExtendedType::Interface(_) => InterfaceTypeDefinitionPosition {
-                    type_name: type_name.clone(),
+                ExtendedType::Interface(_) => {
+                    InterfaceTypeDefinitionPosition::new(type_name.clone()).into()
                 }
-                .into(),
-                ExtendedType::Union(_) => UnionTypeDefinitionPosition {
-                    type_name: type_name.clone(),
+                ExtendedType::Union(_) => {
+                    UnionTypeDefinitionPosition::new(type_name.clone()).into()
                 }
-                .into(),
                 _ => continue,
             };
             // All "normal" types from subgraphs should be in the API schema, but there are a
@@ -899,10 +897,7 @@ impl SchemaQueryGraphBuilder {
         };
         let entity_type_name = entity_type_definition.name.clone();
         let entity_type_node = self.add_type_recursively(
-            UnionTypeDefinitionPosition {
-                type_name: entity_type_name.clone(),
-            }
-            .into(),
+            UnionTypeDefinitionPosition::new(entity_type_name.clone()).into(),
         )?;
         let key_directive_definition =
             federation_spec_definition.key_directive_definition(self.base.query_graph.schema()?)?;
@@ -918,9 +913,8 @@ impl SchemaQueryGraphBuilder {
             )?
             .is_empty()
             {
-                interface_type_definition_positions.push(InterfaceTypeDefinitionPosition {
-                    type_name: type_name.clone(),
-                });
+                interface_type_definition_positions
+                    .push(InterfaceTypeDefinitionPosition::new(type_name.clone()));
             }
         }
         for interface_type_definition_position in interface_type_definition_positions {
@@ -928,10 +922,8 @@ impl SchemaQueryGraphBuilder {
                 self.add_type_recursively(interface_type_definition_position.clone().into())?;
             let transition = QueryGraphEdgeTransition::Downcast {
                 source: self.base.query_graph.current_source.clone(),
-                from_type_position: UnionTypeDefinitionPosition {
-                    type_name: entity_type_name.clone(),
-                }
-                .into(),
+                from_type_position: UnionTypeDefinitionPosition::new(entity_type_name.clone())
+                    .into(),
                 to_type_position: interface_type_definition_position.into(),
             };
             self.base
@@ -2181,10 +2173,7 @@ mod tests {
         assert_node_type(
             &query_graph,
             *root_node,
-            ObjectTypeDefinitionPosition {
-                type_name: name!("Query"),
-            }
-            .into(),
+            ObjectTypeDefinitionPosition::new(name!("Query")).into(),
             Some(SchemaRootDefinitionKind::Query),
         )?;
         assert_eq!(
@@ -2204,10 +2193,7 @@ mod tests {
         assert_node_type(
             &query_graph,
             *root_typename_tail,
-            ScalarTypeDefinitionPosition {
-                type_name: name!("String"),
-            }
-            .into(),
+            ScalarTypeDefinitionPosition::new(name!("String")).into(),
             None,
         )?;
 
@@ -2215,10 +2201,7 @@ mod tests {
         assert_node_type(
             &query_graph,
             *t1_node,
-            ObjectTypeDefinitionPosition {
-                type_name: name!("T1"),
-            }
-            .into(),
+            ObjectTypeDefinitionPosition::new(name!("T1")).into(),
             None,
         )?;
         assert_eq!(
@@ -2238,10 +2221,7 @@ mod tests {
         assert_node_type(
             &query_graph,
             *t1_typename_tail,
-            ScalarTypeDefinitionPosition {
-                type_name: name!("String"),
-            }
-            .into(),
+            ScalarTypeDefinitionPosition::new(name!("String")).into(),
             None,
         )?;
 
@@ -2249,10 +2229,7 @@ mod tests {
         assert_node_type(
             &query_graph,
             *t1_f1_tail,
-            ScalarTypeDefinitionPosition {
-                type_name: name!("Int"),
-            }
-            .into(),
+            ScalarTypeDefinitionPosition::new(name!("Int")).into(),
             None,
         )?;
         assert_eq!(
@@ -2267,10 +2244,7 @@ mod tests {
         assert_node_type(
             &query_graph,
             *t1_f2_tail,
-            ScalarTypeDefinitionPosition {
-                type_name: name!("String"),
-            }
-            .into(),
+            ScalarTypeDefinitionPosition::new(name!("String")).into(),
             None,
         )?;
         assert_eq!(
@@ -2285,10 +2259,7 @@ mod tests {
         assert_node_type(
             &query_graph,
             *t2_node,
-            ObjectTypeDefinitionPosition {
-                type_name: name!("T2"),
-            }
-            .into(),
+            ObjectTypeDefinitionPosition::new(name!("T2")).into(),
             None,
         )?;
         assert_eq!(
@@ -2308,10 +2279,7 @@ mod tests {
         assert_node_type(
             &query_graph,
             *t2_typename_tail,
-            ScalarTypeDefinitionPosition {
-                type_name: name!("String"),
-            }
-            .into(),
+            ScalarTypeDefinitionPosition::new(name!("String")).into(),
             None,
         )?;
 
@@ -2319,10 +2287,7 @@ mod tests {
         assert_node_type(
             &query_graph,
             *t2_t_tail,
-            ObjectTypeDefinitionPosition {
-                type_name: name!("T1"),
-            }
-            .into(),
+            ObjectTypeDefinitionPosition::new(name!("T1")).into(),
             None,
         )?;
 

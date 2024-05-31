@@ -397,10 +397,8 @@ fn extract_subgraphs_from_fed_2_supergraph(
         remove_inactive_requires_and_provides_from_subgraph(&mut subgraph.schema)?;
         remove_unused_types_from_subgraph(&mut subgraph.schema)?;
         for definition in all_executable_directive_definitions.iter() {
-            DirectiveDefinitionPosition {
-                directive_name: definition.name.clone(),
-            }
-            .insert(&mut subgraph.schema, definition.clone())?;
+            DirectiveDefinitionPosition::new(definition.name.clone())
+                .insert(&mut subgraph.schema, definition.clone())?;
         }
     }
 
@@ -539,9 +537,7 @@ fn add_empty_type(
                         }),
                     )?;
                     if pos.type_name == "Query" {
-                        let root_pos = SchemaRootDefinitionPosition {
-                            root_kind: SchemaRootDefinitionKind::Query,
-                        };
+                        let root_pos = SchemaRootDefinitionPosition::QUERY;
                         if root_pos.try_get(subgraph.schema.schema()).is_none() {
                             root_pos.insert(
                                 &mut subgraph.schema,
@@ -549,9 +545,7 @@ fn add_empty_type(
                             )?;
                         }
                     } else if pos.type_name == "Mutation" {
-                        let root_pos = SchemaRootDefinitionPosition {
-                            root_kind: SchemaRootDefinitionKind::Mutation,
-                        };
+                        let root_pos = SchemaRootDefinitionPosition::MUTATION;
                         if root_pos.try_get(subgraph.schema.schema()).is_none() {
                             root_pos.insert(
                                 &mut subgraph.schema,
@@ -559,9 +553,7 @@ fn add_empty_type(
                             )?;
                         }
                     } else if pos.type_name == "Subscription" {
-                        let root_pos = SchemaRootDefinitionPosition {
-                            root_kind: SchemaRootDefinitionKind::Subscription,
-                        };
+                        let root_pos = SchemaRootDefinitionPosition::SUBSCRIPTION;
                         if root_pos.try_get(subgraph.schema.schema()).is_none() {
                             root_pos.insert(
                                 &mut subgraph.schema,
@@ -575,9 +567,7 @@ fn add_empty_type(
                         is_interface_object = true;
                         let interface_object_directive = federation_spec_definition
                             .interface_object_directive(&subgraph.schema)?;
-                        let pos = ObjectTypeDefinitionPosition {
-                            type_name: pos.type_name.clone(),
-                        };
+                        let pos = ObjectTypeDefinitionPosition::new(pos.type_name.clone());
                         pos.pre_insert(&mut subgraph.schema)?;
                         pos.insert(
                             &mut subgraph.schema,
@@ -713,9 +703,7 @@ fn extract_object_type_content(
         subgraph_info,
     } in info.iter()
     {
-        let pos = ObjectTypeDefinitionPosition {
-            type_name: (*type_name).clone(),
-        };
+        let pos = ObjectTypeDefinitionPosition::new((*type_name).clone());
         let type_ = pos.get(supergraph_schema.schema())?;
 
         for directive in type_
@@ -857,10 +845,8 @@ fn extract_interface_type_content(
         subgraph_info,
     } in info.iter()
     {
-        let type_ = InterfaceTypeDefinitionPosition {
-            type_name: (*type_name).clone(),
-        }
-        .get(supergraph_schema.schema())?;
+        let type_ = InterfaceTypeDefinitionPosition::new((*type_name).clone())
+            .get(supergraph_schema.schema())?;
         fn get_pos(
             subgraph: &FederationSubgraph,
             subgraph_info: &IndexMap<Name, bool>,
@@ -1044,9 +1030,7 @@ fn extract_union_type_content(
         subgraph_info,
     } in info.iter()
     {
-        let pos = UnionTypeDefinitionPosition {
-            type_name: (*type_name).clone(),
-        };
+        let pos = UnionTypeDefinitionPosition::new((*type_name).clone());
         let type_ = pos.get(supergraph_schema.schema())?;
 
         let mut union_member_directive_applications = Vec::new();
@@ -1133,9 +1117,7 @@ fn extract_enum_type_content(
         subgraph_info,
     } in info.iter()
     {
-        let pos = EnumTypeDefinitionPosition {
-            type_name: (*type_name).clone(),
-        };
+        let pos = EnumTypeDefinitionPosition::new((*type_name).clone());
         let type_ = pos.get(supergraph_schema.schema())?;
 
         for (value_name, value) in type_.values.iter() {
@@ -1216,9 +1198,7 @@ fn extract_input_object_type_content(
         subgraph_info,
     } in info.iter()
     {
-        let pos = InputObjectTypeDefinitionPosition {
-            type_name: (*type_name).clone(),
-        };
+        let pos = InputObjectTypeDefinitionPosition::new((*type_name).clone());
         let type_ = pos.get(supergraph_schema.schema())?;
 
         for (input_field_name, input_field) in type_.fields.iter() {
@@ -1561,42 +1541,26 @@ fn remove_unused_types_from_subgraph(schema: &mut FederationSchema) -> Result<()
         match type_ {
             ExtendedType::Object(type_) => {
                 if type_.fields.is_empty() {
-                    type_definition_positions.push(
-                        ObjectTypeDefinitionPosition {
-                            type_name: type_name.clone(),
-                        }
-                        .into(),
-                    );
+                    type_definition_positions
+                        .push(ObjectTypeDefinitionPosition::new(type_name.clone()).into());
                 }
             }
             ExtendedType::Interface(type_) => {
                 if type_.fields.is_empty() {
-                    type_definition_positions.push(
-                        InterfaceTypeDefinitionPosition {
-                            type_name: type_name.clone(),
-                        }
-                        .into(),
-                    );
+                    type_definition_positions
+                        .push(InterfaceTypeDefinitionPosition::new(type_name.clone()).into());
                 }
             }
             ExtendedType::Union(type_) => {
                 if type_.members.is_empty() {
-                    type_definition_positions.push(
-                        UnionTypeDefinitionPosition {
-                            type_name: type_name.clone(),
-                        }
-                        .into(),
-                    );
+                    type_definition_positions
+                        .push(UnionTypeDefinitionPosition::new(type_name.clone()).into());
                 }
             }
             ExtendedType::InputObject(type_) => {
                 if type_.fields.is_empty() {
-                    type_definition_positions.push(
-                        InputObjectTypeDefinitionPosition {
-                            type_name: type_name.clone(),
-                        }
-                        .into(),
-                    );
+                    type_definition_positions
+                        .push(InputObjectTypeDefinitionPosition::new(type_name.clone()).into());
                 }
             }
             _ => {}
@@ -1708,9 +1672,7 @@ fn add_federation_operations(
     }
 
     // the `Query` Type
-    let query_root_pos = SchemaRootDefinitionPosition {
-        root_kind: SchemaRootDefinitionKind::Query,
-    };
+    let query_root_pos = SchemaRootDefinitionPosition::QUERY;
     if query_root_pos.try_get(subgraph.schema.schema()).is_none() {
         QUERY_TYPE_SPEC.check_or_add(&mut subgraph.schema)?;
         query_root_pos.insert(
@@ -1721,10 +1683,10 @@ fn add_federation_operations(
 
     // `Query._entities` (optional)
     let query_root_type_name = query_root_pos.get(subgraph.schema.schema())?.name.clone();
-    let entity_field_pos = ObjectFieldDefinitionPosition {
-        type_name: query_root_type_name.clone(),
-        field_name: FEDERATION_ENTITIES_FIELD_NAME,
-    };
+    let entity_field_pos = ObjectFieldDefinitionPosition::new(
+        query_root_type_name.clone(),
+        FEDERATION_ENTITIES_FIELD_NAME,
+    );
     if has_entity_type {
         entity_field_pos.insert(
             &mut subgraph.schema,
@@ -1749,20 +1711,17 @@ fn add_federation_operations(
     }
 
     // `Query._service`
-    ObjectFieldDefinitionPosition {
-        type_name: query_root_type_name.clone(),
-        field_name: FEDERATION_SERVICE_FIELD_NAME,
-    }
-    .insert(
-        &mut subgraph.schema,
-        Component::new(FieldDefinition {
-            description: None,
-            name: FEDERATION_SERVICE_FIELD_NAME,
-            arguments: Vec::new(),
-            ty: Type::NonNullNamed(FEDERATION_SERVICE_TYPE_NAME),
-            directives: Default::default(),
-        }),
-    )?;
+    ObjectFieldDefinitionPosition::new(query_root_type_name.clone(), FEDERATION_SERVICE_FIELD_NAME)
+        .insert(
+            &mut subgraph.schema,
+            Component::new(FieldDefinition {
+                description: None,
+                name: FEDERATION_SERVICE_FIELD_NAME,
+                arguments: Vec::new(),
+                ty: Type::NonNullNamed(FEDERATION_SERVICE_TYPE_NAME),
+                directives: Default::default(),
+            }),
+        )?;
 
     Ok(())
 }

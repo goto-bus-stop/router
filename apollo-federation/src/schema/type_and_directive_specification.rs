@@ -107,9 +107,7 @@ impl TypeAndDirectiveSpecification for ScalarTypeSpecification {
             return ensure_expected_type_kind(TypeKind::Scalar, &existing);
         }
 
-        let type_pos = ScalarTypeDefinitionPosition {
-            type_name: self.name.clone(),
-        };
+        let type_pos = ScalarTypeDefinitionPosition::new(self.name.clone());
         type_pos.pre_insert(schema)?;
         type_pos.insert(
             schema,
@@ -153,9 +151,7 @@ impl TypeAndDirectiveSpecification for ObjectTypeSpecification {
             field_map.insert(field_spec.name.clone(), Component::new(field_def));
         }
 
-        let type_pos = ObjectTypeDefinitionPosition {
-            type_name: self.name.clone(),
-        };
+        let type_pos = ObjectTypeDefinitionPosition::new(self.name.clone());
         type_pos.pre_insert(schema)?;
         type_pos.insert(
             schema,
@@ -224,9 +220,7 @@ where
             return Ok(());
         }
 
-        let type_pos = UnionTypeDefinitionPosition {
-            type_name: self.name.clone(),
-        };
+        let type_pos = UnionTypeDefinitionPosition::new(self.name.clone());
         type_pos.pre_insert(schema)?;
         type_pos.insert(
             schema,
@@ -288,9 +282,7 @@ impl TypeAndDirectiveSpecification for EnumTypeSpecification {
             return Ok(());
         }
 
-        let type_pos = EnumTypeDefinitionPosition {
-            type_name: self.name.clone(),
-        };
+        let type_pos = EnumTypeDefinitionPosition::new(self.name.clone());
         type_pos.pre_insert(schema)?;
         type_pos.insert(
             schema,
@@ -469,9 +461,7 @@ impl TypeAndDirectiveSpecification for DirectiveSpecification {
             );
         }
 
-        let directive_pos = DirectiveDefinitionPosition {
-            directive_name: self.name.clone(),
-        };
+        let directive_pos = DirectiveDefinitionPosition::new(self.name.clone());
         directive_pos.pre_insert(schema)?;
         directive_pos.insert(
             schema,

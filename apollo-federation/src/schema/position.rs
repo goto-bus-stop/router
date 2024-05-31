@@ -2113,7 +2113,7 @@ impl ObjectPosition {
         )?;
         if let Some(root_query_type) = SchemaRootPosition::QUERY.try_get(schema) {
             // Note that when removing an object type that's the root query type, it will eventually
-            // call SchemaRootDefinitionPosition.remove() to unset the root query type, and there's
+            // call SchemaRootPosition.remove() to unset the root query type, and there's
             // code there to call remove_root_query_references(). However, that code won't find the
             // meta-fields __schema or __type, as the type has already been removed from the schema
             // before it executes. We instead need to execute the reference removal here, as it's
@@ -2681,394 +2681,7 @@ impl Debug for ObjectFieldPosition {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub(crate) struct ObjectFieldArgumentPosition {
-    pub(crate) type_name: Name,
-    pub(crate) field_name: Name,
-    pub(crate) argument_name: Name,
-}
-
-impl ObjectFieldArgumentPosition {
-    pub const fn new(type_name: Name, field_name: Name, argument_name: Name) -> Self {
-        Self {
-            type_name,
-            field_name,
-            argument_name,
-        }
-    }
-
-    pub(crate) fn parent(&self) -> ObjectFieldPosition {
-        ObjectFieldPosition {
-            type_name: self.type_name.clone(),
-            field_name: self.field_name.clone(),
-        }
-    }
-
-    pub(crate) fn get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Result<&'schema Node<InputValueDefinition>, FederationError> {
-        let parent = self.parent();
-        let type_ = parent.get(schema)?;
-
-        type_
-            .arguments
-            .iter()
-            .find(|a| a.name == self.argument_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Object field \"{}\" has no argument \"{}\"",
-                        parent, self.argument_name
-                    ),
-                }
-                .into()
-            })
-    }
-
-    pub(crate) fn try_get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Option<&'schema Node<InputValueDefinition>> {
-        self.get(schema).ok()
-    }
-
-    fn make_mut<'schema>(
-        &self,
-        schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Node<InputValueDefinition>, FederationError> {
-        let parent = self.parent();
-        let type_ = parent.make_mut(schema)?.make_mut();
-
-        type_
-            .arguments
-            .iter_mut()
-            .find(|a| a.name == self.argument_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Object field \"{}\" has no argument \"{}\"",
-                        parent, self.argument_name
-                    ),
-                }
-                .into()
-            })
-    }
-
-    fn try_make_mut<'schema>(
-        &self,
-        schema: &'schema mut Schema,
-    ) -> Option<&'schema mut Node<InputValueDefinition>> {
-        if self.try_get(schema).is_some() {
-            self.make_mut(schema).ok()
-        } else {
-            None
-        }
-    }
-
-    pub(crate) fn insert(
-        &self,
-        schema: &mut FederationSchema,
-        argument: Node<InputValueDefinition>,
-    ) -> Result<(), FederationError> {
-        if self.argument_name != argument.name {
-            return Err(SingleFederationError::Internal {
-                message: format!(
-                    "Object field argument \"{}\" given argument named \"{}\"",
-                    self, argument.name,
-                ),
-            }
-            .into());
-        }
-        if self.try_get(&schema.schema).is_some() {
-            // TODO: Handle old spec edge case of arguments with non-unique names
-            return Err(SingleFederationError::Internal {
-                message: format!(
-                    "Object field argument \"{}\" already exists in schema",
-                    self,
-                ),
-            }
-            .into());
-        }
-        self.parent()
-            .make_mut(&mut schema.schema)?
-            .make_mut()
-            .arguments
-            .push(argument);
-        self.insert_references(
-            self.get(&schema.schema)?,
-            &schema.schema,
-            &mut schema.referencers,
-        )
-    }
-
-    pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
-        let Some(argument) = self.try_get(&schema.schema) else {
-            return Ok(());
-        };
-        self.remove_references(argument, &schema.schema, &mut schema.referencers)?;
-        self.parent()
-            .make_mut(&mut schema.schema)?
-            .make_mut()
-            .arguments
-            .retain(|other_argument| other_argument.name != self.argument_name);
-        Ok(())
-    }
-
-    pub(crate) fn insert_directive(
-        &self,
-        schema: &mut FederationSchema,
-        directive: Node<Directive>,
-    ) -> Result<(), FederationError> {
-        let argument = self.make_mut(&mut schema.schema)?;
-        if argument
-            .directives
-            .iter()
-            .any(|other_directive| other_directive.ptr_eq(&directive))
-        {
-            return Err(SingleFederationError::Internal {
-                message: format!(
-                    "Directive application \"@{}\" already exists on object field argument \"{}\"",
-                    directive.name, self,
-                ),
-            }
-            .into());
-        }
-        let name = directive.name.clone();
-        argument.make_mut().directives.push(directive);
-        self.insert_directive_name_references(&mut schema.referencers, &name)
-    }
-
-    pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
-        let Some(argument) = self.try_make_mut(&mut schema.schema) else {
-            return;
-        };
-        self.remove_directive_name_references(&mut schema.referencers, name);
-        argument
-            .make_mut()
-            .directives
-            .retain(|other_directive| other_directive.name != name);
-    }
-
-    pub(crate) fn remove_directive(
-        &self,
-        schema: &mut FederationSchema,
-        directive: &Node<Directive>,
-    ) {
-        let Some(argument) = self.try_make_mut(&mut schema.schema) else {
-            return;
-        };
-        if !argument.directives.iter().any(|other_directive| {
-            (other_directive.name == directive.name) && !other_directive.ptr_eq(directive)
-        }) {
-            self.remove_directive_name_references(&mut schema.referencers, &directive.name);
-        }
-        argument
-            .make_mut()
-            .directives
-            .retain(|other_directive| !other_directive.ptr_eq(directive));
-    }
-
-    fn insert_references(
-        &self,
-        argument: &Node<InputValueDefinition>,
-        schema: &Schema,
-        referencers: &mut Referencers,
-    ) -> Result<(), FederationError> {
-        if is_graphql_reserved_name(&self.argument_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!("Cannot insert reserved object field argument \"{}\"", self),
-            }
-            .into());
-        }
-        validate_node_directives(argument.directives.deref())?;
-        for directive_reference in argument.directives.iter() {
-            self.insert_directive_name_references(referencers, &directive_reference.name)?;
-        }
-        self.insert_type_references(argument, schema, referencers)
-    }
-
-    fn remove_references(
-        &self,
-        argument: &Node<InputValueDefinition>,
-        schema: &Schema,
-        referencers: &mut Referencers,
-    ) -> Result<(), FederationError> {
-        if is_graphql_reserved_name(&self.argument_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!("Cannot remove reserved object field argument \"{}\"", self),
-            }
-            .into());
-        }
-        for directive_reference in argument.directives.iter() {
-            self.remove_directive_name_references(referencers, &directive_reference.name);
-        }
-        self.remove_type_references(argument, schema, referencers)
-    }
-
-    fn insert_directive_name_references(
-        &self,
-        referencers: &mut Referencers,
-        name: &Name,
-    ) -> Result<(), FederationError> {
-        let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: format!(
-                    "Object field argument \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
-                    self,
-                    name,
-                ),
-            }
-        })?;
-        directive_referencers
-            .object_field_arguments
-            .insert(self.clone());
-        Ok(())
-    }
-
-    fn remove_directive_name_references(&self, referencers: &mut Referencers, name: &str) {
-        let Some(directive_referencers) = referencers.directives.get_mut(name) else {
-            return;
-        };
-        directive_referencers
-            .object_field_arguments
-            .shift_remove(self);
-    }
-
-    fn insert_type_references(
-        &self,
-        argument: &Node<InputValueDefinition>,
-        schema: &Schema,
-        referencers: &mut Referencers,
-    ) -> Result<(), FederationError> {
-        let input_type_reference = argument.ty.inner_named_type();
-        match schema.types.get(input_type_reference) {
-            Some(ExtendedType::Scalar(_)) => {
-                let scalar_type_referencers = referencers
-                    .scalar_types
-                    .get_mut(input_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for type \"{}\"",
-                            input_type_reference
-                        ),
-                    })?;
-                scalar_type_referencers
-                    .object_field_arguments
-                    .insert(self.clone());
-            }
-            Some(ExtendedType::Enum(_)) => {
-                let enum_type_referencers = referencers
-                    .enum_types
-                    .get_mut(input_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for type \"{}\"",
-                            input_type_reference
-                        ),
-                    })?;
-                enum_type_referencers
-                    .object_field_arguments
-                    .insert(self.clone());
-            }
-            Some(ExtendedType::InputObject(_)) => {
-                let input_object_type_referencers = referencers
-                    .input_object_types
-                    .get_mut(input_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for type \"{}\"",
-                            input_type_reference
-                        ),
-                    })?;
-                input_object_type_referencers
-                    .object_field_arguments
-                    .insert(self.clone());
-            }
-            _ => {
-                return Err(
-                    SingleFederationError::Internal {
-                        message: format!(
-                            "Object field argument \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
-                            self,
-                            input_type_reference.deref(),
-                        )
-                    }.into()
-                );
-            }
-        }
-        Ok(())
-    }
-
-    fn remove_type_references(
-        &self,
-        argument: &Node<InputValueDefinition>,
-        schema: &Schema,
-        referencers: &mut Referencers,
-    ) -> Result<(), FederationError> {
-        let input_type_reference = argument.ty.inner_named_type();
-        match schema.types.get(input_type_reference) {
-            Some(ExtendedType::Scalar(_)) => {
-                let Some(scalar_type_referencers) =
-                    referencers.scalar_types.get_mut(input_type_reference)
-                else {
-                    return Ok(());
-                };
-                scalar_type_referencers
-                    .object_field_arguments
-                    .shift_remove(self);
-            }
-            Some(ExtendedType::Enum(_)) => {
-                let Some(enum_type_referencers) =
-                    referencers.enum_types.get_mut(input_type_reference)
-                else {
-                    return Ok(());
-                };
-                enum_type_referencers
-                    .object_field_arguments
-                    .shift_remove(self);
-            }
-            Some(ExtendedType::InputObject(_)) => {
-                let Some(input_object_type_referencers) =
-                    referencers.input_object_types.get_mut(input_type_reference)
-                else {
-                    return Ok(());
-                };
-                input_object_type_referencers
-                    .object_field_arguments
-                    .shift_remove(self);
-            }
-            _ => {
-                return Err(
-                    SingleFederationError::Internal {
-                        message: format!(
-                            "Object field argument \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
-                            self,
-                            input_type_reference.deref(),
-                        )
-                    }.into()
-                );
-            }
-        }
-        Ok(())
-    }
-}
-
-impl Display for ObjectFieldArgumentPosition {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}.{}({}:)",
-            self.type_name, self.field_name, self.argument_name
-        )
-    }
-}
-
-impl Debug for ObjectFieldArgumentPosition {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ObjectFieldArgument({self})")
-    }
-}
+pub(crate) type ObjectFieldArgumentPosition = ArgumentPosition<ObjectFieldPosition>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct InterfacePosition {
@@ -3932,27 +3545,80 @@ impl Display for InterfaceFieldPosition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct InterfaceFieldArgumentPosition {
-    pub(crate) type_name: Name,
-    pub(crate) field_name: Name,
-    pub(crate) argument_name: Name,
+trait Argumentable: Display + Clone + PartialEq + Eq + std::hash::Hash {
+    fn arguments<'s>(
+        &self,
+        schema: &'s Schema,
+    ) -> Result<&'s Vec<Node<InputValueDefinition>>, FederationError>;
+    fn arguments_mut<'s>(
+        &self,
+        schema: &'s mut Schema,
+    ) -> Result<&'s mut Vec<Node<InputValueDefinition>>, FederationError>;
+    fn describe() -> &'static str;
 }
 
-impl InterfaceFieldArgumentPosition {
-    pub const fn new(type_name: Name, field_name: Name, argument_name: Name) -> Self {
+impl Argumentable for ObjectFieldPosition {
+    fn arguments<'s>(
+        &self,
+        schema: &'s Schema,
+    ) -> Result<&'s Vec<Node<InputValueDefinition>>, FederationError> {
+        Ok(&self.get(schema)?.arguments)
+    }
+
+    fn arguments_mut<'s>(
+        &self,
+        schema: &'s mut Schema,
+    ) -> Result<&'s mut Vec<Node<InputValueDefinition>>, FederationError> {
+        Ok(&mut self.make_mut(schema)?.make_mut().arguments)
+    }
+
+    fn describe() -> &'static str {
+        "Object field"
+    }
+}
+
+impl Argumentable for InterfaceFieldPosition {
+    fn arguments<'s>(
+        &self,
+        schema: &'s Schema,
+    ) -> Result<&'s Vec<Node<InputValueDefinition>>, FederationError> {
+        Ok(&self.get(schema)?.arguments)
+    }
+
+    fn arguments_mut<'s>(
+        &self,
+        schema: &'s mut Schema,
+    ) -> Result<&'s mut Vec<Node<InputValueDefinition>>, FederationError> {
+        Ok(&mut self.make_mut(schema)?.make_mut().arguments)
+    }
+
+    fn describe() -> &'static str {
+        "Interface field"
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ArgumentPosition<T: Argumentable> {
+    parent: T,
+    pub argument_name: Name,
+}
+
+impl<T: Argumentable> Display for ArgumentPosition<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}({}:)", self.parent(), self.argument_name)
+    }
+}
+
+impl<T: Argumentable> ArgumentPosition<T> {
+    pub const fn new(parent: T, argument_name: Name) -> Self {
         Self {
-            type_name,
-            field_name,
+            parent,
             argument_name,
         }
     }
 
-    pub(crate) fn parent(&self) -> InterfaceFieldPosition {
-        InterfaceFieldPosition {
-            type_name: self.type_name.clone(),
-            field_name: self.field_name.clone(),
-        }
+    pub fn parent(&self) -> &T {
+        &self.parent
     }
 
     pub(crate) fn get<'schema>(
@@ -3960,20 +3626,18 @@ impl InterfaceFieldArgumentPosition {
         schema: &'schema Schema,
     ) -> Result<&'schema Node<InputValueDefinition>, FederationError> {
         let parent = self.parent();
-        let type_ = parent.get(schema)?;
+        let arguments = parent.arguments(schema)?;
 
-        type_
-            .arguments
+        arguments
             .iter()
             .find(|a| a.name == self.argument_name)
             .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Interface field \"{}\" has no argument \"{}\"",
-                        parent, self.argument_name
-                    ),
-                }
-                .into()
+                FederationError::internal(format!(
+                    r#"{} "{}" has no argument "{}""#,
+                    T::describe(),
+                    parent,
+                    self.argument_name
+                ))
             })
     }
 
@@ -3988,21 +3652,17 @@ impl InterfaceFieldArgumentPosition {
         &self,
         schema: &'schema mut Schema,
     ) -> Result<&'schema mut Node<InputValueDefinition>, FederationError> {
-        let parent = self.parent();
-        let type_ = parent.make_mut(schema)?.make_mut();
-
-        type_
-            .arguments
+        self.parent()
+            .arguments_mut(schema)?
             .iter_mut()
             .find(|a| a.name == self.argument_name)
             .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Interface field \"{}\" has no argument \"{}\"",
-                        parent, self.argument_name
-                    ),
-                }
-                .into()
+                FederationError::internal(format!(
+                    "{} \"{}\" has no argument \"{}\"",
+                    T::describe(),
+                    self.parent(),
+                    self.argument_name
+                ))
             })
     }
 
@@ -4023,28 +3683,23 @@ impl InterfaceFieldArgumentPosition {
         argument: Node<InputValueDefinition>,
     ) -> Result<(), FederationError> {
         if self.argument_name != argument.name {
-            return Err(SingleFederationError::Internal {
-                message: format!(
-                    "Interface field argument \"{}\" given argument named \"{}\"",
-                    self, argument.name,
-                ),
-            }
-            .into());
+            return Err(FederationError::internal(format!(
+                "{} argument \"{}\" given argument named \"{}\"",
+                T::describe(),
+                self,
+                argument.name,
+            )));
         }
         if self.try_get(&schema.schema).is_some() {
             // TODO: Handle old spec edge case of arguments with non-unique names
-            return Err(SingleFederationError::Internal {
-                message: format!(
-                    "Interface field argument \"{}\" already exists in schema",
-                    self,
-                ),
-            }
-            .into());
+            return Err(FederationError::internal(format!(
+                "{} argument \"{}\" already exists in schema",
+                T::describe(),
+                self,
+            )));
         }
         self.parent()
-            .make_mut(&mut schema.schema)?
-            .make_mut()
-            .arguments
+            .arguments_mut(&mut schema.schema)?
             .push(argument);
         self.insert_references(
             self.get(&schema.schema)?,
@@ -4058,9 +3713,7 @@ impl InterfaceFieldArgumentPosition {
         };
         self.remove_references(argument, &schema.schema, &mut schema.referencers)?;
         self.parent()
-            .make_mut(&mut schema.schema)?
-            .make_mut()
-            .arguments
+            .arguments_mut(&mut schema.schema)?
             .retain(|other_argument| other_argument.name != self.argument_name);
         Ok(())
     }
@@ -4076,15 +3729,10 @@ impl InterfaceFieldArgumentPosition {
             .iter()
             .any(|other_directive| other_directive.ptr_eq(&directive))
         {
-            return Err(
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Directive application \"@{}\" already exists on interface field argument \"{}\"",
-                        directive.name,
-                        self,
-                    )
-                }.into()
-            );
+            return Err(FederationError::internal(format!(
+                "Directive application \"@{}\" already exists on interface field argument \"{}\"",
+                directive.name, self,
+            )));
         }
         let name = directive.name.clone();
         argument.make_mut().directives.push(directive);
@@ -4128,13 +3776,10 @@ impl InterfaceFieldArgumentPosition {
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.argument_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!(
-                    "Cannot insert reserved interface field argument \"{}\"",
-                    self
-                ),
-            }
-            .into());
+            return Err(FederationError::internal(format!(
+                "Cannot insert reserved interface field argument \"{}\"",
+                self
+            )));
         }
         validate_node_directives(argument.directives.deref())?;
         for directive_reference in argument.directives.iter() {
@@ -4150,13 +3795,10 @@ impl InterfaceFieldArgumentPosition {
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.argument_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!(
-                    "Cannot remove reserved interface field argument \"{}\"",
-                    self
-                ),
-            }
-            .into());
+            return Err(FederationError::internal(format!(
+                "Cannot remove reserved interface field argument \"{}\"",
+                self
+            )));
         }
         for directive_reference in argument.directives.iter() {
             self.remove_directive_name_references(referencers, &directive_reference.name);
@@ -4205,11 +3847,11 @@ impl InterfaceFieldArgumentPosition {
                 let scalar_type_referencers = referencers
                     .scalar_types
                     .get_mut(input_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
+                    .ok_or_else(|| {
+                        FederationError::internal(format!(
                             "Schema missing referencers for type \"{}\"",
                             input_type_reference
-                        ),
+                        ))
                     })?;
                 scalar_type_referencers
                     .interface_field_arguments
@@ -4219,11 +3861,11 @@ impl InterfaceFieldArgumentPosition {
                 let enum_type_referencers = referencers
                     .enum_types
                     .get_mut(input_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
+                    .ok_or_else(|| {
+                        FederationError::internal(format!(
                             "Schema missing referencers for type \"{}\"",
                             input_type_reference
-                        ),
+                        ))
                     })?;
                 enum_type_referencers
                     .interface_field_arguments
@@ -4233,11 +3875,11 @@ impl InterfaceFieldArgumentPosition {
                 let input_object_type_referencers = referencers
                     .input_object_types
                     .get_mut(input_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
+                    .ok_or_else(|| {
+                        FederationError::internal(format!(
                             "Schema missing referencers for type \"{}\"",
                             input_type_reference
-                        ),
+                        ))
                     })?;
                 input_object_type_referencers
                     .interface_field_arguments
@@ -4245,13 +3887,13 @@ impl InterfaceFieldArgumentPosition {
             }
             _ => {
                 return Err(
-                    SingleFederationError::Internal {
-                        message: format!(
+                    FederationError::internal(
+                        format!(
                             "Interface field argument \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
                             self,
                             input_type_reference.deref(),
                         )
-                    }.into()
+                    )
                 );
             }
         }
@@ -4312,15 +3954,7 @@ impl InterfaceFieldArgumentPosition {
     }
 }
 
-impl Display for InterfaceFieldArgumentPosition {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}.{}({}:)",
-            self.type_name, self.field_name, self.argument_name
-        )
-    }
-}
+pub(crate) type InterfaceFieldArgumentPosition = ArgumentPosition<InterfaceFieldPosition>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct UnionPosition {
@@ -6702,7 +6336,7 @@ lazy_static! {
             name!("defer"),
         ])
     };
-    // This is static so that UnionTypenameFieldDefinitionPosition.field_name() can return `&Name`,
+    // This is static so that UnionTypenamePosition.field_name() can return `&Name`,
     // like the other field_name() methods in this file.
     pub(crate) static ref INTROSPECTION_TYPENAME_FIELD_NAME: Name = name!("__typename");
 }

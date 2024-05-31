@@ -21,12 +21,12 @@ use crate::query_plan::operation::Field;
 use crate::query_plan::operation::InlineFragment;
 use crate::query_plan::operation::SelectionSet;
 use crate::schema::field_set::parse_field_set;
-use crate::schema::position::CompositeTypeDefinitionPosition;
-use crate::schema::position::FieldDefinitionPosition;
-use crate::schema::position::InterfaceFieldDefinitionPosition;
-use crate::schema::position::ObjectTypeDefinitionPosition;
-use crate::schema::position::OutputTypeDefinitionPosition;
-use crate::schema::position::SchemaRootDefinitionKind;
+use crate::schema::position::CompositeTypePosition;
+use crate::schema::position::FieldPosition;
+use crate::schema::position::InterfaceFieldPosition;
+use crate::schema::position::ObjectPosition;
+use crate::schema::position::OutputTypePosition;
+use crate::schema::position::SchemaRootKind;
 use crate::schema::ValidFederationSchema;
 
 pub mod build_query_graph;
@@ -65,7 +65,7 @@ pub(crate) struct QueryGraphNode {
     /// this mostly exists for debugging visualization.
     pub(crate) provide_id: Option<u32>,
     // If present, this node represents a root node of the corresponding kind.
-    pub(crate) root_kind: Option<SchemaRootDefinitionKind>,
+    pub(crate) root_kind: Option<SchemaRootKind>,
 }
 
 impl QueryGraphNode {
@@ -89,8 +89,8 @@ impl Display for QueryGraphNode {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::IsVariant)]
 pub(crate) enum QueryGraphNodeType {
-    SchemaType(OutputTypeDefinitionPosition),
-    FederatedRootType(SchemaRootDefinitionKind),
+    SchemaType(OutputTypePosition),
+    FederatedRootType(SchemaRootKind),
 }
 
 impl Display for QueryGraphNodeType {
@@ -104,7 +104,7 @@ impl Display for QueryGraphNodeType {
     }
 }
 
-impl TryFrom<QueryGraphNodeType> for CompositeTypeDefinitionPosition {
+impl TryFrom<QueryGraphNodeType> for CompositeTypePosition {
     type Error = FederationError;
 
     fn try_from(value: QueryGraphNodeType) -> Result<Self, Self::Error> {
@@ -117,7 +117,7 @@ impl TryFrom<QueryGraphNodeType> for CompositeTypeDefinitionPosition {
     }
 }
 
-impl TryFrom<QueryGraphNodeType> for ObjectTypeDefinitionPosition {
+impl TryFrom<QueryGraphNodeType> for ObjectPosition {
     type Error = FederationError;
 
     fn try_from(value: QueryGraphNodeType) -> Result<Self, Self::Error> {
@@ -177,7 +177,7 @@ pub(crate) enum QueryGraphEdgeTransition {
         /// The name of the schema containing the field.
         source: NodeStr,
         /// The object/interface field being collected.
-        field_definition_position: FieldDefinitionPosition,
+        field_definition_position: FieldPosition,
         /// Whether this field is part of an @provides.
         is_part_of_provides: bool,
     },
@@ -189,9 +189,9 @@ pub(crate) enum QueryGraphEdgeTransition {
         source: NodeStr,
         /// The parent type of the type condition, i.e. the type of the selection set containing
         /// the type condition.
-        from_type_position: CompositeTypeDefinitionPosition,
+        from_type_position: CompositeTypePosition,
         /// The type of the type condition, i.e. the type coming after "... on".
-        to_type_position: CompositeTypeDefinitionPosition,
+        to_type_position: CompositeTypePosition,
     },
     /// A key edge (only found in federated query graphs) going from an entity type in a particular
     /// subgraph to the same entity type but in another subgraph. Key transition edges _must_ have
@@ -203,7 +203,7 @@ pub(crate) enum QueryGraphEdgeTransition {
     /// from there.
     RootTypeResolution {
         /// The kind of schema root resolved.
-        root_kind: SchemaRootDefinitionKind,
+        root_kind: SchemaRootKind,
     },
     /// A subgraph-entering edge, which is a special case only used for edges coming out of the root
     /// nodes of "federated" query graphs. It does not correspond to any physical GraphQL elements
@@ -221,7 +221,7 @@ pub(crate) enum QueryGraphEdgeTransition {
         source: NodeStr,
         /// The parent type of the type condition, i.e. the type of the selection set containing
         /// the type condition.
-        from_type_position: CompositeTypeDefinitionPosition,
+        from_type_position: CompositeTypePosition,
         /// The type of the type condition, i.e. the type coming after "... on".
         to_type_name: Name,
     },
@@ -289,7 +289,7 @@ pub struct QueryGraph {
     /// a "federated" query graph source, each type name will only map to a single node.
     types_to_nodes_by_source: IndexMap<NodeStr, IndexMap<NamedType, IndexSet<NodeIndex>>>,
     /// A map (keyed by source) that associates schema root kinds to root nodes.
-    root_kinds_to_nodes_by_source: IndexMap<NodeStr, IndexMap<SchemaRootDefinitionKind, NodeIndex>>,
+    root_kinds_to_nodes_by_source: IndexMap<NodeStr, IndexMap<SchemaRootKind, NodeIndex>>,
     /// Maps an edge to the possible edges that can follow it "productively", that is without
     /// creating a trivially inefficient path.
     ///
@@ -436,7 +436,7 @@ impl QueryGraph {
 
     pub(crate) fn root_kinds_to_nodes(
         &self,
-    ) -> Result<&IndexMap<SchemaRootDefinitionKind, NodeIndex>, FederationError> {
+    ) -> Result<&IndexMap<SchemaRootKind, NodeIndex>, FederationError> {
         self.root_kinds_to_nodes_by_source
             .get(&self.current_source)
             .ok_or_else(|| {
@@ -450,7 +450,7 @@ impl QueryGraph {
     pub(crate) fn root_kinds_to_nodes_by_source(
         &self,
         source: &str,
-    ) -> Result<&IndexMap<SchemaRootDefinitionKind, NodeIndex>, FederationError> {
+    ) -> Result<&IndexMap<SchemaRootKind, NodeIndex>, FederationError> {
         self.root_kinds_to_nodes_by_source
             .get(source)
             .ok_or_else(|| {
@@ -463,7 +463,7 @@ impl QueryGraph {
 
     fn root_kinds_to_nodes_mut(
         &mut self,
-    ) -> Result<&mut IndexMap<SchemaRootDefinitionKind, NodeIndex>, FederationError> {
+    ) -> Result<&mut IndexMap<SchemaRootKind, NodeIndex>, FederationError> {
         self.root_kinds_to_nodes_by_source
             .get_mut(&self.current_source)
             .ok_or_else(|| {
@@ -677,9 +677,9 @@ impl QueryGraph {
     // PORT_NOTE: Named `updateRuntimeTypes` in the JS codebase.
     pub(crate) fn advance_possible_runtime_types(
         &self,
-        possible_runtime_types: &IndexSet<ObjectTypeDefinitionPosition>,
+        possible_runtime_types: &IndexSet<ObjectPosition>,
         edge: Option<EdgeIndex>,
-    ) -> Result<IndexSet<ObjectTypeDefinitionPosition>, FederationError> {
+    ) -> Result<IndexSet<ObjectPosition>, FederationError> {
         let Some(edge) = edge else {
             return Ok(possible_runtime_types.clone());
         };
@@ -698,8 +698,7 @@ impl QueryGraph {
                 field_definition_position,
                 ..
             } => {
-                let Ok(_): Result<CompositeTypeDefinitionPosition, _> =
-                    tail_type_pos.clone().try_into()
+                let Ok(_): Result<CompositeTypePosition, _> = tail_type_pos.clone().try_into()
                 else {
                     return Ok(IndexSet::new());
                 };
@@ -711,7 +710,7 @@ impl QueryGraph {
                     let Some(field) = field_pos.try_get(schema.schema()) else {
                         continue;
                     };
-                    let field_type_pos: CompositeTypeDefinitionPosition = schema
+                    let field_type_pos: CompositeTypePosition = schema
                         .get_type(field.ty.inner_named_type().clone())?
                         .try_into()?;
                     new_possible_runtime_types
@@ -730,15 +729,13 @@ impl QueryGraph {
                 .cloned()
                 .collect()),
             QueryGraphEdgeTransition::KeyResolution => {
-                let tail_type_pos: CompositeTypeDefinitionPosition =
-                    tail_type_pos.clone().try_into()?;
+                let tail_type_pos: CompositeTypePosition = tail_type_pos.clone().try_into()?;
                 Ok(self
                     .schema_by_source(&tail_weight.source)?
                     .possible_runtime_types(tail_type_pos)?)
             }
             QueryGraphEdgeTransition::RootTypeResolution { .. } => {
-                let OutputTypeDefinitionPosition::Object(tail_type_pos) = tail_type_pos.clone()
-                else {
+                let OutputTypePosition::Object(tail_type_pos) = tail_type_pos.clone() else {
                     return Err(FederationError::internal(
                         "Unexpectedly encountered non-object root operation type.",
                     ));
@@ -746,8 +743,7 @@ impl QueryGraph {
                 Ok(IndexSet::from([tail_type_pos]))
             }
             QueryGraphEdgeTransition::SubgraphEnteringTransition => {
-                let OutputTypeDefinitionPosition::Object(tail_type_pos) = tail_type_pos.clone()
-                else {
+                let OutputTypePosition::Object(tail_type_pos) = tail_type_pos.clone() else {
                     return Err(FederationError::internal(
                         "Unexpectedly encountered non-object root operation type.",
                     ));
@@ -769,9 +765,7 @@ impl QueryGraph {
     ) -> Result<Option<SelectionSet>, FederationError> {
         let node = self.node_weight(node_index)?;
         let type_name = match &node.type_ {
-            QueryGraphNodeType::SchemaType(ty) => {
-                CompositeTypeDefinitionPosition::try_from(ty.clone())?
-            }
+            QueryGraphNodeType::SchemaType(ty) => CompositeTypePosition::try_from(ty.clone())?,
             QueryGraphNodeType::FederatedRootType(_) => {
                 return Err(FederationError::internal(format!(
                     "get_locally_satisfiable_key must be called on a composite type, got {}",
@@ -834,7 +828,7 @@ impl QueryGraph {
     pub(crate) fn has_an_implementation_with_provides(
         &self,
         source: &NodeStr,
-        interface_field_definition_position: InterfaceFieldDefinitionPosition,
+        interface_field_definition_position: InterfaceFieldPosition,
     ) -> Result<bool, FederationError> {
         let schema = self.schema_by_source(source)?;
         let Some(metadata) = schema.subgraph_metadata() else {

@@ -38,13 +38,13 @@ use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlan;
 use crate::query_plan::SequenceNode;
 use crate::query_plan::TopLevelPlanNode;
-use crate::schema::position::AbstractTypeDefinitionPosition;
-use crate::schema::position::CompositeTypeDefinitionPosition;
-use crate::schema::position::InterfaceTypeDefinitionPosition;
-use crate::schema::position::ObjectTypeDefinitionPosition;
-use crate::schema::position::OutputTypeDefinitionPosition;
-use crate::schema::position::SchemaRootDefinitionKind;
-use crate::schema::position::TypeDefinitionPosition;
+use crate::schema::position::AbstractTypePosition;
+use crate::schema::position::CompositeTypePosition;
+use crate::schema::position::InterfacePosition;
+use crate::schema::position::ObjectPosition;
+use crate::schema::position::OutputTypePosition;
+use crate::schema::position::SchemaRootKind;
+use crate::schema::position::TypePosition;
 use crate::schema::ValidFederationSchema;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
@@ -181,12 +181,12 @@ pub struct QueryPlanner {
     subgraph_federation_spec_definitions: Arc<IndexMap<NodeStr, &'static FederationSpecDefinition>>,
     /// A set of the names of interface types for which at least one subgraph use an
     /// @interfaceObject to abstract that interface.
-    interface_types_with_interface_objects: IndexSet<InterfaceTypeDefinitionPosition>,
+    interface_types_with_interface_objects: IndexSet<InterfacePosition>,
     /// A set of the names of interface or union types that have inconsistent "runtime types" across
     /// subgraphs.
     // PORT_NOTE: Named `inconsistentAbstractTypesRuntimes` in the JS codebase, which was slightly
     // confusing.
-    abstract_types_with_inconsistent_runtime_types: IndexSet<AbstractTypeDefinitionPosition>,
+    abstract_types_with_inconsistent_runtime_types: IndexSet<AbstractTypePosition>,
 }
 
 impl QueryPlanner {
@@ -223,7 +223,7 @@ impl QueryPlanner {
             .schema
             .get_types()
             .filter_map(|position| match position {
-                TypeDefinitionPosition::Interface(interface_position) => Some(interface_position),
+                TypePosition::Interface(interface_position) => Some(interface_position),
                 _ => None,
             })
             .filter(|position| {
@@ -237,15 +237,15 @@ impl QueryPlanner {
             })
             .collect::<IndexSet<_>>();
 
-        let is_inconsistent = |position: AbstractTypeDefinitionPosition| {
+        let is_inconsistent = |position: AbstractTypePosition| {
             let mut sources = query_graph.sources().filter_map(|(_name, subgraph)| {
                 match subgraph.try_get_type(position.type_name().clone())? {
                     // This is only called for type names that are abstract in the supergraph, so it
                     // can only be an object in a subgraph if it is an `@interfaceObject`. And as `@interfaceObject`s
                     // "stand-in" for all possible runtime types, they don't create inconsistencies by themselves
                     // and we can ignore them.
-                    TypeDefinitionPosition::Object(_) => None,
-                    TypeDefinitionPosition::Interface(interface) => Some(
+                    TypePosition::Object(_) => None,
+                    TypePosition::Interface(interface) => Some(
                         subgraph
                             .referencers()
                             .get_interface_type(&interface.type_name)
@@ -253,12 +253,12 @@ impl QueryPlanner {
                             .object_types
                             .clone(),
                     ),
-                    TypeDefinitionPosition::Union(union_) => Some(
+                    TypePosition::Union(union_) => Some(
                         union_
                             .try_get(subgraph.schema())?
                             .members
                             .iter()
-                            .map(|member| ObjectTypeDefinitionPosition::new(member.name.clone()))
+                            .map(|member| ObjectPosition::new(member.name.clone()))
                             .collect(),
                     ),
                     _ => None,
@@ -274,7 +274,7 @@ impl QueryPlanner {
         let abstract_types_with_inconsistent_runtime_types = supergraph
             .schema
             .get_types()
-            .filter_map(|position| AbstractTypeDefinitionPosition::try_from(position).ok())
+            .filter_map(|position| AbstractTypePosition::try_from(position).ok())
             .filter(|position| is_inconsistent(position.clone()))
             .collect::<IndexSet<_>>();
 
@@ -510,7 +510,7 @@ fn compute_root_serial_dependency_graph(
         operation,
         ..
     } = parameters;
-    let root_type: Option<CompositeTypeDefinitionPosition> = if has_defers {
+    let root_type: Option<CompositeTypePosition> = if has_defers {
         supergraph_schema
             .schema()
             .root_operation(operation.root_kind.into())
@@ -590,7 +590,7 @@ fn only_root_subgraph(graph: &FetchDependencyGraph) -> Result<NodeIndex, Federat
 }
 
 pub(crate) fn compute_root_fetch_groups(
-    root_kind: SchemaRootDefinitionKind,
+    root_kind: SchemaRootKind,
     dependency_graph: &mut FetchDependencyGraph,
     path: &OpPathTree,
 ) -> Result<(), FederationError> {
@@ -606,7 +606,7 @@ pub(crate) fn compute_root_fetch_groups(
         let target_node = path.graph.node_weight(target_node)?;
         let subgraph_name = &target_node.source;
         let root_type = match &target_node.type_ {
-            QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(object)) => {
+            QueryGraphNodeType::SchemaType(OutputTypePosition::Object(object)) => {
                 object.clone().into()
             }
             ty => {
@@ -664,7 +664,7 @@ fn compute_plan_internal(
 ) -> Result<Option<PlanNode>, FederationError> {
     let root_kind = parameters.operation.root_kind;
 
-    let (main, deferred, primary_selection) = if root_kind == SchemaRootDefinitionKind::Mutation {
+    let (main, deferred, primary_selection) = if root_kind == SchemaRootKind::Mutation {
         let dependency_graphs = compute_root_serial_dependency_graph(parameters, has_defers)?;
         let mut main = None;
         let mut deferred = vec![];

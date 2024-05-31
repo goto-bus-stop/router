@@ -4,17 +4,17 @@ use apollo_compiler::Schema;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::schema::position::CompositeTypeDefinitionPosition;
-use crate::schema::position::InterfaceTypeDefinitionPosition;
-use crate::schema::position::TypeDefinitionPosition;
-use crate::schema::position::UnionTypeDefinitionPosition;
+use crate::schema::position::CompositeTypePosition;
+use crate::schema::position::InterfacePosition;
+use crate::schema::position::TypePosition;
+use crate::schema::position::UnionPosition;
 
 pub(crate) enum AbstractType {
-    Interface(InterfaceTypeDefinitionPosition),
-    Union(UnionTypeDefinitionPosition),
+    Interface(InterfacePosition),
+    Union(UnionPosition),
 }
 
-impl From<AbstractType> for CompositeTypeDefinitionPosition {
+impl From<AbstractType> for CompositeTypePosition {
     fn from(value: AbstractType) -> Self {
         match value {
             AbstractType::Interface(x) => Self::Interface(x),
@@ -23,11 +23,11 @@ impl From<AbstractType> for CompositeTypeDefinitionPosition {
     }
 }
 
-pub(crate) fn is_abstract_type(ty: TypeDefinitionPosition) -> bool {
+pub(crate) fn is_abstract_type(ty: TypePosition) -> bool {
     matches!(
         ty,
-        crate::schema::position::TypeDefinitionPosition::Interface(_)
-            | crate::schema::position::TypeDefinitionPosition::Union(_)
+        crate::schema::position::TypePosition::Interface(_)
+            | crate::schema::position::TypePosition::Union(_)
     )
 }
 

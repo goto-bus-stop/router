@@ -44,10 +44,10 @@ use crate::query_plan::FetchDataRewrite;
 use crate::schema::definitions::is_composite_type;
 use crate::schema::definitions::types_can_be_merged;
 use crate::schema::definitions::AbstractType;
-use crate::schema::position::CompositeTypeDefinitionPosition;
-use crate::schema::position::InterfaceTypeDefinitionPosition;
-use crate::schema::position::ObjectTypeDefinitionPosition;
-use crate::schema::position::SchemaRootDefinitionKind;
+use crate::schema::position::CompositeTypePosition;
+use crate::schema::position::InterfacePosition;
+use crate::schema::position::ObjectPosition;
+use crate::schema::position::SchemaRootKind;
 use crate::schema::ValidFederationSchema;
 
 pub(crate) const TYPENAME_FIELD: Name = name!("__typename");
@@ -146,7 +146,7 @@ fn same_directives(left: &executable::DirectiveList, right: &executable::Directi
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Operation {
     pub(crate) schema: ValidFederationSchema,
-    pub(crate) root_kind: SchemaRootDefinitionKind,
+    pub(crate) root_kind: SchemaRootKind,
     pub(crate) name: Option<Name>,
     pub(crate) variables: Arc<Vec<Node<executable::VariableDefinition>>>,
     pub(crate) directives: Arc<executable::DirectiveList>,
@@ -240,7 +240,7 @@ impl Operation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SelectionSet {
     pub(crate) schema: ValidFederationSchema,
-    pub(crate) type_position: CompositeTypeDefinitionPosition,
+    pub(crate) type_position: CompositeTypePosition,
     pub(crate) selections: Arc<SelectionMap>,
 }
 
@@ -853,7 +853,7 @@ impl Selection {
 
     pub(crate) fn rebase_on(
         &self,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
         error_handling: RebaseErrorHandlingOption,
@@ -873,7 +873,7 @@ impl Selection {
 
     pub(crate) fn can_add_to(
         &self,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         schema: &ValidFederationSchema,
     ) -> bool {
         match self {
@@ -885,7 +885,7 @@ impl Selection {
 
     pub(crate) fn normalize(
         &self,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
         option: NormalizeSelectionOption,
@@ -929,7 +929,7 @@ impl Selection {
 
     pub(crate) fn with_updated_selections<S: Into<Selection>>(
         &self,
-        type_position: CompositeTypeDefinitionPosition,
+        type_position: CompositeTypePosition,
         selections: impl IntoIterator<Item = S>,
     ) -> Result<Self, FederationError> {
         let new_sub_selection =
@@ -1022,7 +1022,7 @@ pub(crate) enum SelectionOrSet {
 pub(crate) struct Fragment {
     pub(crate) schema: ValidFederationSchema,
     pub(crate) name: Name,
-    pub(crate) type_condition_position: CompositeTypeDefinitionPosition,
+    pub(crate) type_condition_position: CompositeTypePosition,
     pub(crate) directives: Arc<executable::DirectiveList>,
     pub(crate) selection_set: SelectionSet,
 }
@@ -1081,9 +1081,9 @@ mod normalized_field_selection {
     use crate::query_plan::operation::SelectionKey;
     use crate::query_plan::operation::SelectionSet;
     use crate::query_plan::FetchDataPathElement;
-    use crate::schema::position::CompositeTypeDefinitionPosition;
-    use crate::schema::position::FieldDefinitionPosition;
-    use crate::schema::position::TypeDefinitionPosition;
+    use crate::schema::position::CompositeTypePosition;
+    use crate::schema::position::FieldPosition;
+    use crate::schema::position::TypePosition;
     use crate::schema::ValidFederationSchema;
 
     /// An analogue of the apollo-compiler type `Field` with these changes:
@@ -1165,14 +1165,14 @@ mod normalized_field_selection {
         /// Create a trivial field selection without any arguments or directives.
         pub(crate) fn from_position(
             schema: &ValidFederationSchema,
-            field_position: FieldDefinitionPosition,
+            field_position: FieldPosition,
         ) -> Self {
             Self::new(FieldData::from_position(schema, field_position))
         }
 
         pub(crate) fn new_introspection_typename(
             schema: &ValidFederationSchema,
-            parent_type: &CompositeTypeDefinitionPosition,
+            parent_type: &CompositeTypePosition,
             alias: Option<Name>,
         ) -> Self {
             Self::new(FieldData {
@@ -1266,7 +1266,7 @@ mod normalized_field_selection {
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub(crate) struct FieldData {
         pub(crate) schema: ValidFederationSchema,
-        pub(crate) field_position: FieldDefinitionPosition,
+        pub(crate) field_position: FieldPosition,
         pub(crate) alias: Option<Name>,
         pub(crate) arguments: Arc<Vec<Node<executable::Argument>>>,
         pub(crate) directives: Arc<executable::DirectiveList>,
@@ -1277,7 +1277,7 @@ mod normalized_field_selection {
         /// Create a trivial field selection without any arguments or directives.
         pub fn from_position(
             schema: &ValidFederationSchema,
-            field_position: FieldDefinitionPosition,
+            field_position: FieldPosition,
         ) -> Self {
             Self {
                 schema: schema.clone(),
@@ -1301,7 +1301,7 @@ mod normalized_field_selection {
             Ok(&self.field_position.get(self.schema.schema())?.ty)
         }
 
-        pub(crate) fn output_base_type(&self) -> Result<TypeDefinitionPosition, FederationError> {
+        pub(crate) fn output_base_type(&self) -> Result<TypePosition, FederationError> {
             let definition = self.field_position.get(self.schema.schema())?;
             self.schema
                 .get_type(definition.ty.inner_named_type().clone())
@@ -1311,7 +1311,7 @@ mod normalized_field_selection {
             let base_type_position = self.output_base_type()?;
             Ok(matches!(
                 base_type_position,
-                TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_)
+                TypePosition::Scalar(_) | TypePosition::Enum(_)
             ))
         }
     }
@@ -1342,7 +1342,7 @@ mod normalized_fragment_spread_selection {
     use crate::query_plan::operation::SelectionId;
     use crate::query_plan::operation::SelectionKey;
     use crate::query_plan::operation::SelectionSet;
-    use crate::schema::position::CompositeTypeDefinitionPosition;
+    use crate::schema::position::CompositeTypePosition;
     use crate::schema::ValidFederationSchema;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1395,7 +1395,7 @@ mod normalized_fragment_spread_selection {
     pub(crate) struct FragmentSpreadData {
         pub(crate) schema: ValidFederationSchema,
         pub(crate) fragment_name: Name,
-        pub(crate) type_condition_position: CompositeTypeDefinitionPosition,
+        pub(crate) type_condition_position: CompositeTypePosition,
         // directives applied on the fragment spread selection
         pub(crate) directives: Arc<executable::DirectiveList>,
         // directives applied within the fragment definition
@@ -1430,7 +1430,7 @@ pub(crate) use normalized_fragment_spread_selection::FragmentSpreadSelection;
 impl FragmentSpreadSelection {
     pub(crate) fn rebase_on(
         &self,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
         error_handling: RebaseErrorHandlingOption,
@@ -1572,7 +1572,7 @@ impl FragmentSpreadSelection {
 
     pub(crate) fn normalize(
         &self,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
     ) -> Result<Option<SelectionOrSet>, FederationError> {
@@ -1664,7 +1664,7 @@ mod normalized_inline_fragment_selection {
     use crate::query_plan::operation::SelectionKey;
     use crate::query_plan::operation::SelectionSet;
     use crate::query_plan::FetchDataPathElement;
-    use crate::schema::position::CompositeTypeDefinitionPosition;
+    use crate::schema::position::CompositeTypePosition;
     use crate::schema::ValidFederationSchema;
 
     /// An analogue of the apollo-compiler type `InlineFragment` with these changes:
@@ -1736,7 +1736,7 @@ mod normalized_inline_fragment_selection {
 
         pub(crate) fn with_updated_type_condition(
             &self,
-            new: Option<CompositeTypeDefinitionPosition>,
+            new: Option<CompositeTypePosition>,
         ) -> Self {
             let mut data = self.data().clone();
             data.type_condition_position = new;
@@ -1778,8 +1778,8 @@ mod normalized_inline_fragment_selection {
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub(crate) struct InlineFragmentData {
         pub(crate) schema: ValidFederationSchema,
-        pub(crate) parent_type_position: CompositeTypeDefinitionPosition,
-        pub(crate) type_condition_position: Option<CompositeTypeDefinitionPosition>,
+        pub(crate) parent_type_position: CompositeTypePosition,
+        pub(crate) type_condition_position: Option<CompositeTypePosition>,
         pub(crate) directives: Arc<executable::DirectiveList>,
         pub(crate) selection_id: SelectionId,
     }
@@ -1797,9 +1797,9 @@ mod normalized_inline_fragment_selection {
 
         pub(super) fn casted_type_if_add_to(
             &self,
-            parent_type: &CompositeTypeDefinitionPosition,
+            parent_type: &CompositeTypePosition,
             schema: &ValidFederationSchema,
-        ) -> Option<CompositeTypeDefinitionPosition> {
+        ) -> Option<CompositeTypePosition> {
             if &self.parent_type_position == parent_type && &self.schema == schema {
                 return Some(self.casted_type());
             }
@@ -1810,7 +1810,7 @@ mod normalized_inline_fragment_selection {
             }
         }
 
-        pub(crate) fn casted_type(&self) -> CompositeTypeDefinitionPosition {
+        pub(crate) fn casted_type(&self) -> CompositeTypePosition {
             self.type_condition_position
                 .clone()
                 .unwrap_or_else(|| self.parent_type_position.clone())
@@ -1818,15 +1818,15 @@ mod normalized_inline_fragment_selection {
 
         fn can_rebase_on(
             &self,
-            parent_type: &CompositeTypeDefinitionPosition,
-        ) -> (bool, Option<CompositeTypeDefinitionPosition>) {
+            parent_type: &CompositeTypePosition,
+        ) -> (bool, Option<CompositeTypePosition>) {
             let Some(ty) = self.type_condition_position.as_ref() else {
                 return (true, None);
             };
             match self
                 .schema
                 .get_type(ty.type_name().clone())
-                .and_then(CompositeTypeDefinitionPosition::try_from)
+                .and_then(CompositeTypePosition::try_from)
             {
                 Ok(ty) if runtime_types_intersect(parent_type, &ty, &self.schema) => {
                     (true, Some(ty))
@@ -1912,7 +1912,7 @@ impl FromIterator<Selection> for SelectionMapperReturn {
 impl SelectionSet {
     pub(crate) fn empty(
         schema: ValidFederationSchema,
-        type_position: CompositeTypeDefinitionPosition,
+        type_position: CompositeTypePosition,
     ) -> Self {
         Self {
             schema,
@@ -1960,7 +1960,7 @@ impl SelectionSet {
     /// PORT_NOTE: JS calls this `newCompositeTypeSelectionSet`
     pub(crate) fn for_composite_type(
         schema: ValidFederationSchema,
-        type_position: CompositeTypeDefinitionPosition,
+        type_position: CompositeTypePosition,
     ) -> Self {
         let typename_field = Field::new_introspection_typename(&schema, &type_position, None)
             .with_subselection(None);
@@ -1973,7 +1973,7 @@ impl SelectionSet {
 
     /// Build a selection set from a single selection.
     pub(crate) fn from_selection(
-        type_position: CompositeTypeDefinitionPosition,
+        type_position: CompositeTypePosition,
         selection: Selection,
     ) -> Self {
         let schema = selection.schema().clone();
@@ -1990,7 +1990,7 @@ impl SelectionSet {
     /// selections with the same keys!
     pub(crate) fn from_raw_selections<S: Into<Selection>>(
         schema: ValidFederationSchema,
-        type_position: CompositeTypeDefinitionPosition,
+        type_position: CompositeTypePosition,
         selections: impl IntoIterator<Item = S>,
     ) -> Self {
         Self {
@@ -2003,7 +2003,7 @@ impl SelectionSet {
     #[cfg(any(doc, test))]
     pub fn parse(
         schema: ValidFederationSchema,
-        type_position: CompositeTypeDefinitionPosition,
+        type_position: CompositeTypePosition,
         source_text: &str,
     ) -> Result<Self, FederationError> {
         let selection_set = crate::schema::field_set::parse_field_set_without_normalization(
@@ -2052,7 +2052,7 @@ impl SelectionSet {
         fragments: &NamedFragments,
         schema: &ValidFederationSchema,
     ) -> Result<SelectionSet, FederationError> {
-        let type_position: CompositeTypeDefinitionPosition =
+        let type_position: CompositeTypePosition =
             schema.get_type(selection_set.ty.clone())?.try_into()?;
         let mut normalized_selections = vec![];
         SelectionSet::normalize_selections(
@@ -2074,7 +2074,7 @@ impl SelectionSet {
     /// A helper function for normalizing a list of selections into a destination.
     fn normalize_selections(
         selections: &[executable::Selection],
-        parent_type_position: &CompositeTypeDefinitionPosition,
+        parent_type_position: &CompositeTypePosition,
         destination: &mut Vec<Selection>,
         fragments: &NamedFragments,
         schema: &ValidFederationSchema,
@@ -2381,10 +2381,10 @@ impl SelectionSet {
     /// that case, and that's actually what we want.
     pub(crate) fn optimize_sibling_typenames(
         &mut self,
-        interface_types_with_interface_objects: &IndexSet<InterfaceTypeDefinitionPosition>,
+        interface_types_with_interface_objects: &IndexSet<InterfacePosition>,
     ) -> Result<(), FederationError> {
         let is_interface_object = interface_types_with_interface_objects.contains(
-            &InterfaceTypeDefinitionPosition::new(self.type_position.type_name().clone()),
+            &InterfacePosition::new(self.type_position.type_name().clone()),
         );
         let mut typename_field_key: Option<SelectionKey> = None;
         let mut sibling_field_key: Option<SelectionKey> = None;
@@ -2506,7 +2506,7 @@ impl SelectionSet {
     /// - Assumes all items in the slice have the same selection key.
     fn make_selection<'a>(
         schema: &ValidFederationSchema,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         selections: impl Iterator<Item = &'a Selection>,
         named_fragments: &NamedFragments,
     ) -> Result<Selection, FederationError> {
@@ -2540,7 +2540,7 @@ impl SelectionSet {
                 "Unable to rebase selection updates",
             ));
         };
-        let sub_selection_parent_type: Option<CompositeTypeDefinitionPosition> =
+        let sub_selection_parent_type: Option<CompositeTypePosition> =
             element.sub_selection_type_position()?;
 
         let Some(ref sub_selection_parent_type) = sub_selection_parent_type else {
@@ -2576,7 +2576,7 @@ impl SelectionSet {
     ///   ignored and replaced by the new group.
     pub(crate) fn make_selection_set<'a>(
         schema: &ValidFederationSchema,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         selection_key_groups: impl Iterator<Item = impl Iterator<Item = &'a Selection>>,
         named_fragments: &NamedFragments,
     ) -> Result<SelectionSet, FederationError> {
@@ -2742,7 +2742,7 @@ impl SelectionSet {
     /// existing selection while keeping the same insertion index.
     fn add_selection(
         &mut self,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         schema: &ValidFederationSchema,
         selection: Selection,
     ) -> Result<(), FederationError> {
@@ -2863,7 +2863,7 @@ impl SelectionSet {
 
     pub(crate) fn rebase_on(
         &self,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
         error_handling: RebaseErrorHandlingOption,
@@ -2959,7 +2959,7 @@ impl SelectionSet {
     /// inside the sub-selection of an selection that is not removed by the normalization.
     pub(crate) fn normalize(
         &self,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
         option: NormalizeSelectionOption,
@@ -2987,7 +2987,7 @@ impl SelectionSet {
         })
     }
 
-    pub(crate) fn can_rebase_on(&self, parent_type: &CompositeTypeDefinitionPosition) -> bool {
+    pub(crate) fn can_rebase_on(&self, parent_type: &CompositeTypePosition) -> bool {
         self.selections
             .values()
             .all(|sel| sel.can_add_to(parent_type, &self.schema))
@@ -3440,12 +3440,10 @@ pub(crate) fn subselection_type_if_abstract(
                 .get_type(field.field.data().field_position.type_name().clone())
                 .ok()?
             {
-                crate::schema::position::TypeDefinitionPosition::Interface(i) => {
+                crate::schema::position::TypePosition::Interface(i) => {
                     Some(AbstractType::Interface(i))
                 }
-                crate::schema::position::TypeDefinitionPosition::Union(u) => {
-                    Some(AbstractType::Union(u))
-                }
+                crate::schema::position::TypePosition::Union(u) => Some(AbstractType::Union(u)),
                 _ => None,
             }
         }
@@ -3462,9 +3460,9 @@ pub(crate) fn subselection_type_if_abstract(
                 //FIXME: return error
                 .ok()?;
             match fragment.type_condition_position.clone() {
-                CompositeTypeDefinitionPosition::Interface(i) => Some(AbstractType::Interface(i)),
-                CompositeTypeDefinitionPosition::Union(u) => Some(AbstractType::Union(u)),
-                CompositeTypeDefinitionPosition::Object(_) => None,
+                CompositeTypePosition::Interface(i) => Some(AbstractType::Interface(i)),
+                CompositeTypePosition::Union(u) => Some(AbstractType::Union(u)),
+                CompositeTypePosition::Object(_) => None,
             }
         }
         Selection::InlineFragment(inline_fragment) => {
@@ -3474,9 +3472,9 @@ pub(crate) fn subselection_type_if_abstract(
                 .type_condition_position
                 .clone()?
             {
-                CompositeTypeDefinitionPosition::Interface(i) => Some(AbstractType::Interface(i)),
-                CompositeTypeDefinitionPosition::Union(u) => Some(AbstractType::Union(u)),
-                CompositeTypeDefinitionPosition::Object(_) => None,
+                CompositeTypePosition::Interface(i) => Some(AbstractType::Interface(i)),
+                CompositeTypePosition::Union(u) => Some(AbstractType::Union(u)),
+                CompositeTypePosition::Object(_) => None,
             }
         }
     }
@@ -3492,7 +3490,7 @@ impl FieldSelection {
     ///   their parent type matches.
     pub(crate) fn from_field(
         field: &executable::Field,
-        parent_type_position: &CompositeTypeDefinitionPosition,
+        parent_type_position: &CompositeTypePosition,
         fragments: &NamedFragments,
         schema: &ValidFederationSchema,
     ) -> Result<Option<FieldSelection>, FederationError> {
@@ -3507,7 +3505,7 @@ impl FieldSelection {
         // Operation creation and the creation of the ValidFederationSchema, it's safer to just
         // confirm it exists in this schema.
         field_position.get(schema.schema())?;
-        let field_composite_type_result: Result<CompositeTypeDefinitionPosition, FederationError> =
+        let field_composite_type_result: Result<CompositeTypePosition, FederationError> =
             schema.get_type(field.selection_set.ty.clone())?.try_into();
 
         Ok(Some(FieldSelection {
@@ -3533,7 +3531,7 @@ impl FieldSelection {
 
     pub(crate) fn normalize(
         &self,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
         option: NormalizeSelectionOption,
@@ -3542,7 +3540,7 @@ impl FieldSelection {
             let mut normalized_selection: SelectionSet =
                 if NormalizeSelectionOption::NormalizeRecursively == option {
                     let field = self.field.data().field_position.get(schema.schema())?;
-                    let field_composite_type_position: CompositeTypeDefinitionPosition = schema
+                    let field_composite_type_position: CompositeTypePosition = schema
                         .get_type(field.ty.inner_named_type().clone())?
                         .try_into()?;
                     selection_set.normalize(
@@ -3606,7 +3604,7 @@ impl FieldSelection {
     /// make sense from the provided parent type. If this is not the case, this method will throw.
     pub(crate) fn rebase_on(
         &self,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
         error_handling: RebaseErrorHandlingOption,
@@ -3634,7 +3632,7 @@ impl FieldSelection {
             .get(schema.schema())?
             .ty
             .inner_named_type();
-        let rebased_base_type: CompositeTypeDefinitionPosition =
+        let rebased_base_type: CompositeTypePosition =
             schema.get_type(rebased_type_name.clone())?.try_into()?;
 
         let selection_set_type = &selection_set.type_position;
@@ -3663,7 +3661,7 @@ impl FieldSelection {
 
     fn can_add_to(
         &self,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         schema: &ValidFederationSchema,
     ) -> bool {
         if &self.field.data().schema == schema
@@ -3781,7 +3779,7 @@ impl<'a> FieldSelectionValue<'a> {
 impl Field {
     pub(crate) fn rebase_on(
         &self,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         schema: &ValidFederationSchema,
         error_handling: RebaseErrorHandlingOption,
     ) -> Result<Option<Field>, FederationError> {
@@ -3846,7 +3844,7 @@ impl Field {
     ///  if the field name simply does not exist in `parent_type`.
     fn can_rebase_on(
         &self,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         schema: &ValidFederationSchema,
     ) -> bool {
         let field_parent_type = self.data().field_position.parent();
@@ -3856,7 +3854,7 @@ impl Field {
         }
         // case 2
         let is_interface_object_type =
-            match TryInto::<ObjectTypeDefinitionPosition>::try_into(field_parent_type.clone()) {
+            match TryInto::<ObjectPosition>::try_into(field_parent_type.clone()) {
                 Ok(ref o) => is_interface_object(o, schema),
                 Err(_) => false,
             };
@@ -3870,9 +3868,9 @@ impl Field {
 
     pub(crate) fn type_if_added_to(
         &self,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         schema: &ValidFederationSchema,
-    ) -> Option<CompositeTypeDefinitionPosition> {
+    ) -> Option<CompositeTypePosition> {
         let data = self.data();
         if data.field_position.parent() == *parent_type && data.schema == *schema {
             let base_ty_name = data
@@ -3883,7 +3881,7 @@ impl Field {
                 .inner_named_type();
             return schema
                 .get_type(base_ty_name.clone())
-                .and_then(CompositeTypeDefinitionPosition::try_from)
+                .and_then(CompositeTypePosition::try_from)
                 .ok();
         }
         if data.name() == &TYPENAME_FIELD {
@@ -3909,7 +3907,7 @@ impl Field {
         }
     }
 
-    pub(crate) fn parent_type_position(&self) -> CompositeTypeDefinitionPosition {
+    pub(crate) fn parent_type_position(&self) -> CompositeTypePosition {
         self.data().field_position.parent()
     }
 
@@ -3970,11 +3968,11 @@ impl InlineFragmentSelection {
     ///   their parent type matches.
     pub(crate) fn from_inline_fragment(
         inline_fragment: &executable::InlineFragment,
-        parent_type_position: &CompositeTypeDefinitionPosition,
+        parent_type_position: &CompositeTypePosition,
         fragments: &NamedFragments,
         schema: &ValidFederationSchema,
     ) -> Result<InlineFragmentSelection, FederationError> {
-        let type_condition_position: Option<CompositeTypeDefinitionPosition> =
+        let type_condition_position: Option<CompositeTypePosition> =
             if let Some(type_condition) = &inline_fragment.type_condition {
                 Some(schema.get_type(type_condition.clone())?.try_into()?)
             } else {
@@ -3997,7 +3995,7 @@ impl InlineFragmentSelection {
     }
 
     pub(crate) fn from_fragment_spread_selection(
-        parent_type_position: CompositeTypeDefinitionPosition,
+        parent_type_position: CompositeTypePosition,
         fragment_spread_selection: &Arc<FragmentSpreadSelection>,
     ) -> Result<InlineFragmentSelection, FederationError> {
         let fragment_spread_data = fragment_spread_selection.spread.data();
@@ -4018,7 +4016,7 @@ impl InlineFragmentSelection {
     /// Construct a new InlineFragmentSelection out of a selection set.
     /// - The new type condition will be the same as the selection set's type.
     pub(crate) fn from_selection_set(
-        parent_type_position: CompositeTypeDefinitionPosition,
+        parent_type_position: CompositeTypePosition,
         selection_set: SelectionSet,
         directives: Arc<executable::DirectiveList>,
     ) -> Self {
@@ -4037,7 +4035,7 @@ impl InlineFragmentSelection {
 
     pub(crate) fn normalize(
         &self,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
         option: NormalizeSelectionOption,
@@ -4240,7 +4238,7 @@ impl InlineFragmentSelection {
 
     pub(crate) fn rebase_on(
         &self,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
         error_handling: RebaseErrorHandlingOption,
@@ -4292,7 +4290,7 @@ impl InlineFragmentSelection {
 
     pub(crate) fn can_add_to(
         &self,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         schema: &ValidFederationSchema,
     ) -> bool {
         if &self.inline_fragment.data().parent_type_position == parent_type
@@ -4321,7 +4319,7 @@ impl InlineFragmentSelection {
 
     pub(crate) fn can_rebase_on(
         &self,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         parent_schema: &ValidFederationSchema,
     ) -> bool {
         self.inline_fragment
@@ -4329,7 +4327,7 @@ impl InlineFragmentSelection {
             .0
     }
 
-    pub(crate) fn casted_type(&self) -> &CompositeTypeDefinitionPosition {
+    pub(crate) fn casted_type(&self) -> &CompositeTypePosition {
         let data = self.inline_fragment.data();
         data.type_condition_position
             .as_ref()
@@ -4409,7 +4407,7 @@ impl<'a> InlineFragmentSelectionValue<'a> {
 impl InlineFragment {
     pub(crate) fn rebase_on(
         &self,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         schema: &ValidFederationSchema,
         error_handling: RebaseErrorHandlingOption,
     ) -> Result<Option<InlineFragment>, FederationError> {
@@ -4454,9 +4452,9 @@ impl InlineFragment {
 
     pub(crate) fn can_rebase_on(
         &self,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         parent_schema: &ValidFederationSchema,
-    ) -> (bool, Option<CompositeTypeDefinitionPosition>) {
+    ) -> (bool, Option<CompositeTypePosition>) {
         if self.data().type_condition_position.is_none() {
             // can_rebase = true, condition = undefined
             return (true, None);
@@ -4470,7 +4468,7 @@ impl InlineFragment {
                 parent_schema.try_get_type(condition_position.type_name().clone())
             })
             .map(|rebased_condition_position| {
-                CompositeTypeDefinitionPosition::try_from(rebased_condition_position)
+                CompositeTypePosition::try_from(rebased_condition_position)
             })
         {
             // chained if let chains are not yet supported
@@ -4717,7 +4715,7 @@ impl NamedFragments {
         for fragment in self.fragments.values() {
             if let Ok(rebased_type) = schema
                 .get_type(fragment.type_condition_position.type_name().clone())
-                .and_then(CompositeTypeDefinitionPosition::try_from)
+                .and_then(CompositeTypePosition::try_from)
             {
                 if let Ok(mut rebased_selection) = fragment.selection_set.rebase_on(
                     &rebased_type,
@@ -5208,7 +5206,7 @@ pub(crate) fn normalize_operation(
     operation: &executable::Operation,
     named_fragments: NamedFragments,
     schema: &ValidFederationSchema,
-    interface_types_with_interface_objects: &IndexSet<InterfaceTypeDefinitionPosition>,
+    interface_types_with_interface_objects: &IndexSet<InterfacePosition>,
 ) -> Result<Operation, FederationError> {
     let mut normalized_selection_set =
         SelectionSet::from_selection_set(&operation.selection_set, &named_fragments, schema)?;
@@ -5228,7 +5226,7 @@ pub(crate) fn normalize_operation(
 }
 
 // TODO remove once it is available in schema metadata
-fn is_interface_object(obj: &ObjectTypeDefinitionPosition, schema: &ValidFederationSchema) -> bool {
+fn is_interface_object(obj: &ObjectPosition, schema: &ValidFederationSchema) -> bool {
     if let Ok(intf_obj_directive) = get_federation_spec_definition_from_subgraph(schema)
         .and_then(|spec| spec.interface_object_directive(schema))
     {
@@ -5240,8 +5238,8 @@ fn is_interface_object(obj: &ObjectTypeDefinitionPosition, schema: &ValidFederat
 }
 
 fn runtime_types_intersect(
-    type1: &CompositeTypeDefinitionPosition,
-    type2: &CompositeTypeDefinitionPosition,
+    type1: &CompositeTypePosition,
+    type2: &CompositeTypePosition,
     schema: &ValidFederationSchema,
 ) -> bool {
     if type1 == type2 {
@@ -5259,7 +5257,7 @@ fn runtime_types_intersect(
 }
 
 fn print_possible_runtimes(
-    composite_type: &CompositeTypeDefinitionPosition,
+    composite_type: &CompositeTypePosition,
     schema: &ValidFederationSchema,
 ) -> String {
     schema
@@ -5292,8 +5290,8 @@ mod tests {
     use super::SelectionKey;
     use super::SelectionSet;
     use crate::query_graph::graph_path::OpPathElement;
-    use crate::schema::position::InterfaceTypeDefinitionPosition;
-    use crate::schema::position::ObjectTypeDefinitionPosition;
+    use crate::schema::position::InterfacePosition;
+    use crate::schema::position::ObjectPosition;
     use crate::schema::ValidFederationSchema;
     use crate::subgraph::Subgraph;
 
@@ -6275,8 +6273,8 @@ scalar FieldSet
         let (schema, mut executable_document) =
             parse_schema_and_operation(operation_with_intf_object_typename);
         if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
-            let mut interface_objects: IndexSet<InterfaceTypeDefinitionPosition> = IndexSet::new();
-            interface_objects.insert(InterfaceTypeDefinitionPosition::new(name!("Foo")));
+            let mut interface_objects: IndexSet<InterfacePosition> = IndexSet::new();
+            interface_objects.insert(InterfacePosition::new(name!("Foo")));
 
             let normalized_operation = normalize_operation(
                 operation,
@@ -6309,7 +6307,7 @@ scalar FieldSet
         use crate::query_plan::operation::tests::parse_schema_and_operation;
         use crate::query_plan::operation::tests::parse_subgraph;
         use crate::query_plan::operation::NamedFragments;
-        use crate::schema::position::InterfaceTypeDefinitionPosition;
+        use crate::schema::position::InterfacePosition;
 
         #[test]
         fn skips_unknown_fragment_fields() {
@@ -6605,9 +6603,8 @@ type T implements I {
             );
 
             if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
-                let mut interface_objects: IndexSet<InterfaceTypeDefinitionPosition> =
-                    IndexSet::new();
-                interface_objects.insert(InterfaceTypeDefinitionPosition::new(name!("I")));
+                let mut interface_objects: IndexSet<InterfacePosition> = IndexSet::new();
+                interface_objects.insert(InterfacePosition::new(name!("I")));
                 let normalized_operation = normalize_operation(
                     operation,
                     NamedFragments::new(&executable_document.fragments, &schema),
@@ -7397,9 +7394,7 @@ type T {
     ) -> OpPathElement {
         OpPathElement::Field(super::Field::new(super::FieldData {
             schema: schema.clone(),
-            field_position: ObjectTypeDefinitionPosition::new(object)
-                .field(field)
-                .into(),
+            field_position: ObjectPosition::new(object).field(field).into(),
             alias: None,
             arguments: Default::default(),
             directives: Default::default(),
@@ -7437,10 +7432,8 @@ type T {
                 .unwrap();
         let schema = ValidFederationSchema::new(schema).unwrap();
 
-        let mut selection_set = SelectionSet::empty(
-            schema.clone(),
-            ObjectTypeDefinitionPosition::new(name!("Query")).into(),
-        );
+        let mut selection_set =
+            SelectionSet::empty(schema.clone(), ObjectPosition::new(name!("Query")).into());
 
         selection_set
             .add_at_path(
@@ -7466,10 +7459,8 @@ type T {
                 .unwrap();
         let schema = ValidFederationSchema::new(schema).unwrap();
 
-        let mut selection_set = SelectionSet::empty(
-            schema.clone(),
-            ObjectTypeDefinitionPosition::new(name!("Query")).into(),
-        );
+        let mut selection_set =
+            SelectionSet::empty(schema.clone(), ObjectPosition::new(name!("Query")).into());
 
         let path_to_c = [
             field_element(&schema, name!("Query"), name!("a")).into(),
@@ -7483,7 +7474,7 @@ type T {
                 Some(
                     &SelectionSet::parse(
                         schema.clone(),
-                        ObjectTypeDefinitionPosition::new(name!("C")).into(),
+                        ObjectPosition::new(name!("C")).into(),
                         "d",
                     )
                     .unwrap()
@@ -7497,7 +7488,7 @@ type T {
                 Some(
                     &SelectionSet::parse(
                         schema.clone(),
-                        ObjectTypeDefinitionPosition::new(name!("C")).into(),
+                        ObjectPosition::new(name!("C")).into(),
                         "e(arg: 1)",
                     )
                     .unwrap()
@@ -7518,10 +7509,8 @@ type T {
                 .unwrap();
         let schema = ValidFederationSchema::new(schema).unwrap();
 
-        let mut selection_set = SelectionSet::empty(
-            schema.clone(),
-            ObjectTypeDefinitionPosition::new(name!("Query")).into(),
-        );
+        let mut selection_set =
+            SelectionSet::empty(schema.clone(), ObjectPosition::new(name!("Query")).into());
         selection_set
             .add_at_path(
                 &[
@@ -7532,7 +7521,7 @@ type T {
                 Some(
                     &SelectionSet::parse(
                         schema.clone(),
-                        InterfaceTypeDefinitionPosition::new(name!("X")).into(),
+                        InterfacePosition::new(name!("X")).into(),
                         "... on C { d }",
                     )
                     .unwrap()

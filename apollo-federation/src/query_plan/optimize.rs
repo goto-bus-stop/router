@@ -59,7 +59,7 @@ use super::operation::SelectionMapperReturn;
 use super::operation::SelectionOrSet;
 use super::operation::SelectionSet;
 use crate::error::FederationError;
-use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::CompositeTypePosition;
 
 //=============================================================================
 // Selection/SelectionSet intersection/minus operations
@@ -182,7 +182,7 @@ impl Fragment {
     // query meant to.
     fn can_apply_directly_at_type(
         &self,
-        ty: &CompositeTypeDefinitionPosition,
+        ty: &CompositeTypePosition,
     ) -> Result<bool, FederationError> {
         // Short-circuit #1: the same type => trivially true.
         if self.type_condition_position == *ty {
@@ -225,7 +225,7 @@ impl NamedFragments {
     /// Returns a list of fragments that can be applied directly at the given type.
     fn get_all_may_apply_directly_at_type(
         &self,
-        ty: &CompositeTypeDefinitionPosition,
+        ty: &CompositeTypePosition,
     ) -> Result<Vec<Node<Fragment>>, FederationError> {
         self.iter()
             .filter_map(|fragment| {
@@ -524,7 +524,7 @@ impl Fragment {
     // does not.
     fn expanded_selection_set_at_type(
         &self,
-        ty: &CompositeTypeDefinitionPosition,
+        ty: &CompositeTypePosition,
     ) -> Result<FragmentRestrictionAtType, FederationError> {
         let expanded_selection_set = self.selection_set.expand_all_fragments()?;
         let normalized_selection_set = expanded_selection_set.normalize(
@@ -597,7 +597,7 @@ enum FullMatchingFragmentCondition<'a> {
     ForFieldSelection,
     ForInlineFragmentSelection {
         // the type condition and directives on an inline fragment selection.
-        type_condition_position: &'a CompositeTypeDefinitionPosition,
+        type_condition_position: &'a CompositeTypePosition,
         directives: &'a Arc<executable::DirectiveList>,
     },
 }
@@ -722,7 +722,7 @@ impl SelectionSet {
     // PORT_NOTE: `parent_type` argument seems always to be the same as `self.type_position`.
     fn try_optimize_with_fragments(
         &self,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         fragments: &NamedFragments,
         validator: &mut FieldsConflictMultiBranchValidator,
         full_match_condition: FullMatchingFragmentCondition,
@@ -835,7 +835,7 @@ impl Selection {
     //            `expand_all_fragments`. So, it was renamed to `retain_fragments`.
     fn retain_fragments(
         &self,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         fragments_to_keep: &NamedFragments,
     ) -> Result<SelectionOrSet, FederationError> {
         match self {
@@ -1030,7 +1030,7 @@ impl FieldSelection {
         fragments: &NamedFragments,
         validator: &mut FieldsConflictMultiBranchValidator,
     ) -> Result<Self, FederationError> {
-        let Some(base_composite_type): Option<CompositeTypeDefinitionPosition> =
+        let Some(base_composite_type): Option<CompositeTypePosition> =
             self.field.data().output_base_type()?.try_into().ok()
         else {
             return Ok(self.clone());

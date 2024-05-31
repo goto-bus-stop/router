@@ -38,7 +38,7 @@ fn remove_core_feature_elements(schema: &mut FederationSchema) -> Result<(), Fed
     // references from the type.
     for position in &types_for_removal {
         match position {
-            position::TypeDefinitionPosition::Object(position) => {
+            position::TypePosition::Object(position) => {
                 let object = position.get(schema.schema())?;
                 let remove_children = object
                     .fields
@@ -49,7 +49,7 @@ fn remove_core_feature_elements(schema: &mut FederationSchema) -> Result<(), Fed
                     child.remove(schema)?;
                 }
             }
-            position::TypeDefinitionPosition::Interface(position) => {
+            position::TypePosition::Interface(position) => {
                 let interface = position.get(schema.schema())?;
                 let remove_children = interface
                     .fields
@@ -60,7 +60,7 @@ fn remove_core_feature_elements(schema: &mut FederationSchema) -> Result<(), Fed
                     child.remove(schema)?;
                 }
             }
-            position::TypeDefinitionPosition::InputObject(position) => {
+            position::TypePosition::InputObject(position) => {
                 let input_object = position.get(schema.schema())?;
                 let remove_children = input_object
                     .fields
@@ -71,7 +71,7 @@ fn remove_core_feature_elements(schema: &mut FederationSchema) -> Result<(), Fed
                     child.remove(schema)?;
                 }
             }
-            position::TypeDefinitionPosition::Enum(position) => {
+            position::TypePosition::Enum(position) => {
                 let enum_ = position.get(schema.schema())?;
                 let remove_children = enum_
                     .values
@@ -92,22 +92,22 @@ fn remove_core_feature_elements(schema: &mut FederationSchema) -> Result<(), Fed
 
     for position in &types_for_removal {
         match position {
-            position::TypeDefinitionPosition::Object(position) => {
+            position::TypePosition::Object(position) => {
                 position.remove(schema)?;
             }
-            position::TypeDefinitionPosition::Interface(position) => {
+            position::TypePosition::Interface(position) => {
                 position.remove(schema)?;
             }
-            position::TypeDefinitionPosition::InputObject(position) => {
+            position::TypePosition::InputObject(position) => {
                 position.remove(schema)?;
             }
-            position::TypeDefinitionPosition::Enum(position) => {
+            position::TypePosition::Enum(position) => {
                 position.remove(schema)?;
             }
-            position::TypeDefinitionPosition::Scalar(position) => {
+            position::TypePosition::Scalar(position) => {
                 position.remove(schema)?;
             }
-            position::TypeDefinitionPosition::Union(position) => {
+            position::TypePosition::Union(position) => {
                 position.remove(schema)?;
             }
         }

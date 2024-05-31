@@ -48,12 +48,12 @@ use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::QueryPathElement;
 use crate::query_plan::QueryPlanCost;
-use crate::schema::position::AbstractTypeDefinitionPosition;
-use crate::schema::position::CompositeTypeDefinitionPosition;
-use crate::schema::position::InterfaceFieldDefinitionPosition;
-use crate::schema::position::ObjectTypeDefinitionPosition;
-use crate::schema::position::OutputTypeDefinitionPosition;
-use crate::schema::position::TypeDefinitionPosition;
+use crate::schema::position::AbstractTypePosition;
+use crate::schema::position::CompositeTypePosition;
+use crate::schema::position::InterfaceFieldPosition;
+use crate::schema::position::ObjectPosition;
+use crate::schema::position::OutputTypePosition;
+use crate::schema::position::TypePosition;
 use crate::schema::ValidFederationSchema;
 
 /// An immutable path in a query graph.
@@ -141,10 +141,10 @@ where
     /// more info).
     overriding_path_ids: Arc<IndexSet<OverrideId>>,
     /// Names of all the possible runtime types the tail of the path can be.
-    runtime_types_of_tail: Arc<IndexSet<ObjectTypeDefinitionPosition>>,
+    runtime_types_of_tail: Arc<IndexSet<ObjectPosition>>,
     /// If the last edge in the `edges` array was a `DownCast` transition, then the runtime types
     /// before that edge.
-    runtime_types_before_tail_if_last_is_cast: Option<Arc<IndexSet<ObjectTypeDefinitionPosition>>>,
+    runtime_types_before_tail_if_last_is_cast: Option<Arc<IndexSet<ObjectPosition>>>,
     /// If the trigger of the last edge in the `edges` array was an operation element with a
     /// `@defer` application, then the arguments of that application.
     defer_on_tail: Option<DeferDirectiveArguments>,
@@ -326,7 +326,7 @@ impl OpPathElement {
         }
     }
 
-    pub(crate) fn parent_type_position(&self) -> CompositeTypeDefinitionPosition {
+    pub(crate) fn parent_type_position(&self) -> CompositeTypePosition {
         match self {
             OpPathElement::Field(field) => field.data().field_position.parent(),
             OpPathElement::InlineFragment(inline) => inline.data().parent_type_position.clone(),
@@ -335,7 +335,7 @@ impl OpPathElement {
 
     pub(crate) fn sub_selection_type_position(
         &self,
-    ) -> Result<Option<CompositeTypeDefinitionPosition>, FederationError> {
+    ) -> Result<Option<CompositeTypePosition>, FederationError> {
         match self {
             OpPathElement::Field(field) => Ok(field.data().output_base_type()?.try_into().ok()),
             OpPathElement::InlineFragment(inline) => Ok(Some(inline.data().casted_type())),
@@ -442,7 +442,7 @@ impl OpPathElement {
 
     pub(crate) fn rebase_on(
         &self,
-        parent_type: &CompositeTypeDefinitionPosition,
+        parent_type: &CompositeTypePosition,
         schema: &ValidFederationSchema,
         error_handling: RebaseErrorHandlingOption,
     ) -> Result<Option<OpPathElement>, FederationError> {
@@ -837,14 +837,11 @@ where
         Ok(path)
     }
 
-    fn head_possible_runtime_types(
-        &self,
-    ) -> Result<IndexSet<ObjectTypeDefinitionPosition>, FederationError> {
+    fn head_possible_runtime_types(&self) -> Result<IndexSet<ObjectPosition>, FederationError> {
         let head_weight = self.graph.node_weight(self.head)?;
         Ok(match &head_weight.type_ {
             QueryGraphNodeType::SchemaType(head_type_pos) => {
-                let head_type_pos: CompositeTypeDefinitionPosition =
-                    head_type_pos.clone().try_into()?;
+                let head_type_pos: CompositeTypePosition = head_type_pos.clone().try_into()?;
                 self.graph
                     .schema_by_source(&head_weight.source)?
                     .possible_runtime_types(head_type_pos)?
@@ -1059,7 +1056,7 @@ where
             if self.last_edge_is_interface_object_fake_down_cast()?
                 && matches!(
                     edge_tail_weight.type_,
-                    QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Interface(_))
+                    QueryGraphNodeType::SchemaType(OutputTypePosition::Interface(_))
                 )
             {
                 // We replace the previous operation element with this one.
@@ -1267,9 +1264,8 @@ where
     fn tail_is_interface_object(&self) -> Result<bool, FederationError> {
         let tail_weight = self.graph.node_weight(self.tail)?;
 
-        let QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(
-            tail_type_position,
-        )) = &tail_weight.type_
+        let QueryGraphNodeType::SchemaType(OutputTypePosition::Object(tail_type_position)) =
+            &tail_weight.type_
         else {
             return Ok(false);
         };
@@ -1736,7 +1732,7 @@ where
         &self,
         start_index: usize,
         start_node: NodeIndex,
-        end_type_position: &OutputTypeDefinitionPosition,
+        end_type_position: &OutputTypePosition,
         node_and_trigger_to_edge: impl Fn(&Arc<QueryGraph>, NodeIndex, &Arc<TTrigger>) -> Option<TEdge>,
     ) -> Result<Option<NodeIndex>, FederationError> {
         let mut current_node = start_node;
@@ -1997,8 +1993,7 @@ impl OpGraphPath {
                 "Unexpectedly found federated root node as tail",
             ));
         };
-        let Ok(tail_type_pos) = CompositeTypeDefinitionPosition::try_from(tail_type_pos.clone())
-        else {
+        let Ok(tail_type_pos) = CompositeTypePosition::try_from(tail_type_pos.clone()) else {
             return Ok(path);
         };
         let typename_field = Field::new_introspection_typename(
@@ -2119,10 +2114,7 @@ impl OpGraphPath {
         else {
             return Ok(false);
         };
-        if !matches!(
-            from_type_position,
-            CompositeTypeDefinitionPosition::Interface(_)
-        ) {
+        if !matches!(from_type_position, CompositeTypePosition::Interface(_)) {
             return Ok(false);
         }
 
@@ -2216,14 +2208,14 @@ impl OpGraphPath {
     fn has_an_entity_implementation_with_shareable_field(
         &self,
         _source: &NodeStr,
-        itf: InterfaceFieldDefinitionPosition,
+        itf: InterfaceFieldPosition,
     ) -> Result<bool, FederationError> {
         let valid_schema = self.graph.schema()?;
         let schema = valid_schema.schema();
         let fed_spec = get_federation_spec_definition_from_subgraph(valid_schema)?;
         let key_directive = fed_spec.key_directive_definition(valid_schema)?;
         let shareable_directive = fed_spec.shareable_directive(valid_schema)?;
-        let comp_type_pos = CompositeTypeDefinitionPosition::Interface(itf.parent());
+        let comp_type_pos = CompositeTypePosition::Interface(itf.parent());
         for implem in valid_schema.possible_runtime_types(comp_type_pos)? {
             let ty = implem.get(schema)?;
             let field = ty.fields.get(&itf.field_name).ok_or_else(|| {
@@ -2336,7 +2328,7 @@ impl OpGraphPath {
         match operation_element {
             OpPathElement::Field(operation_field) => {
                 match tail_type_pos {
-                    OutputTypeDefinitionPosition::Object(tail_type_pos) => {
+                    OutputTypePosition::Object(tail_type_pos) => {
                         // Just take the edge corresponding to the field, if it exists and can be
                         // used.
                         let Some(edge) = self.next_edge_for_field(operation_field) else {
@@ -2388,7 +2380,7 @@ impl OpGraphPath {
                         )?;
                         Ok((field_path.map(|p| vec![p.into()]), None))
                     }
-                    OutputTypeDefinitionPosition::Interface(tail_type_pos) => {
+                    OutputTypePosition::Interface(tail_type_pos) => {
                         // Due to `@interfaceObject`, we could be in a case where the field asked is
                         // not on the interface but rather on one of it's implementations. This can
                         // happen if we just entered the subgraph on an interface `@key` and are
@@ -2496,7 +2488,7 @@ impl OpGraphPath {
                                     .data()
                                     .schema
                                     .get_type(operation_field_type_name.clone())?,
-                                TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_)
+                                TypePosition::Scalar(_) | TypePosition::Enum(_)
                             );
                             if is_operation_field_type_leaf
                                 && self.has_an_entity_implementation_with_shareable_field(
@@ -2524,7 +2516,7 @@ impl OpGraphPath {
                         //   queried is actually of one of the implementation of the interface. In
                         //   that case, we only want to consider that one implementation.
                         let implementations = if field_is_of_an_implementation {
-                            let CompositeTypeDefinitionPosition::Object(field_parent_pos) =
+                            let CompositeTypePosition::Object(field_parent_pos) =
                                 &operation_field.data().field_position.parent()
                             else {
                                 return Err(FederationError::internal(
@@ -2654,7 +2646,7 @@ impl OpGraphPath {
                             Ok((Some(all_options), Some(true)))
                         }
                     }
-                    OutputTypeDefinitionPosition::Union(_) => {
+                    OutputTypePosition::Union(_) => {
                         let Some(typename_edge) = self.next_edge_for_field(operation_field) else {
                             return Err(FederationError::internal(
                                 "Should always have an edge for __typename edge on an union",
@@ -2707,9 +2699,8 @@ impl OpGraphPath {
                     return Ok((Some(vec![fragment_path.into()]), None));
                 }
                 match tail_type_pos {
-                    OutputTypeDefinitionPosition::Interface(_)
-                    | OutputTypeDefinitionPosition::Union(_) => {
-                        let tail_type_pos: AbstractTypeDefinitionPosition =
+                    OutputTypePosition::Interface(_) | OutputTypePosition::Union(_) => {
+                        let tail_type_pos: AbstractTypePosition =
                             tail_type_pos.clone().try_into()?;
 
                         // If we have an edge for the typecast, take that.
@@ -2790,7 +2781,7 @@ impl OpGraphPath {
                         );
                         Ok((Some(all_options), None))
                     }
-                    OutputTypeDefinitionPosition::Object(tail_type_pos) => {
+                    OutputTypePosition::Object(tail_type_pos) => {
                         // We've already handled the case of a fragment whose type condition is the
                         // same as the tail type. But the fragment might be for either:
                         // - A super-type of the tail type. In which case, we're pretty much in the
@@ -2807,7 +2798,7 @@ impl OpGraphPath {
                         //   there is an intersection). In that case, the whole operation element
                         //   simply cannot ever return anything.
                         let type_condition_pos = supergraph_schema.get_type(type_condition_name)?;
-                        let abstract_type_condition_pos: Option<AbstractTypeDefinitionPosition> =
+                        let abstract_type_condition_pos: Option<AbstractTypePosition> =
                             type_condition_pos.clone().try_into().ok();
                         if let Some(type_condition_pos) = abstract_type_condition_pos {
                             if supergraph_schema
@@ -3558,8 +3549,8 @@ mod tests {
     use crate::query_graph::graph_path::OpPathElement;
     use crate::query_plan::operation::Field;
     use crate::query_plan::operation::FieldData;
-    use crate::schema::position::FieldDefinitionPosition;
-    use crate::schema::position::ObjectFieldDefinitionPosition;
+    use crate::schema::position::FieldPosition;
+    use crate::schema::position::ObjectFieldPosition;
     use crate::schema::ValidFederationSchema;
 
     #[test]
@@ -3582,10 +3573,10 @@ mod tests {
         let graph = build_query_graph(name, schema.clone()).unwrap();
         let path = OpGraphPath::new(Arc::new(graph), NodeIndex::new(0)).unwrap();
         assert_eq!(path.to_string(), "_");
-        let pos = ObjectFieldDefinitionPosition::new(name!("T"), name!("t"));
+        let pos = ObjectFieldPosition::new(name!("T"), name!("t"));
         let data = FieldData {
             schema: schema.clone(),
-            field_position: FieldDefinitionPosition::Object(pos),
+            field_position: FieldPosition::Object(pos),
             alias: None,
             arguments: Arc::new(Vec::new()),
             directives: Arc::new(DirectiveList::new()),
@@ -3604,10 +3595,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(path.to_string(), "Query(S1)* --[t]--> T(S1) (types: [T])");
-        let pos = ObjectFieldDefinitionPosition::new(name!("ID"), name!("id"));
+        let pos = ObjectFieldPosition::new(name!("ID"), name!("id"));
         let data = FieldData {
             schema,
-            field_position: FieldDefinitionPosition::Object(pos),
+            field_position: FieldPosition::Object(pos),
             alias: None,
             arguments: Arc::new(Vec::new()),
             directives: Arc::new(DirectiveList::new()),

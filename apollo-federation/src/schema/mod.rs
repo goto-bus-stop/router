@@ -15,15 +15,15 @@ use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
 use crate::link::LinksMetadata;
-use crate::schema::position::CompositeTypeDefinitionPosition;
-use crate::schema::position::DirectiveDefinitionPosition;
-use crate::schema::position::EnumTypeDefinitionPosition;
-use crate::schema::position::InputObjectTypeDefinitionPosition;
-use crate::schema::position::InterfaceTypeDefinitionPosition;
-use crate::schema::position::ObjectTypeDefinitionPosition;
-use crate::schema::position::ScalarTypeDefinitionPosition;
-use crate::schema::position::TypeDefinitionPosition;
-use crate::schema::position::UnionTypeDefinitionPosition;
+use crate::schema::position::CompositeTypePosition;
+use crate::schema::position::DirectivePosition;
+use crate::schema::position::EnumPosition;
+use crate::schema::position::InputObjectPosition;
+use crate::schema::position::InterfacePosition;
+use crate::schema::position::ObjectPosition;
+use crate::schema::position::ScalarPosition;
+use crate::schema::position::TypePosition;
+use crate::schema::position::UnionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 
 pub(crate) mod argument_composition_strategies;
@@ -81,7 +81,7 @@ impl FederationSchema {
     }
 
     /// Returns all the types in the schema, minus builtins.
-    pub(crate) fn get_types(&self) -> impl Iterator<Item = TypeDefinitionPosition> + '_ {
+    pub(crate) fn get_types(&self) -> impl Iterator<Item = TypePosition> + '_ {
         self.schema
             .types
             .iter()
@@ -89,34 +89,25 @@ impl FederationSchema {
             .map(|(type_name, type_)| {
                 let type_name = type_name.clone();
                 match type_ {
-                    ExtendedType::Scalar(_) => ScalarTypeDefinitionPosition::new(type_name).into(),
-                    ExtendedType::Object(_) => ObjectTypeDefinitionPosition::new(type_name).into(),
-                    ExtendedType::Interface(_) => {
-                        InterfaceTypeDefinitionPosition::new(type_name).into()
-                    }
-                    ExtendedType::Union(_) => UnionTypeDefinitionPosition::new(type_name).into(),
-                    ExtendedType::Enum(_) => EnumTypeDefinitionPosition::new(type_name).into(),
-                    ExtendedType::InputObject(_) => {
-                        InputObjectTypeDefinitionPosition::new(type_name).into()
-                    }
+                    ExtendedType::Scalar(_) => ScalarPosition::new(type_name).into(),
+                    ExtendedType::Object(_) => ObjectPosition::new(type_name).into(),
+                    ExtendedType::Interface(_) => InterfacePosition::new(type_name).into(),
+                    ExtendedType::Union(_) => UnionPosition::new(type_name).into(),
+                    ExtendedType::Enum(_) => EnumPosition::new(type_name).into(),
+                    ExtendedType::InputObject(_) => InputObjectPosition::new(type_name).into(),
                 }
             })
     }
 
-    pub(crate) fn get_directive_definitions(
-        &self,
-    ) -> impl Iterator<Item = DirectiveDefinitionPosition> + '_ {
+    pub(crate) fn get_directive_definitions(&self) -> impl Iterator<Item = DirectivePosition> + '_ {
         self.schema
             .directive_definitions
             .keys()
             .cloned()
-            .map(DirectiveDefinitionPosition::new)
+            .map(DirectivePosition::new)
     }
 
-    pub(crate) fn get_type(
-        &self,
-        type_name: Name,
-    ) -> Result<TypeDefinitionPosition, FederationError> {
+    pub(crate) fn get_type(&self, type_name: Name) -> Result<TypePosition, FederationError> {
         let type_ =
             self.schema
                 .types
@@ -125,37 +116,35 @@ impl FederationSchema {
                     message: format!("Schema has no type \"{}\"", type_name),
                 })?;
         Ok(match type_ {
-            ExtendedType::Scalar(_) => ScalarTypeDefinitionPosition::new(type_name).into(),
-            ExtendedType::Object(_) => ObjectTypeDefinitionPosition::new(type_name).into(),
-            ExtendedType::Interface(_) => InterfaceTypeDefinitionPosition::new(type_name).into(),
-            ExtendedType::Union(_) => UnionTypeDefinitionPosition::new(type_name).into(),
-            ExtendedType::Enum(_) => EnumTypeDefinitionPosition::new(type_name).into(),
-            ExtendedType::InputObject(_) => {
-                InputObjectTypeDefinitionPosition::new(type_name).into()
-            }
+            ExtendedType::Scalar(_) => ScalarPosition::new(type_name).into(),
+            ExtendedType::Object(_) => ObjectPosition::new(type_name).into(),
+            ExtendedType::Interface(_) => InterfacePosition::new(type_name).into(),
+            ExtendedType::Union(_) => UnionPosition::new(type_name).into(),
+            ExtendedType::Enum(_) => EnumPosition::new(type_name).into(),
+            ExtendedType::InputObject(_) => InputObjectPosition::new(type_name).into(),
         })
     }
 
-    pub(crate) fn try_get_type(&self, type_name: Name) -> Option<TypeDefinitionPosition> {
+    pub(crate) fn try_get_type(&self, type_name: Name) -> Option<TypePosition> {
         self.get_type(type_name).ok()
     }
 
     pub(crate) fn possible_runtime_types(
         &self,
-        composite_type_definition_position: CompositeTypeDefinitionPosition,
-    ) -> Result<IndexSet<ObjectTypeDefinitionPosition>, FederationError> {
+        composite_type_definition_position: CompositeTypePosition,
+    ) -> Result<IndexSet<ObjectPosition>, FederationError> {
         Ok(match composite_type_definition_position {
-            CompositeTypeDefinitionPosition::Object(pos) => IndexSet::from([pos]),
-            CompositeTypeDefinitionPosition::Interface(pos) => self
+            CompositeTypePosition::Object(pos) => IndexSet::from([pos]),
+            CompositeTypePosition::Interface(pos) => self
                 .referencers()
                 .get_interface_type(&pos.type_name)?
                 .object_types
                 .clone(),
-            CompositeTypeDefinitionPosition::Union(pos) => pos
+            CompositeTypePosition::Union(pos) => pos
                 .get(self.schema())?
                 .members
                 .iter()
-                .map(|t| ObjectTypeDefinitionPosition::new(t.name.clone()))
+                .map(|t| ObjectPosition::new(t.name.clone()))
                 .collect::<IndexSet<_>>(),
         })
     }
@@ -183,26 +172,21 @@ impl FederationSchema {
         ValidFederationSchema::new_assume_valid(self).map_err(|(_schema, error)| error)
     }
 
-    pub(crate) fn get_directive_definition(
-        &self,
-        name: &Name,
-    ) -> Option<DirectiveDefinitionPosition> {
+    pub(crate) fn get_directive_definition(&self, name: &Name) -> Option<DirectivePosition> {
         self.schema
             .directive_definitions
             .contains_key(name)
-            .then(|| DirectiveDefinitionPosition::new(name.clone()))
+            .then(|| DirectivePosition::new(name.clone()))
     }
 
     /// Note that a subgraph may have no "entities" and so no `_Entity` type.
-    pub(crate) fn entity_type(
-        &self,
-    ) -> Result<Option<UnionTypeDefinitionPosition>, FederationError> {
+    pub(crate) fn entity_type(&self) -> Result<Option<UnionPosition>, FederationError> {
         // Note that the _Entity type is special in that:
         // 1. Spec renaming doesn't take place for it (there's no prefixing or importing needed),
         //    in order to maintain backwards compatibility with Fed 1.
         // 2. Its presence is optional; if absent, it means the subgraph has no resolvable keys.
         match self.schema.types.get(&FEDERATION_ENTITY_TYPE_NAME_IN_SPEC) {
-            Some(ExtendedType::Union(_)) => Ok(Some(UnionTypeDefinitionPosition::new(
+            Some(ExtendedType::Union(_)) => Ok(Some(UnionPosition::new(
                 FEDERATION_ENTITY_TYPE_NAME_IN_SPEC,
             ))),
             Some(_) => Err(FederationError::internal(format!(

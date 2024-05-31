@@ -12,11 +12,11 @@ use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::query_plan::operation::NamedFragments;
 use crate::query_plan::operation::SelectionSet;
-use crate::schema::position::CompositeTypeDefinitionPosition;
-use crate::schema::position::FieldDefinitionPosition;
-use crate::schema::position::InterfaceTypeDefinitionPosition;
-use crate::schema::position::ObjectTypeDefinitionPosition;
-use crate::schema::position::UnionTypeDefinitionPosition;
+use crate::schema::position::CompositeTypePosition;
+use crate::schema::position::FieldPosition;
+use crate::schema::position::InterfacePosition;
+use crate::schema::position::ObjectPosition;
+use crate::schema::position::UnionPosition;
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
 
@@ -89,7 +89,7 @@ pub(crate) fn collect_target_fields_from_field_set(
     schema: &Valid<Schema>,
     parent_type_name: NamedType,
     value: NodeStr,
-) -> Result<Vec<FieldDefinitionPosition>, FederationError> {
+) -> Result<Vec<FieldPosition>, FederationError> {
     // Note this parsing takes care of adding curly braces ("{" and "}") if they aren't in the
     // string.
     let field_set = FieldSet::parse_and_validate(
@@ -106,16 +106,10 @@ pub(crate) fn collect_target_fields_from_field_set(
                 "Unexpectedly missing selection set type from schema.",
             ));
         };
-        let parent_type_position: CompositeTypeDefinitionPosition = match parent_type {
-            ExtendedType::Object(_) => {
-                ObjectTypeDefinitionPosition::new(selection_set.ty.clone()).into()
-            }
-            ExtendedType::Interface(_) => {
-                InterfaceTypeDefinitionPosition::new(selection_set.ty.clone()).into()
-            }
-            ExtendedType::Union(_) => {
-                UnionTypeDefinitionPosition::new(selection_set.ty.clone()).into()
-            }
+        let parent_type_position: CompositeTypePosition = match parent_type {
+            ExtendedType::Object(_) => ObjectPosition::new(selection_set.ty.clone()).into(),
+            ExtendedType::Interface(_) => InterfacePosition::new(selection_set.ty.clone()).into(),
+            ExtendedType::Union(_) => UnionPosition::new(selection_set.ty.clone()).into(),
             _ => {
                 return Err(FederationError::internal(
                     "Unexpectedly encountered non-composite type for selection set.",
@@ -149,12 +143,12 @@ pub(crate) fn collect_target_fields_from_field_set(
 // PORT_NOTE: This is meant as a companion function for collect_target_fields_from_field_set(), as
 // some callers will also want to include interface field implementations.
 pub(crate) fn add_interface_field_implementations(
-    fields: Vec<FieldDefinitionPosition>,
+    fields: Vec<FieldPosition>,
     schema: &FederationSchema,
-) -> Result<Vec<FieldDefinitionPosition>, FederationError> {
+) -> Result<Vec<FieldPosition>, FederationError> {
     let mut new_fields = vec![];
     for field in fields {
-        let interface_field = if let FieldDefinitionPosition::Interface(field) = &field {
+        let interface_field = if let FieldPosition::Interface(field) = &field {
             Some(field.clone())
         } else {
             None

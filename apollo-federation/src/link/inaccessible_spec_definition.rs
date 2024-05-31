@@ -25,15 +25,15 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::position;
-use crate::schema::position::DirectiveDefinitionPosition;
-use crate::schema::position::EnumValueDefinitionPosition;
-use crate::schema::position::InputObjectFieldDefinitionPosition;
-use crate::schema::position::InterfaceFieldArgumentDefinitionPosition;
-use crate::schema::position::InterfaceFieldDefinitionPosition;
-use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
-use crate::schema::position::ObjectFieldDefinitionPosition;
-use crate::schema::position::SchemaRootDefinitionKind;
-use crate::schema::position::TypeDefinitionPosition;
+use crate::schema::position::DirectivePosition;
+use crate::schema::position::EnumValuePosition;
+use crate::schema::position::InputObjectFieldPosition;
+use crate::schema::position::InterfaceFieldArgumentPosition;
+use crate::schema::position::InterfaceFieldPosition;
+use crate::schema::position::ObjectFieldArgumentPosition;
+use crate::schema::position::ObjectFieldPosition;
+use crate::schema::position::SchemaRootKind;
+use crate::schema::position::TypePosition;
 use crate::schema::FederationSchema;
 
 pub(crate) const INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC: Name = name!("inaccessible");
@@ -160,14 +160,14 @@ fn field_uses_inaccessible(field: &FieldDefinition, inaccessible_directive: &Nam
 fn type_uses_inaccessible(
     schema: &FederationSchema,
     inaccessible_directive: &Name,
-    position: &TypeDefinitionPosition,
+    position: &TypePosition,
 ) -> Result<bool, FederationError> {
     Ok(match position {
-        TypeDefinitionPosition::Scalar(scalar_position) => {
+        TypePosition::Scalar(scalar_position) => {
             let scalar = scalar_position.get(schema.schema())?;
             scalar.directives.has(inaccessible_directive)
         }
-        TypeDefinitionPosition::Object(object_position) => {
+        TypePosition::Object(object_position) => {
             let object = object_position.get(schema.schema())?;
             object.directives.has(inaccessible_directive)
                 || object
@@ -175,7 +175,7 @@ fn type_uses_inaccessible(
                     .values()
                     .any(|field| field_uses_inaccessible(field, inaccessible_directive))
         }
-        TypeDefinitionPosition::Interface(interface_position) => {
+        TypePosition::Interface(interface_position) => {
             let interface = interface_position.get(schema.schema())?;
             interface.directives.has(inaccessible_directive)
                 || interface
@@ -183,11 +183,11 @@ fn type_uses_inaccessible(
                     .values()
                     .any(|field| field_uses_inaccessible(field, inaccessible_directive))
         }
-        TypeDefinitionPosition::Union(union_position) => {
+        TypePosition::Union(union_position) => {
             let union_ = union_position.get(schema.schema())?;
             union_.directives.has(inaccessible_directive)
         }
-        TypeDefinitionPosition::Enum(enum_position) => {
+        TypePosition::Enum(enum_position) => {
             let enum_ = enum_position.get(schema.schema())?;
             enum_.directives.has(inaccessible_directive)
                 || enum_
@@ -195,7 +195,7 @@ fn type_uses_inaccessible(
                     .values()
                     .any(|value| value.directives.has(inaccessible_directive))
         }
-        TypeDefinitionPosition::InputObject(input_object_position) => {
+        TypePosition::InputObject(input_object_position) => {
             let input_object = input_object_position.get(schema.schema())?;
             input_object.directives.has(inaccessible_directive)
                 || input_object
@@ -218,9 +218,9 @@ fn directive_uses_inaccessible(
 }
 
 enum HasArgumentDefinitionsPosition {
-    ObjectField(ObjectFieldDefinitionPosition),
-    InterfaceField(InterfaceFieldDefinitionPosition),
-    DirectiveDefinition(DirectiveDefinitionPosition),
+    ObjectField(ObjectFieldPosition),
+    InterfaceField(InterfaceFieldPosition),
+    DirectiveDefinition(DirectivePosition),
 }
 impl fmt::Display for HasArgumentDefinitionsPosition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -252,7 +252,7 @@ fn validate_inaccessible_in_default_value(
                     return Ok(());
                 };
                 let input_field_position =
-                    InputObjectFieldDefinitionPosition::new(type_.name.clone(), field_name.clone());
+                    InputObjectFieldPosition::new(type_.name.clone(), field_name.clone());
                 if input_field_position.is_inaccessible(schema, inaccessible_directive)? {
                     errors.push(SingleFederationError::DefaultValueUsesInaccessible {
                         message: format!("Input field `{input_field_position}` is @inaccessible but is used in the default value of `{value_position}`, which is in the API schema."),
@@ -302,7 +302,7 @@ fn validate_inaccessible_in_default_value(
                 return Ok(());
             };
             let enum_value_position =
-                EnumValueDefinitionPosition::new(type_.name.clone(), enum_value.value.clone());
+                EnumValuePosition::new(type_.name.clone(), enum_value.value.clone());
             if enum_value_position.is_inaccessible(schema, inaccessible_directive)? {
                 errors.push(SingleFederationError::DefaultValueUsesInaccessible {
                     message: format!("Enum value `{enum_value_position}` is @inaccessible but is used in the default value of `{value_position}`, which is in the API schema."),
@@ -359,7 +359,7 @@ fn validate_inaccessible_in_arguments(
 fn validate_inaccessible_in_fields(
     schema: &FederationSchema,
     inaccessible_directive: &Name,
-    type_position: &TypeDefinitionPosition,
+    type_position: &TypePosition,
     fields: &IndexMap<Name, Component<FieldDefinition>>,
     implements: &IndexSet<ComponentName>,
     errors: &mut MultipleFederationErrors,
@@ -384,7 +384,7 @@ fn validate_inaccessible_in_fields(
                 if super_field.directives.has(inaccessible_directive) {
                     return None;
                 }
-                Some(InterfaceFieldDefinitionPosition::new(
+                Some(InterfaceFieldPosition::new(
                     super_type.name.clone(),
                     super_field.name.clone(),
                 ))
@@ -420,7 +420,7 @@ fn validate_inaccessible_in_fields(
                     if super_argument.directives.has(inaccessible_directive) {
                         return None;
                     }
-                    Some(InterfaceFieldArgumentDefinitionPosition::new(
+                    Some(InterfaceFieldArgumentPosition::new(
                         super_type.name.clone(),
                         super_field.name.clone(),
                         super_argument.name.clone(),
@@ -466,7 +466,7 @@ fn validate_inaccessible_in_fields(
                             if !super_argument.directives.has(inaccessible_directive) {
                                 return None;
                             }
-                            Some(InterfaceFieldArgumentDefinitionPosition::new(
+                            Some(InterfaceFieldArgumentPosition::new(
                                 super_type.name.clone(),
                                 super_field.name.clone(),
                                 super_argument.name.clone(),
@@ -484,12 +484,10 @@ fn validate_inaccessible_in_fields(
                 schema,
                 inaccessible_directive,
                 match type_position {
-                    TypeDefinitionPosition::Object(object) => {
-                        HasArgumentDefinitionsPosition::ObjectField(
-                            object.field(field.name.clone()),
-                        )
-                    }
-                    TypeDefinitionPosition::Interface(interface) => {
+                    TypePosition::Object(object) => HasArgumentDefinitionsPosition::ObjectField(
+                        object.field(field.name.clone()),
+                    ),
+                    TypePosition::Interface(interface) => {
                         HasArgumentDefinitionsPosition::InterfaceField(
                             interface.field(field.name.clone()),
                         )
@@ -522,7 +520,7 @@ trait IsInaccessibleExt {
         inaccessible_directive: &Name,
     ) -> Result<bool, FederationError>;
 }
-impl IsInaccessibleExt for position::ObjectTypeDefinitionPosition {
+impl IsInaccessibleExt for position::ObjectPosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,
@@ -532,7 +530,7 @@ impl IsInaccessibleExt for position::ObjectTypeDefinitionPosition {
         Ok(object.directives.has(inaccessible_directive))
     }
 }
-impl IsInaccessibleExt for position::ObjectFieldDefinitionPosition {
+impl IsInaccessibleExt for position::ObjectFieldPosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,
@@ -546,7 +544,7 @@ impl IsInaccessibleExt for position::ObjectFieldDefinitionPosition {
                 .is_inaccessible(schema, inaccessible_directive)?)
     }
 }
-impl IsInaccessibleExt for position::ObjectFieldArgumentDefinitionPosition {
+impl IsInaccessibleExt for position::ObjectFieldArgumentPosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,
@@ -560,7 +558,7 @@ impl IsInaccessibleExt for position::ObjectFieldArgumentDefinitionPosition {
                 .is_inaccessible(schema, inaccessible_directive)?)
     }
 }
-impl IsInaccessibleExt for position::InterfaceTypeDefinitionPosition {
+impl IsInaccessibleExt for position::InterfacePosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,
@@ -570,7 +568,7 @@ impl IsInaccessibleExt for position::InterfaceTypeDefinitionPosition {
         Ok(interface.directives.has(inaccessible_directive))
     }
 }
-impl IsInaccessibleExt for position::InterfaceFieldDefinitionPosition {
+impl IsInaccessibleExt for position::InterfaceFieldPosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,
@@ -584,7 +582,7 @@ impl IsInaccessibleExt for position::InterfaceFieldDefinitionPosition {
                 .is_inaccessible(schema, inaccessible_directive)?)
     }
 }
-impl IsInaccessibleExt for position::InterfaceFieldArgumentDefinitionPosition {
+impl IsInaccessibleExt for position::InterfaceFieldArgumentPosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,
@@ -598,7 +596,7 @@ impl IsInaccessibleExt for position::InterfaceFieldArgumentDefinitionPosition {
                 .is_inaccessible(schema, inaccessible_directive)?)
     }
 }
-impl IsInaccessibleExt for position::InputObjectTypeDefinitionPosition {
+impl IsInaccessibleExt for position::InputObjectPosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,
@@ -608,7 +606,7 @@ impl IsInaccessibleExt for position::InputObjectTypeDefinitionPosition {
         Ok(input_object.directives.has(inaccessible_directive))
     }
 }
-impl IsInaccessibleExt for position::InputObjectFieldDefinitionPosition {
+impl IsInaccessibleExt for position::InputObjectFieldPosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,
@@ -622,7 +620,7 @@ impl IsInaccessibleExt for position::InputObjectFieldDefinitionPosition {
                 .is_inaccessible(schema, inaccessible_directive)?)
     }
 }
-impl IsInaccessibleExt for position::ScalarTypeDefinitionPosition {
+impl IsInaccessibleExt for position::ScalarPosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,
@@ -632,7 +630,7 @@ impl IsInaccessibleExt for position::ScalarTypeDefinitionPosition {
         Ok(scalar.directives.has(inaccessible_directive))
     }
 }
-impl IsInaccessibleExt for position::UnionTypeDefinitionPosition {
+impl IsInaccessibleExt for position::UnionPosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,
@@ -642,7 +640,7 @@ impl IsInaccessibleExt for position::UnionTypeDefinitionPosition {
         Ok(union_.directives.has(inaccessible_directive))
     }
 }
-impl IsInaccessibleExt for position::EnumTypeDefinitionPosition {
+impl IsInaccessibleExt for position::EnumPosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,
@@ -652,7 +650,7 @@ impl IsInaccessibleExt for position::EnumTypeDefinitionPosition {
         Ok(enum_.directives.has(inaccessible_directive))
     }
 }
-impl IsInaccessibleExt for position::EnumValueDefinitionPosition {
+impl IsInaccessibleExt for position::EnumValuePosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,
@@ -666,7 +664,7 @@ impl IsInaccessibleExt for position::EnumValueDefinitionPosition {
                 .is_inaccessible(schema, inaccessible_directive)?)
     }
 }
-impl IsInaccessibleExt for position::DirectiveArgumentDefinitionPosition {
+impl IsInaccessibleExt for position::DirectiveArgumentPosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,
@@ -697,7 +695,7 @@ impl IsInaccessibleExt for position::DirectiveArgumentDefinitionPosition {
 fn validate_inaccessible_type(
     schema: &FederationSchema,
     inaccessible_directive: &Name,
-    position: &TypeDefinitionPosition,
+    position: &TypePosition,
     errors: &mut MultipleFederationErrors,
 ) -> Result<(), FederationError> {
     let referencers = schema.referencers();
@@ -734,7 +732,7 @@ fn validate_inaccessible_type(
     }
 
     match position {
-        TypeDefinitionPosition::Scalar(scalar_position) => {
+        TypePosition::Scalar(scalar_position) => {
             let referencers = referencers
                 .scalar_types
                 .get(&scalar_position.type_name)
@@ -749,7 +747,7 @@ fn validate_inaccessible_type(
                 &referencers.directive_arguments
             );
         }
-        TypeDefinitionPosition::Object(object_position) => {
+        TypePosition::Object(object_position) => {
             let referencers = referencers
                 .object_types
                 .get(&object_position.type_name)
@@ -757,7 +755,7 @@ fn validate_inaccessible_type(
             if referencers
                 .schema_roots
                 .iter()
-                .any(|root| root.root_kind == SchemaRootDefinitionKind::Query)
+                .any(|root| root.root_kind == SchemaRootKind::Query)
             {
                 errors.push(SingleFederationError::QueryRootTypeInaccessible {
                         message: format!("Type `{position}` is @inaccessible but is the query root type, which must be in the API schema."),
@@ -769,7 +767,7 @@ fn validate_inaccessible_type(
                 &referencers.interface_fields
             );
         }
-        TypeDefinitionPosition::Interface(interface_position) => {
+        TypePosition::Interface(interface_position) => {
             let referencers = referencers
                 .interface_types
                 .get(&interface_position.type_name)
@@ -780,7 +778,7 @@ fn validate_inaccessible_type(
                 &referencers.interface_fields
             );
         }
-        TypeDefinitionPosition::Union(union_position) => {
+        TypePosition::Union(union_position) => {
             let referencers = referencers
                 .union_types
                 .get(&union_position.type_name)
@@ -791,7 +789,7 @@ fn validate_inaccessible_type(
                 &referencers.interface_fields
             );
         }
-        TypeDefinitionPosition::Enum(enum_position) => {
+        TypePosition::Enum(enum_position) => {
             let referencers = referencers
                 .enum_types
                 .get(&enum_position.type_name)
@@ -806,7 +804,7 @@ fn validate_inaccessible_type(
                 &referencers.directive_arguments
             );
         }
-        TypeDefinitionPosition::InputObject(input_object_position) => {
+        TypePosition::InputObject(input_object_position) => {
             let referencers = referencers
                 .input_object_types
                 .get(&input_object_position.type_name)
@@ -869,7 +867,7 @@ fn validate_inaccessible(
             // This type must be in the API schema. For types with children (all types except scalar),
             // we check that at least one of the children is accessible.
             match &position {
-                TypeDefinitionPosition::Object(object_position) => {
+                TypePosition::Object(object_position) => {
                     let object = object_position.get(schema.schema())?;
                     validate_inaccessible_in_fields(
                         schema,
@@ -880,7 +878,7 @@ fn validate_inaccessible(
                         &mut errors,
                     )?;
                 }
-                TypeDefinitionPosition::Interface(interface_position) => {
+                TypePosition::Interface(interface_position) => {
                     let interface = interface_position.get(schema.schema())?;
                     validate_inaccessible_in_fields(
                         schema,
@@ -891,7 +889,7 @@ fn validate_inaccessible(
                         &mut errors,
                     )?;
                 }
-                TypeDefinitionPosition::InputObject(input_object_position) => {
+                TypePosition::InputObject(input_object_position) => {
                     let input_object = input_object_position.get(schema.schema())?;
                     let mut has_inaccessible_field = false;
                     let mut has_accessible_field = false;
@@ -929,7 +927,7 @@ fn validate_inaccessible(
                         }.into());
                     }
                 }
-                TypeDefinitionPosition::Union(union_position) => {
+                TypePosition::Union(union_position) => {
                     let union_ = union_position.get(schema.schema())?;
                     let types = &schema.schema().types;
                     let any_accessible_member = union_.members.iter().any(|member| {
@@ -944,7 +942,7 @@ fn validate_inaccessible(
                         }.into());
                     }
                 }
-                TypeDefinitionPosition::Enum(enum_position) => {
+                TypePosition::Enum(enum_position) => {
                     let enum_ = enum_position.get(schema.schema())?;
                     let mut has_inaccessible_value = false;
                     let mut has_accessible_value = false;
@@ -1042,7 +1040,7 @@ fn remove_inaccessible_elements(
     // This is a lot more verbose than in the JS implementation, but the JS implementation relies on
     // being able to set references to `undefined`, and the types all working out in the end once
     // the removal is complete, which our Rust data structures don't support.
-    let mut inaccessible_children: Vec<ObjectFieldDefinitionPosition> = vec![];
+    let mut inaccessible_children: Vec<ObjectFieldPosition> = vec![];
     for position in &inaccessible_referencers.object_types {
         let object = position.get(schema.schema())?;
         inaccessible_children.extend(
@@ -1052,7 +1050,7 @@ fn remove_inaccessible_elements(
                 .map(|field_name| position.field(field_name.clone())),
         );
     }
-    let mut inaccessible_arguments: Vec<ObjectFieldArgumentDefinitionPosition> = vec![];
+    let mut inaccessible_arguments: Vec<ObjectFieldArgumentPosition> = vec![];
     for position in inaccessible_children {
         let field = position.get(schema.schema())?;
         inaccessible_arguments.extend(
@@ -1068,7 +1066,7 @@ fn remove_inaccessible_elements(
         position.remove(schema)?;
     }
 
-    let mut inaccessible_children: Vec<InterfaceFieldDefinitionPosition> = vec![];
+    let mut inaccessible_children: Vec<InterfaceFieldPosition> = vec![];
     for position in &inaccessible_referencers.interface_types {
         let object = position.get(schema.schema())?;
         inaccessible_children.extend(
@@ -1078,7 +1076,7 @@ fn remove_inaccessible_elements(
                 .map(|field_name| position.field(field_name.clone())),
         );
     }
-    let mut inaccessible_arguments: Vec<InterfaceFieldArgumentDefinitionPosition> = vec![];
+    let mut inaccessible_arguments: Vec<InterfaceFieldArgumentPosition> = vec![];
     for position in inaccessible_children {
         let field = position.get(schema.schema())?;
         inaccessible_arguments.extend(
@@ -1094,7 +1092,7 @@ fn remove_inaccessible_elements(
         position.remove(schema)?;
     }
 
-    let mut inaccessible_children: Vec<InputObjectFieldDefinitionPosition> = vec![];
+    let mut inaccessible_children: Vec<InputObjectFieldPosition> = vec![];
     for position in &inaccessible_referencers.input_object_types {
         let object = position.get(schema.schema())?;
         inaccessible_children.extend(

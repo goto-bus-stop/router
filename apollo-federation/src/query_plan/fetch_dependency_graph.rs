@@ -51,10 +51,10 @@ use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
 use crate::query_plan::FetchDataValueSetter;
 use crate::query_plan::QueryPlanCost;
-use crate::schema::position::CompositeTypeDefinitionPosition;
-use crate::schema::position::FieldDefinitionPosition;
-use crate::schema::position::ObjectTypeDefinitionPosition;
-use crate::schema::position::SchemaRootDefinitionKind;
+use crate::schema::position::CompositeTypePosition;
+use crate::schema::position::FieldPosition;
+use crate::schema::position::ObjectPosition;
+use crate::schema::position::SchemaRootKind;
 use crate::schema::ValidFederationSchema;
 use crate::subgraph::spec::ANY_SCALAR_NAME;
 use crate::subgraph::spec::ENTITIES_QUERY;
@@ -79,11 +79,11 @@ pub(crate) struct FetchDependencyGraphNode {
     /// The subgraph this fetch is queried against.
     pub(crate) subgraph_name: NodeStr,
     /// Which root operation kind the fetch should have.
-    root_kind: SchemaRootDefinitionKind,
+    root_kind: SchemaRootKind,
     /// The parent type of the fetch's selection set. For fetches against the root, this is the
     /// subgraph's root operation type for the corresponding root kind, but for entity fetches this
     /// will be the subgraph's entity union type.
-    parent_type: CompositeTypeDefinitionPosition,
+    parent_type: CompositeTypePosition,
     /// The selection set to be fetched from the subgraph, along with memoized conditions.
     selection_set: FetchSelectionSet,
     /// Whether this fetch uses the federation `_entities` field and correspondingly is against the
@@ -154,7 +154,7 @@ pub(crate) struct FetchSelectionSet {
 #[derive(Debug, Clone)]
 pub(crate) struct FetchInputs {
     /// The selection sets to be used as input to `_entities`, separated per parent type.
-    selection_sets_per_parent_type: IndexMap<CompositeTypeDefinitionPosition, Arc<SelectionSet>>,
+    selection_sets_per_parent_type: IndexMap<CompositeTypePosition, Arc<SelectionSet>>,
     /// The supergraph schema (primarily used for validation of added selection sets).
     supergraph_schema: ValidFederationSchema,
 }
@@ -472,7 +472,7 @@ impl FetchDependencyGraph {
     pub(crate) fn new(
         supergraph_schema: ValidFederationSchema,
         federated_query_graph: Arc<QueryGraph>,
-        root_type_for_defer: Option<CompositeTypeDefinitionPosition>,
+        root_type_for_defer: Option<CompositeTypePosition>,
         starting_id_generation: u64,
     ) -> Self {
         Self {
@@ -508,8 +508,8 @@ impl FetchDependencyGraph {
     pub(crate) fn get_or_create_root_node(
         &mut self,
         subgraph_name: &NodeStr,
-        root_kind: SchemaRootDefinitionKind,
-        parent_type: CompositeTypeDefinitionPosition,
+        root_kind: SchemaRootKind,
+        parent_type: CompositeTypePosition,
     ) -> Result<NodeIndex, FederationError> {
         if let Some(node) = self.root_nodes_by_subgraph.get(subgraph_name) {
             return Ok(*node);
@@ -530,8 +530,8 @@ impl FetchDependencyGraph {
     fn new_root_type_node(
         &mut self,
         subgraph_name: NodeStr,
-        root_kind: SchemaRootDefinitionKind,
-        parent_type: &ObjectTypeDefinitionPosition,
+        root_kind: SchemaRootKind,
+        parent_type: &ObjectPosition,
         merge_at: Option<Vec<FetchDataPathElement>>,
         defer_ref: Option<DeferRef>,
     ) -> Result<NodeIndex, FederationError> {
@@ -549,9 +549,9 @@ impl FetchDependencyGraph {
     pub(crate) fn new_node(
         &mut self,
         subgraph_name: NodeStr,
-        parent_type: CompositeTypeDefinitionPosition,
+        parent_type: CompositeTypePosition,
         has_inputs: bool,
-        root_kind: SchemaRootDefinitionKind,
+        root_kind: SchemaRootKind,
         merge_at: Option<Vec<FetchDataPathElement>>,
         defer_ref: Option<DeferRef>,
     ) -> Result<NodeIndex, FederationError> {
@@ -620,7 +620,7 @@ impl FetchDependencyGraph {
         &mut self,
         subgraph_name: &NodeStr,
         merge_at: &[FetchDataPathElement],
-        type_: &CompositeTypeDefinitionPosition,
+        type_: &CompositeTypePosition,
         parent: ParentRelation,
         conditions_nodes: &IndexSet<NodeIndex>,
         defer_ref: Option<&DeferRef>,
@@ -692,7 +692,7 @@ impl FetchDependencyGraph {
             subgraph_name.clone(),
             entity_type.into(),
             /* has_inputs: */ true,
-            SchemaRootDefinitionKind::Query,
+            SchemaRootKind::Query,
             Some(merge_at),
             defer_ref,
         )
@@ -772,7 +772,7 @@ impl FetchDependencyGraph {
     fn type_for_fetch_inputs(
         &self,
         type_name: &Name,
-    ) -> Result<CompositeTypeDefinitionPosition, FederationError> {
+    ) -> Result<CompositeTypePosition, FederationError> {
         self.supergraph_schema
             .get_type(type_name.clone())?
             .try_into()
@@ -1135,14 +1135,14 @@ impl FetchDependencyGraph {
     pub(crate) fn process<TProcessed, TDeferred>(
         &mut self,
         mut processor: impl FetchDependencyGraphProcessor<TProcessed, TDeferred>,
-        root_kind: SchemaRootDefinitionKind,
+        root_kind: SchemaRootKind,
     ) -> Result<(TProcessed, Vec<TDeferred>), FederationError> {
         self.reduce_and_optimize();
 
         let (main_sequence, deferred) = self.process_root_nodes(
             &mut processor,
             self.root_nodes_by_subgraph.values().cloned().collect(),
-            root_kind == SchemaRootDefinitionKind::Query,
+            root_kind == SchemaRootKind::Query,
             None,
             None,
             Conditions::Boolean(true),
@@ -1468,7 +1468,7 @@ fn operation_for_entities_fetch(
     })?;
 
     let query_type = match subgraph_schema.get_type(query_type_name.clone())? {
-        crate::schema::position::TypeDefinitionPosition::Object(o) => o,
+        crate::schema::position::TypePosition::Object(o) => o,
         _ => {
             return Err(SingleFederationError::InvalidGraphQL {
                 message: "the root query type must be an object".to_string(),
@@ -1488,7 +1488,7 @@ fn operation_for_entities_fetch(
         .into());
     }
 
-    let entities = FieldDefinitionPosition::Object(query_type.field(ENTITIES_QUERY.clone()));
+    let entities = FieldPosition::Object(query_type.field(ENTITIES_QUERY.clone()));
 
     let entities_call = Selection::from_element(
         OpPathElement::Field(Field::new(FieldData {
@@ -1506,7 +1506,7 @@ fn operation_for_entities_fetch(
         Some(selection_set),
     )?;
 
-    let type_position: CompositeTypeDefinitionPosition = subgraph_schema
+    let type_position: CompositeTypePosition = subgraph_schema
         .get_type(query_type_name.clone())?
         .try_into()?;
 
@@ -1521,7 +1521,7 @@ fn operation_for_entities_fetch(
 
     Ok(Operation {
         schema: subgraph_schema.clone(),
-        root_kind: SchemaRootDefinitionKind::Query,
+        root_kind: SchemaRootKind::Query,
         name: operation_name.clone().map(|n| n.try_into()).transpose()?,
         variables: Arc::new(variable_definitions),
         directives: Default::default(),
@@ -1532,7 +1532,7 @@ fn operation_for_entities_fetch(
 
 fn operation_for_query_fetch(
     subgraph_schema: &ValidFederationSchema,
-    root_kind: SchemaRootDefinitionKind,
+    root_kind: SchemaRootKind,
     selection_set: SelectionSet,
     variable_definitions: &[Node<VariableDefinition>],
     operation_name: &Option<NodeStr>,
@@ -1607,7 +1607,7 @@ impl SelectionSet {
 impl FetchSelectionSet {
     pub(crate) fn empty(
         schema: ValidFederationSchema,
-        type_position: CompositeTypeDefinitionPosition,
+        type_position: CompositeTypePosition,
     ) -> Result<Self, FederationError> {
         let selection_set = Arc::new(SelectionSet::empty(schema, type_position));
         let conditions = selection_set.conditions()?;
@@ -1667,7 +1667,7 @@ impl FetchInputs {
         &self,
         variable_definitions: &[Node<VariableDefinition>],
         handled_conditions: &Conditions,
-        type_position: &CompositeTypeDefinitionPosition,
+        type_position: &CompositeTypePosition,
     ) -> Result<SelectionSet, FederationError> {
         let mut selections = SelectionMap::new();
         for selection_set in self.selection_sets_per_parent_type.values() {
@@ -1712,7 +1712,7 @@ impl std::fmt::Display for FetchInputs {
 impl DeferTracking {
     fn empty(
         schema: &ValidFederationSchema,
-        root_type_for_defer: Option<CompositeTypeDefinitionPosition>,
+        root_type_for_defer: Option<CompositeTypePosition>,
     ) -> Self {
         Self {
             top_level_deferred: Default::default(),
@@ -1727,7 +1727,7 @@ impl DeferTracking {
         defer_context: &DeferContext,
         defer_args: &DeferDirectiveArguments,
         path: FetchDependencyGraphNodePath,
-        parent_type: CompositeTypeDefinitionPosition,
+        parent_type: CompositeTypePosition,
     ) -> Result<(), FederationError> {
         // Having the primary selection undefined means that @defer handling is actually disabled, so there's no need to track anything.
         let Some(primary_selection) = self.primary_selection.as_mut() else {
@@ -1821,7 +1821,7 @@ impl DeferredInfo {
         schema: ValidFederationSchema,
         label: DeferRef,
         path: FetchDependencyGraphNodePath,
-        parent_type: CompositeTypeDefinitionPosition,
+        parent_type: CompositeTypePosition,
     ) -> Self {
         Self {
             label,
@@ -1968,8 +1968,8 @@ fn compute_nodes_for_key_resolution<'a>(
     let source = stack_item.tree.graph.node_weight(source_id)?;
     let dest = stack_item.tree.graph.node_weight(dest_id)?;
     // We shouldn't have a key on a non-composite type
-    let source_type: CompositeTypeDefinitionPosition = source.type_.clone().try_into()?;
-    let dest_type: CompositeTypeDefinitionPosition = dest.type_.clone().try_into()?;
+    let source_type: CompositeTypePosition = source.type_.clone().try_into()?;
+    let dest_type: CompositeTypePosition = dest.type_.clone().try_into()?;
     let path_in_parent = &stack_item.node_path.path_in_node;
     let updated_defer_context = stack_item.defer_context.after_subgraph_jump();
     // Note that we use the name of `dest_type` for the inputs parent type, which can seem strange,
@@ -2099,7 +2099,7 @@ fn compute_nodes_for_root_type_resolution<'a>(
     child: &'a Arc<PathTreeChild<OpGraphPathTrigger, Option<EdgeIndex>>>,
     edge_id: EdgeIndex,
     edge: &crate::query_graph::QueryGraphEdge,
-    root_kind: SchemaRootDefinitionKind,
+    root_kind: SchemaRootKind,
     new_context: &'a OpGraphPathContext,
 ) -> Result<ComputeNodesStackItem<'a>, FederationError> {
     if child.conditions.is_some() {
@@ -2110,8 +2110,8 @@ fn compute_nodes_for_root_type_resolution<'a>(
     let (source_id, dest_id) = stack_item.tree.graph.edge_endpoints(edge_id)?;
     let source = stack_item.tree.graph.node_weight(source_id)?;
     let dest = stack_item.tree.graph.node_weight(dest_id)?;
-    let source_type: ObjectTypeDefinitionPosition = source.type_.clone().try_into()?;
-    let dest_type: ObjectTypeDefinitionPosition = dest.type_.clone().try_into()?;
+    let source_type: ObjectPosition = source.type_.clone().try_into()?;
+    let dest_type: ObjectPosition = dest.type_.clone().try_into()?;
     let root_operation_type = dependency_graph
         .federated_query_graph
         .schema_by_source(&dest.source)?
@@ -2367,7 +2367,7 @@ fn compute_nodes_for_op_path_element<'a>(
 /// A helper function to wrap the `initial` value with nested conditions from `context`.
 fn wrap_selection_with_type_and_conditions<T>(
     supergraph_schema: &ValidFederationSchema,
-    wrapping_type: &CompositeTypeDefinitionPosition,
+    wrapping_type: &CompositeTypePosition,
     context: &OpGraphPathContext,
     initial: T,
     mut wrap_in_fragment: impl FnMut(InlineFragment, T) -> T,
@@ -2376,7 +2376,7 @@ fn wrap_selection_with_type_and_conditions<T>(
     // as well. However, there was a comment that we should add some validation, which is restated below.
     // TODO: remove the `unwrap` with proper error handling, and ensure we have some intersection
     // between the wrapping_type type and the new type condition.
-    let type_condition: CompositeTypeDefinitionPosition = supergraph_schema
+    let type_condition: CompositeTypePosition = supergraph_schema
         .get_type(wrapping_type.type_name().clone())
         .unwrap()
         .try_into()
@@ -2427,7 +2427,7 @@ fn wrap_selection_with_type_and_conditions<T>(
 
 fn wrap_input_selections(
     supergraph_schema: &ValidFederationSchema,
-    wrapping_type: &CompositeTypeDefinitionPosition,
+    wrapping_type: &CompositeTypePosition,
     selections: SelectionSet,
     context: &OpGraphPathContext,
 ) -> SelectionSet {
@@ -2453,7 +2453,7 @@ fn wrap_input_selections(
 
 fn create_fetch_initial_path(
     supergraph_schema: &ValidFederationSchema,
-    dest_type: &CompositeTypeDefinitionPosition,
+    dest_type: &CompositeTypePosition,
     context: &OpGraphPathContext,
 ) -> Result<Arc<OpPath>, FederationError> {
     // We make sure that all `OperationPath` are based on the supergraph as `OperationPath` is
@@ -2462,7 +2462,7 @@ fn create_fetch_initial_path(
     // an exception when we create an element from an type that may/usually will not be from the
     // supergraph). Doing this make sure we can rely on things like checking subtyping between
     // the types of a given path.
-    let rebased_type: CompositeTypeDefinitionPosition = supergraph_schema
+    let rebased_type: CompositeTypePosition = supergraph_schema
         .get_type(dest_type.type_name().clone())
         .and_then(|res| res.try_into())?;
     Ok(Arc::new(wrap_selection_with_type_and_conditions(
@@ -2481,7 +2481,7 @@ fn create_fetch_initial_path(
 fn compute_input_rewrites_on_key_fetch(
     supergraph_schema: &ValidFederationSchema,
     input_type_name: &NodeStr,
-    dest_type: &CompositeTypeDefinitionPosition,
+    dest_type: &CompositeTypePosition,
 ) -> Option<Vec<Arc<FetchDataRewrite>>> {
     // When we send a fetch to a subgraph, the inputs __typename must essentially match `dest_type`
     // so the proper __resolveReference is called. If `dest_type` is a "normal" object type, that's

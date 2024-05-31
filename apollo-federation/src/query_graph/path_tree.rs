@@ -403,7 +403,7 @@ mod tests {
     use crate::query_plan::operation::normalize_operation;
     use crate::query_plan::operation::Field;
     use crate::query_plan::operation::FieldData;
-    use crate::schema::position::SchemaRootDefinitionKind;
+    use crate::schema::position::SchemaRootKind;
     use crate::schema::ValidFederationSchema;
 
     // NB: stole from operation.rs
@@ -428,7 +428,7 @@ mod tests {
     // A helper function that builds a graph path from a sequence of field names
     fn build_graph_path(
         query_graph: &Arc<QueryGraph>,
-        op_kind: SchemaRootDefinitionKind,
+        op_kind: SchemaRootKind,
         path: &[&str],
     ) -> Result<OpGraphPath, FederationError> {
         let nodes_by_kind = query_graph.root_kinds_to_nodes()?;
@@ -509,19 +509,14 @@ mod tests {
         let query_graph =
             Arc::new(build_query_graph(op_name.to_string().into(), schema.clone()).unwrap());
 
-        let path1 =
-            build_graph_path(&query_graph, SchemaRootDefinitionKind::Query, &["t", "id"]).unwrap();
+        let path1 = build_graph_path(&query_graph, SchemaRootKind::Query, &["t", "id"]).unwrap();
         assert_eq!(
             path1.to_string(),
             "Query(Test)* --[t]--> T(Test) --[id]--> ID(Test)"
         );
 
-        let path2 = build_graph_path(
-            &query_graph,
-            SchemaRootDefinitionKind::Query,
-            &["t", "otherId"],
-        )
-        .unwrap();
+        let path2 =
+            build_graph_path(&query_graph, SchemaRootKind::Query, &["t", "otherId"]).unwrap();
         assert_eq!(
             path2.to_string(),
             "Query(Test)* --[t]--> T(Test) --[otherId]--> ID(Test)"

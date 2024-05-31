@@ -10,10 +10,10 @@ use crate::query_plan::operation::Selection;
 use crate::query_plan::operation::SelectionSet;
 use crate::schema::field_set::add_interface_field_implementations;
 use crate::schema::field_set::collect_target_fields_from_field_set;
-use crate::schema::position::CompositeTypeDefinitionPosition;
-use crate::schema::position::FieldDefinitionPosition;
-use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
-use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
+use crate::schema::position::CompositeTypePosition;
+use crate::schema::position::FieldPosition;
+use crate::schema::position::ObjectOrInterfaceFieldPosition;
+use crate::schema::position::ObjectOrInterfacePosition;
 use crate::schema::FederationSchema;
 
 fn unwrap_schema(fed_schema: &Valid<FederationSchema>) -> &Valid<Schema> {
@@ -66,15 +66,15 @@ impl SubgraphMetadata {
 #[derive(Debug, Clone)]
 pub(crate) struct ExternalMetadata {
     /// All fields with an `@external` directive.
-    external_fields: IndexSet<FieldDefinitionPosition>,
+    external_fields: IndexSet<FieldPosition>,
     /// Fields with an `@external` directive that can't actually be external due to also being
     /// referenced in a `@key` directive.
-    fake_external_fields: IndexSet<FieldDefinitionPosition>,
+    fake_external_fields: IndexSet<FieldPosition>,
     /// Fields that are only sometimes external, and sometimes reachable due to being included
     /// in a `@provides` directive.
-    provided_fields: IndexSet<FieldDefinitionPosition>,
+    provided_fields: IndexSet<FieldPosition>,
     /// Fields that are external because their parent type has an `@external` directive.
-    fields_on_external_types: IndexSet<FieldDefinitionPosition>,
+    fields_on_external_types: IndexSet<FieldPosition>,
 }
 
 impl ExternalMetadata {
@@ -111,7 +111,7 @@ impl ExternalMetadata {
     fn collect_external_fields(
         federation_spec_definition: &'static FederationSpecDefinition,
         schema: &Valid<FederationSchema>,
-    ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
+    ) -> Result<IndexSet<FieldPosition>, FederationError> {
         let external_directive_definition = federation_spec_definition
             .external_directive_definition(schema)?
             .clone();
@@ -142,7 +142,7 @@ impl ExternalMetadata {
     fn collect_fake_externals(
         federation_spec_definition: &'static FederationSpecDefinition,
         schema: &Valid<FederationSchema>,
-    ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
+    ) -> Result<IndexSet<FieldPosition>, FederationError> {
         let mut fake_external_fields = IndexSet::new();
         let extends_directive_definition =
             federation_spec_definition.extends_directive_definition(schema)?;
@@ -151,7 +151,7 @@ impl ExternalMetadata {
         let key_directive_referencers = schema
             .referencers
             .get_directive(&key_directive_definition.name)?;
-        let mut key_type_positions: Vec<ObjectOrInterfaceTypeDefinitionPosition> = vec![];
+        let mut key_type_positions: Vec<ObjectOrInterfacePosition> = vec![];
         for object_type_position in &key_directive_referencers.object_types {
             key_type_positions.push(object_type_position.clone().into());
         }
@@ -160,12 +160,8 @@ impl ExternalMetadata {
         }
         for type_position in key_type_positions {
             let directives = match &type_position {
-                ObjectOrInterfaceTypeDefinitionPosition::Object(pos) => {
-                    &pos.get(schema.schema())?.directives
-                }
-                ObjectOrInterfaceTypeDefinitionPosition::Interface(pos) => {
-                    &pos.get(schema.schema())?.directives
-                }
+                ObjectOrInterfacePosition::Object(pos) => &pos.get(schema.schema())?.directives,
+                ObjectOrInterfacePosition::Interface(pos) => &pos.get(schema.schema())?.directives,
             };
             let has_extends_directive = directives.has(&extends_directive_definition.name);
             for key_directive_application in directives.get_all(&key_directive_definition.name) {
@@ -191,14 +187,14 @@ impl ExternalMetadata {
     fn collect_provided_fields(
         federation_spec_definition: &'static FederationSpecDefinition,
         schema: &Valid<FederationSchema>,
-    ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
+    ) -> Result<IndexSet<FieldPosition>, FederationError> {
         let mut provided_fields = IndexSet::new();
         let provides_directive_definition =
             federation_spec_definition.provides_directive_definition(schema)?;
         let provides_directive_referencers = schema
             .referencers
             .get_directive(&provides_directive_definition.name)?;
-        let mut provides_field_positions: Vec<ObjectOrInterfaceFieldDefinitionPosition> = vec![];
+        let mut provides_field_positions: Vec<ObjectOrInterfaceFieldPosition> = vec![];
         for object_field_position in &provides_directive_referencers.object_fields {
             provides_field_positions.push(object_field_position.clone().into());
         }
@@ -207,7 +203,7 @@ impl ExternalMetadata {
         }
         for field_position in provides_field_positions {
             let field = field_position.get(schema.schema())?;
-            let field_type_position: CompositeTypeDefinitionPosition = schema
+            let field_type_position: CompositeTypePosition = schema
                 .get_type(field.ty.inner_named_type().clone())?
                 .try_into()?;
             for provides_directive_application in field
@@ -232,7 +228,7 @@ impl ExternalMetadata {
     fn collect_fields_on_external_types(
         federation_spec_definition: &'static FederationSpecDefinition,
         schema: &Valid<FederationSchema>,
-    ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
+    ) -> Result<IndexSet<FieldPosition>, FederationError> {
         let external_directive_definition = federation_spec_definition
             .external_directive_definition(schema)?
             .clone();
@@ -258,7 +254,7 @@ impl ExternalMetadata {
 
     pub(crate) fn is_external(
         &self,
-        field_definition_position: &FieldDefinitionPosition,
+        field_definition_position: &FieldPosition,
     ) -> Result<bool, FederationError> {
         Ok((self.external_fields.contains(field_definition_position)
             || self
@@ -267,10 +263,7 @@ impl ExternalMetadata {
             && !self.is_fake_external(field_definition_position))
     }
 
-    pub(crate) fn is_fake_external(
-        &self,
-        field_definition_position: &FieldDefinitionPosition,
-    ) -> bool {
+    pub(crate) fn is_fake_external(&self, field_definition_position: &FieldPosition) -> bool {
         self.fake_external_fields
             .contains(field_definition_position)
     }
@@ -296,7 +289,7 @@ impl ExternalMetadata {
 
     pub(crate) fn is_partially_external(
         &self,
-        field_definition_position: &FieldDefinitionPosition,
+        field_definition_position: &FieldPosition,
     ) -> Result<bool, FederationError> {
         Ok(self.is_external(field_definition_position)?
             && self.provided_fields.contains(field_definition_position))
@@ -304,7 +297,7 @@ impl ExternalMetadata {
 
     pub(crate) fn is_fully_external(
         &self,
-        field_definition_position: &FieldDefinitionPosition,
+        field_definition_position: &FieldPosition,
     ) -> Result<bool, FederationError> {
         Ok(self.is_external(field_definition_position)?
             && !self.provided_fields.contains(field_definition_position))

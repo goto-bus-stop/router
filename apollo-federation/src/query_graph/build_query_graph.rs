@@ -29,18 +29,18 @@ use crate::query_plan::operation::merge_selection_sets;
 use crate::query_plan::operation::Selection;
 use crate::query_plan::operation::SelectionSet;
 use crate::schema::field_set::parse_field_set;
-use crate::schema::position::AbstractTypeDefinitionPosition;
-use crate::schema::position::CompositeTypeDefinitionPosition;
-use crate::schema::position::FieldDefinitionPosition;
-use crate::schema::position::InterfaceTypeDefinitionPosition;
-use crate::schema::position::ObjectFieldDefinitionPosition;
-use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
-use crate::schema::position::ObjectTypeDefinitionPosition;
-use crate::schema::position::OutputTypeDefinitionPosition;
-use crate::schema::position::SchemaRootDefinitionKind;
-use crate::schema::position::SchemaRootDefinitionPosition;
-use crate::schema::position::TypeDefinitionPosition;
-use crate::schema::position::UnionTypeDefinitionPosition;
+use crate::schema::position::AbstractTypePosition;
+use crate::schema::position::CompositeTypePosition;
+use crate::schema::position::FieldPosition;
+use crate::schema::position::InterfacePosition;
+use crate::schema::position::ObjectFieldPosition;
+use crate::schema::position::ObjectOrInterfacePosition;
+use crate::schema::position::ObjectPosition;
+use crate::schema::position::OutputTypePosition;
+use crate::schema::position::SchemaRootKind;
+use crate::schema::position::SchemaRootPosition;
+use crate::schema::position::TypePosition;
+use crate::schema::position::UnionPosition;
 use crate::schema::ValidFederationSchema;
 
 /// Builds a "federated" query graph based on the provided supergraph and API schema.
@@ -204,7 +204,7 @@ impl BaseQueryGraphBuilder {
     fn create_root_node(
         &mut self,
         type_: QueryGraphNodeType,
-        root_kind: SchemaRootDefinitionKind,
+        root_kind: SchemaRootKind,
     ) -> Result<NodeIndex, FederationError> {
         let node = self.create_new_node(type_)?;
         self.set_as_root(node, root_kind)?;
@@ -214,7 +214,7 @@ impl BaseQueryGraphBuilder {
     fn set_as_root(
         &mut self,
         node: NodeIndex,
-        root_kind: SchemaRootDefinitionKind,
+        root_kind: SchemaRootKind,
     ) -> Result<(), FederationError> {
         let node_weight = self.query_graph.node_weight_mut(node)?;
         node_weight.root_kind = Some(root_kind);
@@ -265,8 +265,8 @@ impl SchemaQueryGraphBuilder {
     fn build(mut self) -> Result<QueryGraph, FederationError> {
         // PORT_NOTE: Note that most of the JS code's buildGraphInternal() logic was moved into this
         // build() method.
-        for root_kind in SchemaRootDefinitionKind::iter() {
-            let pos = SchemaRootDefinitionPosition::new(root_kind);
+        for root_kind in SchemaRootKind::iter() {
+            let pos = SchemaRootPosition::new(root_kind);
             if pos
                 .try_get(self.base.query_graph.schema()?.schema())
                 .is_some()
@@ -285,7 +285,7 @@ impl SchemaQueryGraphBuilder {
 
     fn is_external(
         &self,
-        field_definition_position: &FieldDefinitionPosition,
+        field_definition_position: &FieldPosition,
     ) -> Result<bool, FederationError> {
         if let Some(subgraph_metadata) = self.base.query_graph.schema()?.subgraph_metadata() {
             Ok(subgraph_metadata
@@ -304,7 +304,7 @@ impl SchemaQueryGraphBuilder {
     /// and edges for all the types reachable from that root query type.
     fn add_recursively_from_root(
         &mut self,
-        root: SchemaRootDefinitionPosition,
+        root: SchemaRootPosition,
     ) -> Result<(), FederationError> {
         let root_type_name = root.get(self.base.query_graph.schema()?.schema())?;
         let pos = match self
@@ -313,7 +313,7 @@ impl SchemaQueryGraphBuilder {
             .schema()?
             .get_type(root_type_name.name.clone())?
         {
-            TypeDefinitionPosition::Object(pos) => pos,
+            TypePosition::Object(pos) => pos,
             _ => {
                 return Err(SingleFederationError::Internal {
                     message: format!(
@@ -333,7 +333,7 @@ impl SchemaQueryGraphBuilder {
     /// for each field and recursively add nodes for each field's type, etc...).
     fn add_type_recursively(
         &mut self,
-        output_type_definition_position: OutputTypeDefinitionPosition,
+        output_type_definition_position: OutputTypePosition,
     ) -> Result<NodeIndex, FederationError> {
         let type_name = output_type_definition_position.type_name().clone();
         if let Some(existing) = self.base.query_graph.types_to_nodes()?.get(&type_name) {
@@ -356,10 +356,10 @@ impl SchemaQueryGraphBuilder {
             .base
             .create_new_node(output_type_definition_position.clone().into())?;
         match output_type_definition_position {
-            OutputTypeDefinitionPosition::Object(pos) => {
+            OutputTypePosition::Object(pos) => {
                 self.add_object_type_edges(pos, node)?;
             }
-            OutputTypeDefinitionPosition::Interface(pos) => {
+            OutputTypePosition::Interface(pos) => {
                 // For interfaces, we generally don't add direct edges for their fields. Because in
                 // general, the subgraph where a particular field can be fetched from may depend on
                 // the runtime implementation. However, if the subgraph we're currently including
@@ -373,7 +373,7 @@ impl SchemaQueryGraphBuilder {
                 }
                 self.add_abstract_type_edges(pos.clone().into(), node)?;
             }
-            OutputTypeDefinitionPosition::Union(pos) => {
+            OutputTypePosition::Union(pos) => {
                 // Add the special-case __typename edge for unions.
                 self.add_edge_for_field(pos.introspection_typename_field().into(), node, false)?;
                 self.add_abstract_type_edges(pos.clone().into(), node)?;
@@ -387,7 +387,7 @@ impl SchemaQueryGraphBuilder {
 
     fn add_object_type_edges(
         &mut self,
-        object_type_definition_position: ObjectTypeDefinitionPosition,
+        object_type_definition_position: ObjectPosition,
         head: NodeIndex,
     ) -> Result<(), FederationError> {
         let type_ =
@@ -447,12 +447,12 @@ impl SchemaQueryGraphBuilder {
 
     fn add_edge_for_field(
         &mut self,
-        field_definition_position: FieldDefinitionPosition,
+        field_definition_position: FieldPosition,
         head: NodeIndex,
         skip_edge: bool,
     ) -> Result<(), FederationError> {
         let field = field_definition_position.get(self.base.query_graph.schema()?.schema())?;
-        let tail_pos: OutputTypeDefinitionPosition = self
+        let tail_pos: OutputTypePosition = self
             .base
             .query_graph
             .schema()?
@@ -472,7 +472,7 @@ impl SchemaQueryGraphBuilder {
 
     fn maybe_add_interface_fields_edges(
         &mut self,
-        interface_type_definition_position: InterfaceTypeDefinitionPosition,
+        interface_type_definition_position: InterfacePosition,
         head: NodeIndex,
     ) -> Result<(), FederationError> {
         let Some(subgraph) = &self.subgraph else {
@@ -558,7 +558,7 @@ impl SchemaQueryGraphBuilder {
 
     fn is_directly_provided_by_type(
         &self,
-        object_field_definition_position: ObjectFieldDefinitionPosition,
+        object_field_definition_position: ObjectFieldPosition,
     ) -> Result<bool, FederationError> {
         // The field is directly provided if:
         //   1) the type does have it.
@@ -591,7 +591,7 @@ impl SchemaQueryGraphBuilder {
 
     fn add_abstract_type_edges(
         &mut self,
-        abstract_type_definition_position: AbstractTypeDefinitionPosition,
+        abstract_type_definition_position: AbstractTypePosition,
         head: NodeIndex,
     ) -> Result<(), FederationError> {
         let implementations = self
@@ -687,13 +687,9 @@ impl SchemaQueryGraphBuilder {
         // For each abstract type in the schema, compute its runtime types.
         let mut abstract_types_with_runtime_types = Vec::new();
         for (type_name, type_) in &self.base.query_graph.schema()?.schema().types {
-            let pos: AbstractTypeDefinitionPosition = match type_ {
-                ExtendedType::Interface(_) => {
-                    InterfaceTypeDefinitionPosition::new(type_name.clone()).into()
-                }
-                ExtendedType::Union(_) => {
-                    UnionTypeDefinitionPosition::new(type_name.clone()).into()
-                }
+            let pos: AbstractTypePosition = match type_ {
+                ExtendedType::Interface(_) => InterfacePosition::new(type_name.clone()).into(),
+                ExtendedType::Union(_) => UnionPosition::new(type_name.clone()).into(),
                 _ => continue,
             };
             // All "normal" types from subgraphs should be in the API schema, but there are a
@@ -792,7 +788,7 @@ impl SchemaQueryGraphBuilder {
                         .intersection(&t2.subgraph_runtime_type_positions)
                         .collect::<IndexSet<_>>();
                     if intersecting_local_runtime_type_positions.len() >= 2 {
-                        let is_in_local_other_type_but_not_local_intersection = |type_pos: &ObjectTypeDefinitionPosition, other_type: &AbstractTypeWithRuntimeTypes| {
+                        let is_in_local_other_type_but_not_local_intersection = |type_pos: &ObjectPosition, other_type: &AbstractTypeWithRuntimeTypes| {
                             other_type.subgraph_runtime_type_positions.contains(type_pos) &&
                                 !intersecting_local_runtime_type_positions.contains(type_pos)
                         };
@@ -812,7 +808,7 @@ impl SchemaQueryGraphBuilder {
                         // fix for #2256 is implemented.
                         if !(matches!(
                             t2.abstract_type_definition_position,
-                            AbstractTypeDefinitionPosition::Union(_)
+                            AbstractTypePosition::Union(_)
                         ) || t2
                             .api_runtime_type_positions
                             .iter()
@@ -822,7 +818,7 @@ impl SchemaQueryGraphBuilder {
                         }
                         if !(matches!(
                             t1.abstract_type_definition_position,
-                            AbstractTypeDefinitionPosition::Union(_)
+                            AbstractTypePosition::Union(_)
                         ) || t1
                             .api_runtime_type_positions
                             .iter()
@@ -896,9 +892,8 @@ impl SchemaQueryGraphBuilder {
             return Ok(());
         };
         let entity_type_name = entity_type_definition.name.clone();
-        let entity_type_node = self.add_type_recursively(
-            UnionTypeDefinitionPosition::new(entity_type_name.clone()).into(),
-        )?;
+        let entity_type_node =
+            self.add_type_recursively(UnionPosition::new(entity_type_name.clone()).into())?;
         let key_directive_definition =
             federation_spec_definition.key_directive_definition(self.base.query_graph.schema()?)?;
         let mut interface_type_definition_positions = Vec::new();
@@ -913,8 +908,7 @@ impl SchemaQueryGraphBuilder {
             )?
             .is_empty()
             {
-                interface_type_definition_positions
-                    .push(InterfaceTypeDefinitionPosition::new(type_name.clone()));
+                interface_type_definition_positions.push(InterfacePosition::new(type_name.clone()));
             }
         }
         for interface_type_definition_position in interface_type_definition_positions {
@@ -922,8 +916,7 @@ impl SchemaQueryGraphBuilder {
                 self.add_type_recursively(interface_type_definition_position.clone().into())?;
             let transition = QueryGraphEdgeTransition::Downcast {
                 source: self.base.query_graph.current_source.clone(),
-                from_type_position: UnionTypeDefinitionPosition::new(entity_type_name.clone())
-                    .into(),
+                from_type_position: UnionPosition::new(entity_type_name.clone()).into(),
                 to_type_position: interface_type_definition_position.into(),
             };
             self.base
@@ -935,9 +928,9 @@ impl SchemaQueryGraphBuilder {
 }
 
 struct AbstractTypeWithRuntimeTypes {
-    abstract_type_definition_position: AbstractTypeDefinitionPosition,
-    subgraph_runtime_type_positions: IndexSet<ObjectTypeDefinitionPosition>,
-    api_runtime_type_positions: IndexSet<ObjectTypeDefinitionPosition>,
+    abstract_type_definition_position: AbstractTypePosition,
+    subgraph_runtime_type_positions: IndexSet<ObjectPosition>,
+    api_runtime_type_positions: IndexSet<ObjectPosition>,
 }
 
 struct FederatedQueryGraphBuilder {
@@ -1097,7 +1090,7 @@ impl FederatedQueryGraphBuilder {
                 })?
                 .directives();
             let subgraph_data = self.subgraphs.get(source)?;
-            let is_interface_object = matches!(type_pos, OutputTypeDefinitionPosition::Object(_))
+            let is_interface_object = matches!(type_pos, OutputTypePosition::Object(_))
                 && directives.has(&subgraph_data.interface_object_directive_definition_name);
 
             for application in resolvable_key_applications(
@@ -1116,7 +1109,7 @@ impl FederatedQueryGraphBuilder {
                 // allow a type to be an entity in some subgraphs but not others, this is not
                 // the place to impose that restriction, and this may be at least temporarily
                 // useful to allow convert a type to an entity).
-                let Ok(type_pos): Result<ObjectOrInterfaceTypeDefinitionPosition, _> =
+                let Ok(type_pos): Result<ObjectOrInterfacePosition, _> =
                     type_pos.clone().try_into()
                 else {
                     return Err(SingleFederationError::Internal {
@@ -1188,7 +1181,7 @@ impl FederatedQueryGraphBuilder {
                         let type_in_supergraph_pos = self
                             .supergraph_schema
                             .get_type(type_pos.type_name().clone())?;
-                        let TypeDefinitionPosition::Interface(type_in_supergraph_pos) =
+                        let TypePosition::Interface(type_in_supergraph_pos) =
                             type_in_supergraph_pos
                         else {
                             return Err(SingleFederationError::Internal {
@@ -1248,8 +1241,12 @@ impl FederatedQueryGraphBuilder {
                             // other subgraph.
                             let other_schema =
                                 self.base.query_graph.schema_by_source(other_source)?;
-                            let implementation_type_in_other_subgraph_pos: CompositeTypeDefinitionPosition =
-                                other_schema.get_type(implementation_type_in_supergraph_pos.type_name.clone())?.try_into()?;
+                            let implementation_type_in_other_subgraph_pos: CompositeTypePosition =
+                                other_schema
+                                    .get_type(
+                                        implementation_type_in_supergraph_pos.type_name.clone(),
+                                    )?
+                                    .try_into()?;
                             let Ok(implementation_conditions) = parse_field_set(
                                 other_schema,
                                 implementation_type_in_other_subgraph_pos
@@ -1380,8 +1377,7 @@ impl FederatedQueryGraphBuilder {
                 let application = subgraph_data
                     .federation_spec_definition
                     .provides_directive_arguments(directive)?;
-                let field_type_pos: CompositeTypeDefinitionPosition =
-                    field_type_pos.clone().try_into()?;
+                let field_type_pos: CompositeTypePosition = field_type_pos.clone().try_into()?;
                 let conditions = parse_field_set(
                     schema,
                     field_type_pos.type_name().clone(),
@@ -1674,7 +1670,7 @@ impl FederatedQueryGraphBuilder {
         base: &mut BaseQueryGraphBuilder,
         node: NodeIndex,
         provide_id: u32,
-    ) -> Result<(NodeIndex, OutputTypeDefinitionPosition), FederationError> {
+    ) -> Result<(NodeIndex, OutputTypePosition), FederationError> {
         let node_weight = base.query_graph.node_weight(node)?;
         let QueryGraphNodeType::SchemaType(type_pos) = node_weight.type_.clone() else {
             return Err(SingleFederationError::Internal {
@@ -1803,9 +1799,7 @@ impl FederatedQueryGraphBuilder {
                 let type_in_supergraph_pos = self
                     .supergraph_schema
                     .get_type(type_pos.type_name.clone())?;
-                let TypeDefinitionPosition::Interface(type_in_supergraph_pos) =
-                    type_in_supergraph_pos
-                else {
+                let TypePosition::Interface(type_in_supergraph_pos) = type_in_supergraph_pos else {
                     return Err(SingleFederationError::Internal {
                             message: format!(
                                 "Type \"{}\" was marked with \"@interfaceObject\" in subgraph \"{}\", but was non-interface in supergraph",
@@ -2050,11 +2044,11 @@ mod tests {
     use crate::query_graph::QueryGraphEdgeTransition;
     use crate::query_graph::QueryGraphNode;
     use crate::query_graph::QueryGraphNodeType;
-    use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
-    use crate::schema::position::ObjectTypeDefinitionPosition;
-    use crate::schema::position::OutputTypeDefinitionPosition;
-    use crate::schema::position::ScalarTypeDefinitionPosition;
-    use crate::schema::position::SchemaRootDefinitionKind;
+    use crate::schema::position::ObjectOrInterfacePosition;
+    use crate::schema::position::ObjectPosition;
+    use crate::schema::position::OutputTypePosition;
+    use crate::schema::position::ScalarPosition;
+    use crate::schema::position::SchemaRootKind;
     use crate::schema::ValidFederationSchema;
 
     const SCHEMA_NAME: NodeStr = NodeStr::from_static(&"test");
@@ -2068,8 +2062,8 @@ mod tests {
     fn assert_node_type(
         query_graph: &QueryGraph,
         node: NodeIndex,
-        output_type_definition_position: OutputTypeDefinitionPosition,
-        root_kind: Option<SchemaRootDefinitionKind>,
+        output_type_definition_position: OutputTypePosition,
+        root_kind: Option<SchemaRootKind>,
     ) -> Result<(), FederationError> {
         assert_eq!(
             *query_graph.node_weight(node)?,
@@ -2109,7 +2103,7 @@ mod tests {
         let QueryGraphNodeType::SchemaType(type_pos) = &head_weight.type_ else {
             panic!("Unexpectedly found federated root type");
         };
-        let type_pos: ObjectOrInterfaceTypeDefinitionPosition = type_pos.clone().try_into()?;
+        let type_pos: ObjectOrInterfacePosition = type_pos.clone().try_into()?;
         let field_pos = type_pos.field(field_name);
         let schema = query_graph.schema()?;
         field_pos.get(schema.schema())?;
@@ -2163,18 +2157,18 @@ mod tests {
                 .keys()
                 .cloned()
                 .collect::<IndexSet<_>>(),
-            IndexSet::from([SchemaRootDefinitionKind::Query])
+            IndexSet::from([SchemaRootKind::Query])
         );
 
         let root_node = query_graph
             .root_kinds_to_nodes()?
-            .get(&SchemaRootDefinitionKind::Query)
+            .get(&SchemaRootKind::Query)
             .unwrap();
         assert_node_type(
             &query_graph,
             *root_node,
-            ObjectTypeDefinitionPosition::new(name!("Query")).into(),
-            Some(SchemaRootDefinitionKind::Query),
+            ObjectPosition::new(name!("Query")).into(),
+            Some(SchemaRootKind::Query),
         )?;
         assert_eq!(
             query_graph
@@ -2193,7 +2187,7 @@ mod tests {
         assert_node_type(
             &query_graph,
             *root_typename_tail,
-            ScalarTypeDefinitionPosition::new(name!("String")).into(),
+            ScalarPosition::new(name!("String")).into(),
             None,
         )?;
 
@@ -2201,7 +2195,7 @@ mod tests {
         assert_node_type(
             &query_graph,
             *t1_node,
-            ObjectTypeDefinitionPosition::new(name!("T1")).into(),
+            ObjectPosition::new(name!("T1")).into(),
             None,
         )?;
         assert_eq!(
@@ -2221,7 +2215,7 @@ mod tests {
         assert_node_type(
             &query_graph,
             *t1_typename_tail,
-            ScalarTypeDefinitionPosition::new(name!("String")).into(),
+            ScalarPosition::new(name!("String")).into(),
             None,
         )?;
 
@@ -2229,7 +2223,7 @@ mod tests {
         assert_node_type(
             &query_graph,
             *t1_f1_tail,
-            ScalarTypeDefinitionPosition::new(name!("Int")).into(),
+            ScalarPosition::new(name!("Int")).into(),
             None,
         )?;
         assert_eq!(
@@ -2244,7 +2238,7 @@ mod tests {
         assert_node_type(
             &query_graph,
             *t1_f2_tail,
-            ScalarTypeDefinitionPosition::new(name!("String")).into(),
+            ScalarPosition::new(name!("String")).into(),
             None,
         )?;
         assert_eq!(
@@ -2259,7 +2253,7 @@ mod tests {
         assert_node_type(
             &query_graph,
             *t2_node,
-            ObjectTypeDefinitionPosition::new(name!("T2")).into(),
+            ObjectPosition::new(name!("T2")).into(),
             None,
         )?;
         assert_eq!(
@@ -2279,7 +2273,7 @@ mod tests {
         assert_node_type(
             &query_graph,
             *t2_typename_tail,
-            ScalarTypeDefinitionPosition::new(name!("String")).into(),
+            ScalarPosition::new(name!("String")).into(),
             None,
         )?;
 
@@ -2287,7 +2281,7 @@ mod tests {
         assert_node_type(
             &query_graph,
             *t2_t_tail,
-            ObjectTypeDefinitionPosition::new(name!("T1")).into(),
+            ObjectPosition::new(name!("T1")).into(),
             None,
         )?;
 

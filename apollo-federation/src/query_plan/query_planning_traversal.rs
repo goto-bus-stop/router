@@ -37,10 +37,10 @@ use crate::query_plan::query_planner::compute_root_fetch_groups;
 use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::query_plan::query_planner::QueryPlanningStatistics;
 use crate::query_plan::QueryPlanCost;
-use crate::schema::position::AbstractTypeDefinitionPosition;
-use crate::schema::position::CompositeTypeDefinitionPosition;
-use crate::schema::position::ObjectTypeDefinitionPosition;
-use crate::schema::position::SchemaRootDefinitionKind;
+use crate::schema::position::AbstractTypePosition;
+use crate::schema::position::CompositeTypePosition;
+use crate::schema::position::ObjectPosition;
+use crate::schema::position::SchemaRootKind;
 use crate::schema::ValidFederationSchema;
 
 // PORT_NOTE: Named `PlanningParameters` in the JS codebase, but there was no particular reason to
@@ -66,8 +66,7 @@ pub(crate) struct QueryPlanningParameters {
     /// subgraphs.
     // PORT_NOTE: Named `inconsistentAbstractTypesRuntimes` in the JS codebase, which was slightly
     // confusing.
-    pub(crate) abstract_types_with_inconsistent_runtime_types:
-        Arc<IndexSet<AbstractTypeDefinitionPosition>>,
+    pub(crate) abstract_types_with_inconsistent_runtime_types: Arc<IndexSet<AbstractTypePosition>>,
     /// The configuration for the query planner.
     pub(crate) config: QueryPlannerConfig,
     pub(crate) statistics: QueryPlanningStatistics,
@@ -77,7 +76,7 @@ pub(crate) struct QueryPlanningTraversal<'a> {
     /// The parameters given to query planning.
     parameters: &'a QueryPlanningParameters,
     /// The root kind of the operation.
-    root_kind: SchemaRootDefinitionKind,
+    root_kind: SchemaRootKind,
     /// True if query planner `@defer` support is enabled and the operation contains some `@defer`
     /// application.
     has_defers: bool,
@@ -160,7 +159,7 @@ impl<'a> QueryPlanningTraversal<'a> {
         parameters: &'a QueryPlanningParameters,
         selection_set: SelectionSet,
         has_defers: bool,
-        root_kind: SchemaRootDefinitionKind,
+        root_kind: SchemaRootKind,
         cost_processor: FetchDependencyGraphToCostProcessor,
     ) -> Result<Self, FederationError> {
         Self::new_inner(
@@ -183,7 +182,7 @@ impl<'a> QueryPlanningTraversal<'a> {
         selection_set: SelectionSet,
         starting_id_generation: u64,
         has_defers: bool,
-        root_kind: SchemaRootDefinitionKind,
+        root_kind: SchemaRootKind,
         cost_processor: FetchDependencyGraphToCostProcessor,
         initial_context: OpGraphPathContext,
         excluded_destinations: ExcludedDestinations,
@@ -495,7 +494,7 @@ impl<'a> QueryPlanningTraversal<'a> {
             let n = self.parameters.federated_query_graph.node_weight(*node)?;
             let parent_ty = match &n.type_ {
                 QueryGraphNodeType::SchemaType(ty) => {
-                    match CompositeTypeDefinitionPosition::try_from(ty.clone()) {
+                    match CompositeTypePosition::try_from(ty.clone()) {
                         Ok(ty) => ty,
                         _ => return Ok(false),
                     }
@@ -822,7 +821,7 @@ impl<'a> QueryPlanningTraversal<'a> {
                 .root_operation(self.root_kind.into())
                 .cloned()
                 // A root operation type has to be an object type
-                .map(|type_name| ObjectTypeDefinitionPosition { type_name }.into())
+                .map(|type_name| ObjectPosition { type_name }.into())
         } else {
             None
         };

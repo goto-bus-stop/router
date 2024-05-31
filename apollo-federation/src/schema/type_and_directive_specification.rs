@@ -23,12 +23,12 @@ use crate::error::SingleFederationError;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::argument_composition_strategies::ArgumentCompositionStrategy;
-use crate::schema::position::DirectiveDefinitionPosition;
-use crate::schema::position::EnumTypeDefinitionPosition;
-use crate::schema::position::ObjectTypeDefinitionPosition;
-use crate::schema::position::ScalarTypeDefinitionPosition;
-use crate::schema::position::TypeDefinitionPosition;
-use crate::schema::position::UnionTypeDefinitionPosition;
+use crate::schema::position::DirectivePosition;
+use crate::schema::position::EnumPosition;
+use crate::schema::position::ObjectPosition;
+use crate::schema::position::ScalarPosition;
+use crate::schema::position::TypePosition;
+use crate::schema::position::UnionPosition;
 use crate::schema::FederationSchema;
 
 //////////////////////////////////////////////////////////////////////////////
@@ -107,7 +107,7 @@ impl TypeAndDirectiveSpecification for ScalarTypeSpecification {
             return ensure_expected_type_kind(TypeKind::Scalar, &existing);
         }
 
-        let type_pos = ScalarTypeDefinitionPosition::new(self.name.clone());
+        let type_pos = ScalarPosition::new(self.name.clone());
         type_pos.pre_insert(schema)?;
         type_pos.insert(
             schema,
@@ -151,7 +151,7 @@ impl TypeAndDirectiveSpecification for ObjectTypeSpecification {
             field_map.insert(field_spec.name.clone(), Component::new(field_def));
         }
 
-        let type_pos = ObjectTypeDefinitionPosition::new(self.name.clone());
+        let type_pos = ObjectPosition::new(self.name.clone());
         type_pos.pre_insert(schema)?;
         type_pos.insert(
             schema,
@@ -220,7 +220,7 @@ where
             return Ok(());
         }
 
-        let type_pos = UnionTypeDefinitionPosition::new(self.name.clone());
+        let type_pos = UnionPosition::new(self.name.clone());
         type_pos.pre_insert(schema)?;
         type_pos.insert(
             schema,
@@ -282,7 +282,7 @@ impl TypeAndDirectiveSpecification for EnumTypeSpecification {
             return Ok(());
         }
 
-        let type_pos = EnumTypeDefinitionPosition::new(self.name.clone());
+        let type_pos = EnumPosition::new(self.name.clone());
         type_pos.pre_insert(schema)?;
         type_pos.insert(
             schema,
@@ -461,7 +461,7 @@ impl TypeAndDirectiveSpecification for DirectiveSpecification {
             );
         }
 
-        let directive_pos = DirectiveDefinitionPosition::new(self.name.clone());
+        let directive_pos = DirectivePosition::new(self.name.clone());
         directive_pos.pre_insert(schema)?;
         directive_pos.insert(
             schema,
@@ -506,22 +506,22 @@ impl From<&ExtendedType> for TypeKind {
     }
 }
 
-impl From<&TypeDefinitionPosition> for TypeKind {
-    fn from(value: &TypeDefinitionPosition) -> Self {
+impl From<&TypePosition> for TypeKind {
+    fn from(value: &TypePosition) -> Self {
         match value {
-            TypeDefinitionPosition::Scalar(_) => TypeKind::Scalar,
-            TypeDefinitionPosition::Object(_) => TypeKind::Object,
-            TypeDefinitionPosition::Interface(_) => TypeKind::Interface,
-            TypeDefinitionPosition::Union(_) => TypeKind::Union,
-            TypeDefinitionPosition::Enum(_) => TypeKind::Enum,
-            TypeDefinitionPosition::InputObject(_) => TypeKind::InputObject,
+            TypePosition::Scalar(_) => TypeKind::Scalar,
+            TypePosition::Object(_) => TypeKind::Object,
+            TypePosition::Interface(_) => TypeKind::Interface,
+            TypePosition::Union(_) => TypeKind::Union,
+            TypePosition::Enum(_) => TypeKind::Enum,
+            TypePosition::InputObject(_) => TypeKind::InputObject,
         }
     }
 }
 
 fn ensure_expected_type_kind(
     expected: TypeKind,
-    actual: &TypeDefinitionPosition,
+    actual: &TypePosition,
 ) -> Result<(), FederationError> {
     let actual_kind: TypeKind = TypeKind::from(actual);
     if expected != actual_kind {

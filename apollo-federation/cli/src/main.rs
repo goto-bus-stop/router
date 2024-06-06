@@ -39,6 +39,7 @@ enum Command {
     },
     /// Outputs the formatted query plan for the given query and schema
     Plan {
+        /// Path to a query to plan.
         query: PathBuf,
         /// Path(s) to one supergraph schema file, `-` for stdin or multiple subgraph schemas.
         schemas: Vec<PathBuf>,

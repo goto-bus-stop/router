@@ -5,8 +5,10 @@ use std::fmt::Formatter;
 use std::fmt::Write;
 
 use apollo_compiler::ast::InvalidNameError;
+use apollo_compiler::ast::Name;
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::WithErrors;
+use apollo_compiler::SourceMap;
 use lazy_static::lazy_static;
 
 use crate::subgraph::spec::FederationSpecError;
@@ -29,14 +31,32 @@ impl From<SchemaRootKind> for String {
     }
 }
 
+/// Diagnostic type for federation-specific GraphQL errors.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum FederationDiagnostic {
+    #[error(transparent)]
+    InvalidName(InvalidNameError),
+    #[error("the root query type `{name}` must be an object type")]
+    RootOperationObjectType { name: Name },
+    #[error("subgraph missing root query type")]
+    NoQueryRoot,
+    #[error("the root query type `{query_type}` must have an `_entities` field")]
+    NoEntities { query_type: Name },
+}
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum SingleFederationError {
     #[error(
         "An internal error has occurred, please report this bug to Apollo.\n\nDetails: {message}"
     )]
     Internal { message: String },
-    #[error("{message}")]
-    InvalidGraphQL { message: String },
+    #[error("{diagnostics}")]
+    InvalidGraphQL { diagnostics: DiagnosticList },
+    #[error("{diagnostic}")]
+    InvalidGraphQLCustom {
+        sources: SourceMap,
+        diagnostic: FederationDiagnostic,
+    },
     #[error("{message}")]
     DirectiveDefinitionInvalid { message: String },
     #[error("{message}")]
@@ -196,6 +216,7 @@ impl SingleFederationError {
         match self {
             SingleFederationError::Internal { .. } => ErrorCode::Internal,
             SingleFederationError::InvalidGraphQL { .. } => ErrorCode::InvalidGraphQL,
+            SingleFederationError::InvalidGraphQLCustom { .. } => ErrorCode::InvalidGraphQL,
             SingleFederationError::DirectiveDefinitionInvalid { .. } => {
                 ErrorCode::DirectiveDefinitionInvalid
             }
@@ -364,11 +385,24 @@ impl SingleFederationError {
     }
 }
 
+impl From<FederationDiagnostic> for SingleFederationError {
+    fn from(err: FederationDiagnostic) -> Self {
+        SingleFederationError::InvalidGraphQLCustom {
+            sources: Default::default(),
+            diagnostic: err,
+        }
+    }
+}
+
+impl From<FederationDiagnostic> for FederationError {
+    fn from(err: FederationDiagnostic) -> Self {
+        SingleFederationError::from(err).into()
+    }
+}
+
 impl From<InvalidNameError> for SingleFederationError {
     fn from(err: InvalidNameError) -> Self {
-        SingleFederationError::InvalidGraphQL {
-            message: format!("Invalid GraphQL name \"{}\"", err.0),
-        }
+        FederationDiagnostic::InvalidName(err).into()
     }
 }
 
@@ -421,19 +455,6 @@ impl Display for MultipleFederationErrors {
             }
         }
         Ok(())
-    }
-}
-
-impl From<DiagnosticList> for MultipleFederationErrors {
-    fn from(value: DiagnosticList) -> Self {
-        Self {
-            errors: value
-                .iter()
-                .map(|e| SingleFederationError::InvalidGraphQL {
-                    message: e.error.to_string(),
-                })
-                .collect(),
-        }
     }
 }
 
@@ -512,8 +533,7 @@ impl From<SingleFederationError> for FederationError {
 
 impl From<DiagnosticList> for FederationError {
     fn from(value: DiagnosticList) -> Self {
-        let value: MultipleFederationErrors = value.into();
-        value.into()
+        SingleFederationError::InvalidGraphQL { diagnostics: value }.into()
     }
 }
 

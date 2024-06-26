@@ -209,7 +209,6 @@ mod selection_map {
     use std::ops::Deref;
     use std::sync::Arc;
 
-    use apollo_compiler::executable;
     use indexmap::IndexMap;
 
     use crate::error::FederationError;
@@ -428,14 +427,6 @@ mod selection_map {
             }
         }
 
-        pub(super) fn get_directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
-            match self {
-                Self::Field(field) => field.get_directives_mut(),
-                Self::FragmentSpread(spread) => spread.get_directives_mut(),
-                Self::InlineFragment(inline) => inline.get_directives_mut(),
-            }
-        }
-
         pub(super) fn get_selection_set_mut(&mut self) -> Option<&mut SelectionSet> {
             match self {
                 Self::Field(field) => field.get_selection_set_mut().as_mut(),
@@ -445,6 +436,9 @@ mod selection_map {
         }
     }
 
+    /// Provides mutable access to a field selection inside a SelectionMap.
+    ///
+    /// You can *only* mutate parts that do not affect the key of the selection.
     #[derive(Debug)]
     pub(crate) struct FieldSelectionValue<'a>(&'a mut Arc<FieldSelection>);
 
@@ -461,25 +455,20 @@ mod selection_map {
             Arc::make_mut(self.0).field.sibling_typename_mut()
         }
 
-        pub(super) fn get_directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
-            Arc::make_mut(self.0).field.directives_mut()
-        }
-
         pub(crate) fn get_selection_set_mut(&mut self) -> &mut Option<SelectionSet> {
             &mut Arc::make_mut(self.0).selection_set
         }
     }
 
+    /// Provides mutable access to a fragment spread selection inside a SelectionMap.
+    ///
+    /// You can *only* mutate parts that do not affect the key of the selection.
     #[derive(Debug)]
     pub(crate) struct FragmentSpreadSelectionValue<'a>(&'a mut Arc<FragmentSpreadSelection>);
 
     impl<'a> FragmentSpreadSelectionValue<'a> {
         pub(crate) fn new(fragment_spread_selection: &'a mut Arc<FragmentSpreadSelection>) -> Self {
             Self(fragment_spread_selection)
-        }
-
-        pub(super) fn get_directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
-            Arc::make_mut(self.0).spread.directives_mut()
         }
 
         pub(crate) fn get_selection_set_mut(&mut self) -> &mut SelectionSet {
@@ -491,6 +480,9 @@ mod selection_map {
         }
     }
 
+    /// Provides mutable access to an inline fragment selection inside a SelectionMap.
+    ///
+    /// You can *only* mutate parts that do not affect the key of the selection.
     #[derive(Debug)]
     pub(crate) struct InlineFragmentSelectionValue<'a>(&'a mut Arc<InlineFragmentSelection>);
 
@@ -501,10 +493,6 @@ mod selection_map {
 
         pub(crate) fn get(&self) -> &Arc<InlineFragmentSelection> {
             self.0
-        }
-
-        pub(super) fn get_directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
-            Arc::make_mut(self.0).inline_fragment.directives_mut()
         }
 
         pub(crate) fn get_selection_set_mut(&mut self) -> &mut SelectionSet {
@@ -3091,14 +3079,42 @@ impl SelectionSet {
     }
 
     /// Removes the @defer directive from all selections without removing that selection.
-    fn without_defer(&mut self) {
-        for (_key, mut selection) in Arc::make_mut(&mut self.selections).iter_mut() {
-            Arc::make_mut(selection.get_directives_mut()).retain(|dir| dir.name != name!("defer"));
-            if let Some(set) = selection.get_selection_set_mut() {
-                set.without_defer();
-            }
-        }
+    fn without_defer(&mut self) -> Result<(), FederationError> {
+        self.selections = self
+            .selections
+            .into_values()
+            .map(|selection| match selection {
+                Selection::Field(field) => match Arc::make_mut(&mut field).selection_set {
+                    None => Selection::Field(field),
+                    Some(selection_set) => {
+                        selection_set.without_defer()?;
+                        Selection::Field(Arc::new(
+                            field.with_updated_selection_set(Some(selection_set)),
+                        ))
+                    }
+                },
+                Selection::FragmentSpread(spread) => spread.with_updated_directives(
+                    spread
+                        .spread
+                        .directives
+                        .iter()
+                        .filter(|dir| dir.name != name!("defer"))
+                        .cloned()
+                        .collect(),
+                ),
+                Selection::InlineFragment(fragment) => fragment.with_updated_directives(
+                    fragment
+                        .inline_fragment
+                        .directives
+                        .iter()
+                        .filter(|dir| dir.name != name!("defer"))
+                        .cloned()
+                        .collect(),
+                ),
+            })
+            .try_collect()?;
         debug_assert!(!self.has_defer());
+        Ok(())
     }
 
     fn has_defer(&self) -> bool {

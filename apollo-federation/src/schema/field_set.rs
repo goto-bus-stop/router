@@ -205,7 +205,7 @@ mod tests {
         "#;
 
         let subgraph = Subgraph::parse_and_expand("S1", "http://S1", sdl).unwrap();
-        let supergraph = Supergraph::compose([&subgraph].to_vec()).unwrap();
+        let supergraph = Supergraph::compose(&[subgraph]).unwrap();
         let err = super::parse_field_set(&supergraph.schema, Name::new("Query").unwrap(), "r1: r")
             .map(|_| "Unexpected success") // ignore the Ok value
             .expect_err("Expected alias error");
@@ -229,7 +229,7 @@ mod tests {
         "#;
 
         let subgraph = Subgraph::parse_and_expand("S1", "http://S1", sdl).unwrap();
-        let supergraph = Supergraph::compose([&subgraph].to_vec()).unwrap();
+        let supergraph = Supergraph::compose(&[subgraph]).unwrap();
         let api_schema = supergraph.to_api_schema(Default::default())?;
         // Testing via `build_federated_query_graph` function, which validates the @requires directive.
         let err = build_federated_query_graph(supergraph.schema, api_schema, None, None)

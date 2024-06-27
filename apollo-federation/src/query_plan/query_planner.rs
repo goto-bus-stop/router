@@ -1104,8 +1104,7 @@ type User
         "#,
         )
         .unwrap();
-        let subgraphs = vec![&a];
-        let supergraph = Supergraph::compose(subgraphs).unwrap();
+        let supergraph = Supergraph::compose(&[a]).unwrap();
         let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
 
         let document = ExecutableDocument::parse_and_validate(

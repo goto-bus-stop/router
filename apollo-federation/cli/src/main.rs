@@ -115,7 +115,7 @@ fn compose_files(file_paths: &[PathBuf]) -> Result<apollo_federation::Supergraph
             subgraph::Subgraph::parse_and_expand(basename, &url, &doc_str).unwrap()
         })
         .collect();
-    let supergraph = apollo_federation::Supergraph::compose(schemas.iter().collect()).unwrap();
+    let supergraph = apollo_federation::Supergraph::compose(&schemas.iter().collect()).unwrap();
     Ok(supergraph)
 }
 

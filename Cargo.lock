@@ -425,6 +425,7 @@ name = "apollo-federation"
 version = "1.49.1"
 dependencies = [
  "apollo-compiler",
+ "criterion",
  "derive_more",
  "hex",
  "indexmap 2.2.3",

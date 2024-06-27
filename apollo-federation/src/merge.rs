@@ -91,7 +91,7 @@ impl Debug for MergeFailure {
     }
 }
 
-pub fn merge_subgraphs(subgraphs: Vec<&ValidSubgraph>) -> Result<MergeSuccess, MergeFailure> {
+pub fn merge_subgraphs(subgraphs: &[ValidSubgraph]) -> Result<MergeSuccess, MergeFailure> {
     let mut merger = Merger::new();
     let mut federation_subgraphs = ValidFederationSubgraphs::new();
     for subgraph in subgraphs {

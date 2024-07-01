@@ -1,3 +1,27 @@
+[[profile.default.overrides]]
+# These are known flaky tests according to the test flakiness report provided
+# in CircleCI insights, based on the `dev` branch:
+#
+# https://app.circleci.com/insights/github/apollographql/router/workflows/ci_checks/tests
+#
+# We will retry these tests up to 2 additional times. Retry counts are recorded.
+# Items on this list should be prioritized to get improved and removed from this
+# list at the time they are fixed.
+#
+# Frankly, it may be best to just retry all tests in the apollo-router::integration_tests
+# module, as they have a high failure rate, in general.
+retries = 2
+filter = '''
+   test(axum_factory::axum_http_server_factory::tests::request_cancel_log)
+or test(plugins::telemetry::metrics::apollo::test::apollo_metrics_enabled)
+or test(plugins::telemetry::tests::it_test_prometheus_metrics)
+or test(test_condition_if)
+or test(api_schema_hides_field)
+or test(integration::batching::it_handles_single_request_cancelled_by_coprocessor)
+or test(integration::redis::connection_failure_blocks_startup)
+or test(integration::redis::entity_cache)
+'''
+
 [profile.ci]
 # Print out output for failing tests as soon as they fail, and also at the end
 # of the run (for easy scrollability).

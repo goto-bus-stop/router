@@ -21,6 +21,88 @@ use crate::schema::position::SchemaRootDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::position::UnionTypenameFieldDefinitionPosition;
 
+macro_rules! declare_referencers {
+    ( $type_name:ident, $( $value_name:ident : $ty:ty ),+ ) => {
+        #[derive(Clone, derive_more::From)]
+        enum $type_name {
+            $( $value_name(#[from] $ty) ),+
+        }
+    }
+}
+
+declare_referencers!(
+    ScalarTypeReferencer,
+    ObjectField: ObjectFieldDefinitionPosition,
+    ObjectFieldArgument: ObjectFieldArgumentDefinitionPosition,
+    InterfaceField: InterfaceFieldDefinitionPosition,
+    InterfaceFieldArgument: InterfaceFieldArgumentDefinitionPosition,
+    UnionTypename: UnionTypenameFieldDefinitionPosition,
+    InputObjectField: InputObjectFieldDefinitionPosition,
+    DirectiveArgument: DirectiveArgumentDefinitionPosition
+);
+
+declare_referencers!(
+    ObjectTypeReferencer,
+    SchemaRoot: SchemaRootDefinitionPosition,
+    ObjectField: ObjectFieldDefinitionPosition,
+    InterfaceField: InterfaceFieldDefinitionPosition,
+    Union: UnionTypeDefinitionPosition
+);
+
+declare_referencers!(
+    InterfaceTypeReferencer,
+    Object: ObjectTypeDefinitionPosition,
+    ObjectField: ObjectFieldDefinitionPosition,
+    Interface: InterfaceTypeDefinitionPosition,
+    InterfaceField: InterfaceFieldDefinitionPosition
+);
+
+declare_referencers!(
+    UnionTypeReferencer,
+    ObjectField: ObjectFieldDefinitionPosition,
+    InterfaceField: InterfaceFieldDefinitionPosition
+);
+
+declare_referencers!(
+    EnumTypeReferencer,
+    ObjectField: ObjectFieldDefinitionPosition,
+    ObjectFieldArgument: ObjectFieldArgumentDefinitionPosition,
+    InterfaceField: InterfaceFieldDefinitionPosition,
+    InterfaceFieldArgument: InterfaceFieldArgumentDefinitionPosition,
+    InputObjectField: InputObjectFieldDefinitionPosition,
+    DirectiveArgument: DirectiveArgumentDefinitionPosition
+);
+
+declare_referencers!(
+    InputObjectTypeReferencer,
+    ObjectFieldArgument: ObjectFieldArgumentDefinitionPosition,
+    InterfaceFieldArgument: InterfaceFieldArgumentDefinitionPosition,
+    InputObjectField: InputObjectFieldDefinitionPosition,
+    DirectiveArgument: DirectiveArgumentDefinitionPosition
+);
+
+declare_referencers!(
+    DirectiveReferencer,
+    Schema: SchemaDefinitionPosition,
+    Scalar: ScalarTypeDefinitionPosition,
+    Object: ObjectTypeDefinitionPosition,
+    ObjectField: ObjectFieldDefinitionPosition,
+    ObjectFieldArgument: ObjectFieldArgumentDefinitionPosition,
+    Interface: InterfaceTypeDefinitionPosition,
+    InterfaceField: InterfaceFieldDefinitionPosition,
+    InterfaceFieldArgument: InterfaceFieldArgumentDefinitionPosition,
+    Union: UnionTypeDefinitionPosition,
+    Enum: EnumTypeDefinitionPosition,
+    EnumValue: EnumValueDefinitionPosition,
+    InputObject: InputObjectTypeDefinitionPosition,
+    InputObjectField: InputObjectFieldDefinitionPosition,
+    DirectiveArgument: DirectiveArgumentDefinitionPosition
+);
+
+trait Referencable {
+    type Referencer;
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Referencers {
     pub(crate) scalar_types: IndexMap<Name, ScalarTypeReferencers>,

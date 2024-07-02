@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::iter;
@@ -717,18 +716,27 @@ impl FetchDependencyGraph {
     /// Adds another node as a parent of `child`,
     /// meaning that this fetch should happen after the provided one.
     fn add_parent(&mut self, child_id: NodeIndex, parent_relation: ParentRelation) {
-        let ParentRelation {
-            parent_node_id,
-            path_in_parent,
-        } = parent_relation;
+        let parent_node_id = parent_relation.parent_node_id;
         if self.graph.contains_edge(parent_node_id, child_id) {
+            println!("skipping {child_id:?} <- {parent_node_id:?} relation");
             return;
         }
-        assert!(
+        debug_assert!(
             !self.graph.contains_edge(child_id, parent_node_id),
             "Node {parent_node_id:?} is a child of {child_id:?}: \
              adding it as parent would create a cycle"
         );
+        self.add_parent_unchecked(child_id, parent_relation);
+    }
+
+    /// Adds another node as a parent of `child`, meaning that this fetch should happen after the provided one.
+    ///
+    /// This does not check for duplicate edges. Use `add_parent()` if avoiding a duplicate edge is not guaranteed.
+    fn add_parent_unchecked(&mut self, child_id: NodeIndex, parent_relation: ParentRelation) {
+        let ParentRelation {
+            parent_node_id,
+            path_in_parent,
+        } = parent_relation;
         self.on_modification();
         self.graph.add_edge(
             parent_node_id,
@@ -2046,7 +2054,7 @@ impl FetchDependencyGraph {
         merged_id: NodeIndex,
         path_in_this: &OpPath,
     ) {
-        let mut new_parent_relations = HashMap::new();
+        let mut new_parent_relations = vec![];
         for child_id in self.children_of(merged_id) {
             // This could already be a child of `this`. Typically, we can have case where we have:
             //     1
@@ -2064,21 +2072,21 @@ impl FetchDependencyGraph {
                 .and_then(|r| r.path_in_parent);
             let concatenated_paths =
                 concat_paths_in_parents(&Some(Arc::new(path_in_this.clone())), &path_in_merged);
-            new_parent_relations.insert(
+            new_parent_relations.push((
                 child_id,
                 ParentRelation {
                     parent_node_id: node_id,
                     path_in_parent: concatenated_paths,
                 },
-            );
+            ));
         }
         for (child_id, new_parent) in new_parent_relations {
-            self.add_parent(child_id, new_parent);
+            self.add_parent_unchecked(child_id, new_parent);
         }
     }
 
     fn relocate_parents_on_merged_in(&mut self, node_id: NodeIndex, merged_id: NodeIndex) {
-        let mut new_parent_relations = Vec::new();
+        let mut new_parent_relations = vec![];
         for parent in self.parents_relations_of(merged_id) {
             // If the parent of the merged is already a parent of ours, don't re-create the already existing relationship.
             if self.is_parent_of(parent.parent_node_id, node_id) {
@@ -2095,7 +2103,7 @@ impl FetchDependencyGraph {
             new_parent_relations.push(parent.clone());
         }
         for new_parent in new_parent_relations {
-            self.add_parent(node_id, new_parent);
+            self.add_parent_unchecked(node_id, new_parent);
         }
     }
 

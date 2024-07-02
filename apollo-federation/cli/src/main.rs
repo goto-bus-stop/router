@@ -3,6 +3,7 @@ use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Instant;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_federation::error::FederationError;
@@ -115,7 +116,7 @@ fn compose_files(file_paths: &[PathBuf]) -> Result<apollo_federation::Supergraph
             subgraph::Subgraph::parse_and_expand(basename, &url, &doc_str).unwrap()
         })
         .collect();
-    let supergraph = apollo_federation::Supergraph::compose(&schemas.iter().collect()).unwrap();
+    let supergraph = apollo_federation::Supergraph::compose(&schemas).unwrap();
     Ok(supergraph)
 }
 
@@ -169,8 +170,17 @@ fn plan(query_path: &Path, schema_paths: &[PathBuf]) -> Result<(), FederationErr
         ExecutableDocument::parse_and_validate(supergraph.schema.schema(), query, query_path)?;
     // TODO: add CLI parameters for config as needed
     let config = QueryPlannerConfig::default();
+    let start = Instant::now();
     let planner = QueryPlanner::new(&supergraph, config)?;
-    print!("{}", planner.build_query_plan(&query_doc, None)?);
+    let setup_time = start.elapsed();
+    let start = Instant::now();
+    let plan = planner.build_query_plan(&query_doc, None)?;
+    let plan_time = start.elapsed();
+
+    eprintln!("Setup: {setup_time:?}");
+    eprintln!("Planning: {plan_time:?}");
+
+    print!("{plan}");
     Ok(())
 }
 

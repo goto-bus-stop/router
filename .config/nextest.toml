@@ -15,7 +15,7 @@ filter = '''
    test(axum_factory::axum_http_server_factory::tests::request_cancel_log)
 or test(plugins::telemetry::metrics::apollo::test::apollo_metrics_enabled)
 or test(plugins::telemetry::tests::it_test_prometheus_metrics)
-or test(test_condition_if)
+or test(test_client_name)
 or test(api_schema_hides_field)
 or test(integration::batching::it_handles_single_request_cancelled_by_coprocessor)
 or test(integration::redis::connection_failure_blocks_startup)

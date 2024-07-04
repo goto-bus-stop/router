@@ -37,13 +37,13 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::ops::Not;
 use std::sync::Arc;
 
 use apollo_compiler::executable;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 
+use super::fields_in_set_can_merge::FieldsInSetCanMerge;
 use super::CollectedFieldInSet;
 use super::Containment;
 use super::ContainmentOptions;
@@ -419,116 +419,24 @@ impl FieldsConflictValidator {
         };
         by_response_name.values().flatten().cloned().collect()
     }
-
-    fn has_same_response_shape(
-        &self,
-        other: &FieldsConflictValidator,
-    ) -> Result<bool, FederationError> {
-        for (response_name, self_fields) in self.by_response_name.iter() {
-            let Some(other_fields) = other.by_response_name.get(response_name) else {
-                continue;
-            };
-
-            for (self_field, self_validator) in self_fields {
-                for (other_field, other_validator) in other_fields {
-                    if !self_field.types_can_be_merged(other_field)? {
-                        return Ok(false);
-                    }
-
-                    if let Some(self_validator) = self_validator {
-                        if let Some(other_validator) = other_validator {
-                            if !self_validator.has_same_response_shape(other_validator)? {
-                                return Ok(false);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Ok(true)
-    }
-
-    fn do_merge_with(&self, other: &FieldsConflictValidator) -> Result<bool, FederationError> {
-        for (response_name, self_fields) in self.by_response_name.iter() {
-            let Some(other_fields) = other.by_response_name.get(response_name) else {
-                continue;
-            };
-
-            // We're basically checking
-            // [FieldsInSetCanMerge](https://spec.graphql.org/draft/#FieldsInSetCanMerge()), but
-            // from 2 set of fields (`self_fields` and `other_fields`) of the same response that we
-            // know individually merge already.
-            for (self_field, self_validator) in self_fields {
-                for (other_field, other_validator) in other_fields {
-                    if !self_field.types_can_be_merged(other_field)? {
-                        return Ok(false);
-                    }
-
-                    let p1 = self_field.parent_type_position();
-                    let p2 = other_field.parent_type_position();
-                    if p1 == p2 || !p1.is_object_type() || !p2.is_object_type() {
-                        // Additional checks of `FieldsInSetCanMerge` when same parent type or one
-                        // isn't object
-                        if self_field.name() != other_field.name()
-                            || self_field.arguments != other_field.arguments
-                        {
-                            return Ok(false);
-                        }
-                        if let Some(self_validator) = self_validator {
-                            if let Some(other_validator) = other_validator {
-                                if !self_validator.do_merge_with(other_validator)? {
-                                    return Ok(false);
-                                }
-                            }
-                        }
-                    } else {
-                        // Otherwise, the sub-selection must pass
-                        // [SameResponseShape](https://spec.graphql.org/draft/#SameResponseShape()).
-                        if let Some(self_validator) = self_validator {
-                            if let Some(other_validator) = other_validator {
-                                if !self_validator.has_same_response_shape(other_validator)? {
-                                    return Ok(false);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Ok(true)
-    }
-
-    fn do_merge_with_all<'a>(
-        &self,
-        mut iter: impl Iterator<Item = &'a FieldsConflictValidator>,
-    ) -> Result<bool, FederationError> {
-        iter.try_fold(true, |acc, v| Ok(acc && self.do_merge_with(v)?))
-    }
 }
 
-struct FieldsConflictMultiBranchValidator {
-    validators: Vec<Arc<FieldsConflictValidator>>,
-    used_spread_trimmed_part_at_level: Vec<Arc<FieldsConflictValidator>>,
+struct FieldsConflictMultiBranchValidator<'s, 'o> {
+    fields_in_set_can_merge: FieldsInSetCanMerge<'s>,
+    selection_sets: Vec<&'o SelectionSet>,
+    used_spread_trimmed_part_at_level: Vec<SelectionSet>,
 }
 
-impl FieldsConflictMultiBranchValidator {
-    fn new(validators: Vec<Arc<FieldsConflictValidator>>) -> Self {
+impl<'s, 'o> FieldsConflictMultiBranchValidator<'s, 'o> {
+    fn from_initial_set(
+        fields_in_set_can_merge: FieldsInSetCanMerge<'s>,
+        selection_set: &'o SelectionSet,
+    ) -> Self {
         Self {
-            validators,
+            fields_in_set_can_merge,
+            selection_sets: vec![selection_set],
             used_spread_trimmed_part_at_level: Vec::new(),
         }
-    }
-
-    fn from_initial_validator(validator: FieldsConflictValidator) -> Self {
-        Self {
-            validators: vec![Arc::new(validator)],
-            used_spread_trimmed_part_at_level: Vec::new(),
-        }
-    }
-
-    fn for_field(&self, field: &Field) -> Self {
-        let for_all_branches = self.validators.iter().flat_map(|v| v.for_field(field));
-        Self::new(for_all_branches.collect())
     }
 
     // When this method is used in the context of `try_optimize_with_fragments`, we know that the
@@ -555,7 +463,19 @@ impl FieldsConflictMultiBranchValidator {
             return Ok(true); // Nothing to check; Trivially ok.
         };
 
-        if !validator.do_merge_with_all(self.validators.iter().map(Arc::as_ref))? {
+        let can_merge = self
+            .selection_sets
+            .iter()
+            .try_fold(true, |acc, selection_set| {
+                Ok::<_, FederationError>(
+                    acc && self
+                        .fields_in_set_can_merge
+                        .validate_selection_sets_can_merge(
+                            [validator, selection_set].into_iter(),
+                        )?,
+                )
+            })?;
+        if !can_merge {
             return Ok(false);
         }
 
@@ -572,13 +492,14 @@ impl FieldsConflictMultiBranchValidator {
         // overall usage, as it can be better to reuse a fragment that is used in other places,
         // than to use one for which it's the only usage. Adding to all that the fact that conflict
         // can happen in sibling branches).
-        if !validator.do_merge_with_all(
-            self.used_spread_trimmed_part_at_level
-                .iter()
-                .map(Arc::as_ref),
-        )? {
-            return Ok(false);
-        }
+        //if !self
+        //    .fields_in_set_can_merge
+        //    .validate_selection_sets_can_merge(
+        //        std::iter::once(validator).chain(self.used_spread_trimmed_part_at_level.iter()),
+        //    )?
+        //{
+        //    return Ok(false);
+        //}
 
         // We're good, but track the fragment.
         self.used_spread_trimmed_part_at_level
@@ -599,14 +520,14 @@ struct FragmentRestrictionAtType {
     /// A runtime validator to check the fragment selections against other fields.
     /// - `None` means that there is nothing to check.
     /// - See `check_can_reuse_fragment_and_track_it` for more details.
-    validator: Option<Arc<FieldsConflictValidator>>,
+    validator: Option<SelectionSet>,
 }
 
 impl FragmentRestrictionAtType {
-    fn new(selections: SelectionSet, validator: Option<FieldsConflictValidator>) -> Self {
+    fn new(selections: SelectionSet, validator: Option<SelectionSet>) -> Self {
         Self {
             selections,
-            validator: validator.map(Arc::new),
+            validator,
         }
     }
 
@@ -660,9 +581,7 @@ impl Fragment {
             // https://github.com/graphql/graphql-spec/issues/1085 for details.)
             return Ok(FragmentRestrictionAtType::new(
                 normalized_selection_set.clone(),
-                Some(FieldsConflictValidator::from_selection_set(
-                    &expanded_selection_set,
-                )),
+                Some(expanded_selection_set),
             ));
         }
 
@@ -676,13 +595,13 @@ impl Fragment {
         // we're trying to build a smaller validator, but it's ok if trimmed is not as small as it
         // theoretically can be.
         let trimmed = expanded_selection_set.minus(&normalized_selection_set)?;
-        let validator = trimmed
-            .is_empty()
-            .not()
-            .then(|| FieldsConflictValidator::from_selection_set(&trimmed));
         Ok(FragmentRestrictionAtType::new(
             normalized_selection_set.clone(),
-            validator,
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            },
         ))
     }
 
@@ -843,7 +762,7 @@ impl SelectionSet {
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         fragments: &NamedFragments,
-        validator: &mut FieldsConflictMultiBranchValidator,
+        validator: &mut FieldsConflictMultiBranchValidator<'_, '_>,
         full_match_condition: FullMatchingFragmentCondition,
     ) -> Result<SelectionSetOrFragment, FederationError> {
         // We limit to fragments whose selection could be applied "directly" at `parent_type`,
@@ -1203,7 +1122,7 @@ impl Selection {
     fn optimize(
         &self,
         fragments: &NamedFragments,
-        validator: &mut FieldsConflictMultiBranchValidator,
+        validator: &mut FieldsConflictMultiBranchValidator<'_, '_>,
     ) -> Result<Selection, FederationError> {
         match self {
             Selection::Field(field) => Ok(field.optimize(fragments, validator)?.into()),
@@ -1219,7 +1138,7 @@ impl FieldSelection {
     fn optimize(
         &self,
         fragments: &NamedFragments,
-        validator: &mut FieldsConflictMultiBranchValidator,
+        validator: &mut FieldsConflictMultiBranchValidator<'_, '_>,
     ) -> Result<Self, FederationError> {
         let Some(base_composite_type): Option<CompositeTypeDefinitionPosition> =
             self.field.output_base_type()?.try_into().ok()
@@ -1230,13 +1149,13 @@ impl FieldSelection {
             return Ok(self.clone());
         };
 
-        let mut field_validator = validator.for_field(&self.field);
+        //let mut field_validator = validator.for_field(&self.field);
 
         // First, see if we can reuse fragments for the selection of this field.
         let opt = selection_set.try_optimize_with_fragments(
             &base_composite_type,
             fragments,
-            &mut field_validator,
+            validator, // &mut field_validator,
             FullMatchingFragmentCondition::ForFieldSelection,
         )?;
 
@@ -1254,7 +1173,8 @@ impl FieldSelection {
                 optimized = selection_set;
             }
         }
-        optimized = optimized.optimize(fragments, &mut field_validator)?;
+        //optimized = optimized.optimize(fragments, &mut field_validator)?;
+        optimized = optimized.optimize(fragments, validator)?;
         Ok(self.with_updated_selection_set(Some(optimized)))
     }
 }
@@ -1280,7 +1200,7 @@ impl InlineFragmentSelection {
     fn optimize(
         &self,
         fragments: &NamedFragments,
-        validator: &mut FieldsConflictMultiBranchValidator,
+        validator: &mut FieldsConflictMultiBranchValidator<'_, '_>,
     ) -> Result<InlineOrFragmentSelection, FederationError> {
         let mut optimized = self.selection_set.clone();
 
@@ -1355,7 +1275,7 @@ impl SelectionSet {
     fn optimize(
         &self,
         fragments: &NamedFragments,
-        validator: &mut FieldsConflictMultiBranchValidator,
+        validator: &mut FieldsConflictMultiBranchValidator<'_, '_>,
     ) -> Result<SelectionSet, FederationError> {
         self.lazy_map(fragments, |selection| {
             Ok(vec![selection.optimize(fragments, validator)?].into())
@@ -1394,8 +1314,9 @@ impl SelectionSet {
             self.clone(),               // selection set
             Default::default(),         // directives
         );
-        let mut validator = FieldsConflictMultiBranchValidator::from_initial_validator(
-            FieldsConflictValidator::from_selection_set(self),
+        let mut validator = FieldsConflictMultiBranchValidator::from_initial_set(
+            FieldsInSetCanMerge::new(&self.schema),
+            self,
         );
         let optimized = wrapped.optimize(fragments, &mut validator)?;
 

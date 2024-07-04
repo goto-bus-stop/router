@@ -419,11 +419,11 @@ impl<'s> FieldsInSetCanMerge<'s> {
         }
     }
 
-    pub(super) fn validate_selection_set(
+    pub(super) fn validate_selection_sets_can_merge<'a>(
         &mut self,
-        selection_set: &SelectionSet,
+        sets: impl Iterator<Item = &'a SelectionSet>,
     ) -> Result<bool, FederationError> {
-        let fields = expand_selections(std::iter::once(selection_set));
+        let fields = expand_selections(sets);
         let set = self.lookup(fields);
         Ok(set.same_response_shape_by_name(self)? && set.same_for_common_parents_by_name(self)?)
     }

@@ -59,7 +59,7 @@ pub(super) fn parse_operation(schema: &ValidFederationSchema, query: &str) -> Op
         variables: Arc::new(operation.variables.clone()),
         directives: Arc::new(operation.directives.clone()),
         selection_set,
-        named_fragments,
+        named_fragments: Arc::new(named_fragments),
     }
 }
 
@@ -112,7 +112,7 @@ type Foo {
             &IndexSet::new(),
         )
         .unwrap();
-        normalized_operation.named_fragments = Default::default();
+        normalized_operation.named_fragments = Arc::new(Default::default());
         insta::assert_snapshot!(normalized_operation, @r###"
                 query NamedFragmentQuery {
                   foo {
@@ -166,7 +166,7 @@ type Foo {
             &IndexSet::new(),
         )
         .unwrap();
-        normalized_operation.named_fragments = Default::default();
+        normalized_operation.named_fragments = Arc::new(Default::default());
         insta::assert_snapshot!(normalized_operation, @r###"
               query NestedFragmentQuery {
                 foo {

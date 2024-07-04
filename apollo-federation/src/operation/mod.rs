@@ -91,7 +91,7 @@ pub struct Operation {
     pub(crate) variables: Arc<Vec<Node<executable::VariableDefinition>>>,
     pub(crate) directives: Arc<executable::DirectiveList>,
     pub(crate) selection_set: SelectionSet,
-    pub(crate) named_fragments: NamedFragments,
+    pub(crate) named_fragments: Arc<NamedFragments>,
 }
 
 pub(crate) struct NormalizedDefer {
@@ -136,7 +136,7 @@ impl Operation {
             variables: Arc::new(operation.variables.clone()),
             directives: Arc::new(operation.directives.clone()),
             selection_set,
-            named_fragments,
+            named_fragments: Arc::new(named_fragments),
         })
     }
 
@@ -3807,7 +3807,7 @@ pub(crate) fn merge_selection_sets(
 /// here modifying a cloned map will leave the original unchanged.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub(crate) struct NamedFragments {
-    fragments: Arc<IndexMap<Name, Node<Fragment>>>,
+    fragments: IndexMap<Name, Node<Fragment>>,
 }
 
 impl NamedFragments {
@@ -3827,7 +3827,7 @@ impl NamedFragments {
         self.fragments.len() == 0
     }
 
-    pub(crate) fn size(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.fragments.len()
     }
 
@@ -3840,20 +3840,22 @@ impl NamedFragments {
     }
 
     pub(crate) fn iter_mut(&mut self) -> indexmap::map::IterMut<'_, Name, Node<Fragment>> {
-        Arc::make_mut(&mut self.fragments).iter_mut()
+        self.fragments.iter_mut()
     }
 
     // Calls `retain` on the underlying `IndexMap`.
     pub(crate) fn retain(&mut self, mut predicate: impl FnMut(&Name, &Node<Fragment>) -> bool) {
-        Arc::make_mut(&mut self.fragments).retain(|name, fragment| predicate(name, fragment));
+        self.fragments
+            .retain(|name, fragment| predicate(name, fragment));
     }
 
     fn insert(&mut self, fragment: Fragment) {
-        Arc::make_mut(&mut self.fragments).insert(fragment.name.clone(), Node::new(fragment));
+        self.fragments
+            .insert(fragment.name.clone(), Node::new(fragment));
     }
 
     fn try_insert(&mut self, fragment: Fragment) -> Result<(), FederationError> {
-        match Arc::make_mut(&mut self.fragments).entry(fragment.name.clone()) {
+        match self.fragments.entry(fragment.name.clone()) {
             indexmap::map::Entry::Occupied(_) => {
                 Err(FederationError::internal("Duplicate fragment name"))
             }
@@ -4013,16 +4015,16 @@ impl NamedFragments {
 // all subgraphs (or precompute a hash map of subgraph names to OnceLocks).
 #[derive(Clone)]
 pub(crate) struct RebasedFragments {
-    pub(crate) original_fragments: NamedFragments,
+    pub(crate) original_fragments: Arc<NamedFragments>,
     // JS PORT NOTE: In JS implementation values were optional
     /// Map key: subgraph name
-    rebased_fragments: Arc<HashMap<Arc<str>, NamedFragments>>,
+    rebased_fragments: Arc<HashMap<Arc<str>, Arc<NamedFragments>>>,
 }
 
 impl RebasedFragments {
     pub(crate) fn new(fragments: NamedFragments) -> Self {
         Self {
-            original_fragments: fragments,
+            original_fragments: Arc::new(fragments),
             rebased_fragments: Arc::new(HashMap::new()),
         }
     }
@@ -4038,6 +4040,7 @@ impl RebasedFragments {
                 self.original_fragments
                     .rebase_on(subgraph_schema)
                     .unwrap_or_default()
+                    .into()
             })
     }
 }
@@ -4376,7 +4379,7 @@ pub(crate) fn normalize_operation(
         variables: Arc::new(operation.variables.clone()),
         directives: Arc::new(operation.directives.clone()),
         selection_set: normalized_selection_set,
-        named_fragments,
+        named_fragments: Arc::new(named_fragments),
     };
     Ok(normalized_operation)
 }

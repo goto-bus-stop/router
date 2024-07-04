@@ -1,4 +1,24 @@
 //! Adapted from https://github.com/apollographql/apollo-rs/blob/main/crates/apollo-compiler/src/validation/selection.rs
+//!
+/// This uses the [validation algorithm described by XING][0] ([archived][1]), which
+/// scales much better with larger selection sets that may have many overlapping fields,
+/// and with widespread use of fragments.
+///
+/// The functionality here is a bit different than in the apollo-compiler source. We are interested
+/// in checking if two selection sets can be merged with each other. We can assume that the input
+/// selection sets are correct, because they were already validated before getting to the query
+/// planner. The XING algorithm works by intelligently grouping selections together. We can still
+/// do that once per selection set, and then concatenate the groups and run the rest of the
+/// algorithm for each selection set that we attempt to merge in.
+///
+/// [0]: https://tech.new-work.se/graphql-overlapping-fields-can-be-merged-fast-ea6e92e0a01
+/// [1]: https://web.archive.org/web/20240208084612/https://tech.new-work.se/graphql-overlapping-fields-can-be-merged-fast-ea6e92e0a01
+use std::cell::OnceCell;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::collections::VecDeque;
+use std::rc::Rc;
+
 use apollo_compiler::coordinate::TypeAttributeCoordinate;
 use apollo_compiler::executable;
 use apollo_compiler::schema;
@@ -6,11 +26,6 @@ use apollo_compiler::schema::NamedType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use indexmap::IndexMap;
-use std::cell::OnceCell;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::collections::VecDeque;
-use std::rc::Rc;
 
 use crate::error::FederationError;
 

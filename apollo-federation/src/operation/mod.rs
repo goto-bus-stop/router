@@ -49,6 +49,7 @@ use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
 
 mod contains;
+mod fields_in_set_can_merge;
 mod optimize;
 mod rebase;
 mod simplify;

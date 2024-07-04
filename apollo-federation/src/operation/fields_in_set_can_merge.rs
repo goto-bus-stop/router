@@ -15,66 +15,37 @@
 /// [1]: https://web.archive.org/web/20240208084612/https://tech.new-work.se/graphql-overlapping-fields-can-be-merged-fast-ea6e92e0a01
 use std::cell::OnceCell;
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::rc::Rc;
+use std::sync::Arc;
 
-use apollo_compiler::coordinate::TypeAttributeCoordinate;
 use apollo_compiler::executable;
-use apollo_compiler::schema;
-use apollo_compiler::schema::NamedType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use indexmap::IndexMap;
 
+use super::FieldSelection;
+use super::Selection;
+use super::SelectionSet;
 use crate::error::FederationError;
-
-/// Represents a field selected against a parent type.
-#[derive(Debug, Clone, Copy, Hash)]
-struct FieldSelection<'a> {
-    /// The type of the selection set this field selection is part of.
-    pub parent_type: &'a NamedType,
-    pub field: &'a Node<executable::Field>,
-}
-
-impl FieldSelection<'_> {
-    pub fn coordinate(&self) -> TypeAttributeCoordinate {
-        TypeAttributeCoordinate {
-            ty: self.parent_type.clone(),
-            attribute: self.field.name.clone(),
-        }
-    }
-}
+use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::TypeDefinitionPosition;
+use crate::schema::ValidFederationSchema;
 
 /// Expand one or more selection sets to a list of all fields selected.
 fn expand_selections<'doc>(
-    fragments: &'doc IndexMap<Name, Node<executable::Fragment>>,
-    selection_sets: impl Iterator<Item = &'doc executable::SelectionSet>,
-) -> Vec<FieldSelection<'doc>> {
+    selection_sets: impl Iterator<Item = &'doc SelectionSet>,
+) -> Vec<Arc<FieldSelection>> {
     let mut selections = vec![];
-    let mut queue: VecDeque<&executable::SelectionSet> = selection_sets.collect();
-    let mut seen_fragments = HashSet::new();
+    let mut queue: VecDeque<&SelectionSet> = selection_sets.collect();
 
     while let Some(next_set) = queue.pop_front() {
-        for selection in &next_set.selections {
+        for selection in next_set.selections.values() {
             match selection {
-                executable::Selection::Field(field) => selections.push(FieldSelection {
-                    parent_type: &next_set.ty,
-                    field,
-                }),
-                executable::Selection::InlineFragment(spread) => {
-                    queue.push_back(&spread.selection_set)
-                }
-                executable::Selection::FragmentSpread(spread)
-                    if !seen_fragments.contains(&spread.fragment_name) =>
-                {
-                    seen_fragments.insert(&spread.fragment_name);
-                    if let Some(fragment) = fragments.get(&spread.fragment_name) {
-                        queue.push_back(&fragment.selection_set);
-                    }
-                }
-                executable::Selection::FragmentSpread(_) => {
-                    // Already seen
+                Selection::Field(field) => selections.push(Arc::clone(field)),
+                Selection::InlineFragment(spread) => queue.push_back(&spread.selection_set),
+                Selection::FragmentSpread(_) => {
+                    unreachable!()
                 }
             }
         }
@@ -83,8 +54,8 @@ fn expand_selections<'doc>(
     selections
 }
 
-fn is_composite(ty: &schema::ExtendedType) -> bool {
-    use schema::ExtendedType::*;
+fn is_composite(ty: TypeDefinitionPosition) -> bool {
+    use TypeDefinitionPosition::*;
     matches!(ty, Object(_) | Interface(_) | Union(_))
 }
 
@@ -113,18 +84,18 @@ impl<'a> ArgumentLookup<'a> {
 
 /// Check if two field selections from the overlapping types are the same, so the fields can be merged.
 fn same_name_and_arguments(
-    field_a: FieldSelection<'_>,
-    field_b: FieldSelection<'_>,
+    field_a: &FieldSelection,
+    field_b: &FieldSelection,
 ) -> Result<bool, FederationError> {
     // 2bi. fieldA and fieldB must have identical field names.
-    if field_a.field.name != field_b.field.name {
+    if field_a.field.name() != field_b.field.name() {
         return Ok(false);
     }
 
     // Check if fieldB provides the same argument names and values as fieldA (order-independent).
     let self_args = ArgumentLookup::new(&field_a.field.arguments);
     let other_args = ArgumentLookup::new(&field_b.field.arguments);
-    for arg in &field_a.field.arguments {
+    for arg in field_a.field.arguments.iter() {
         let Some(other_arg) = other_args.by_name(&arg.name) else {
             return Ok(false);
         };
@@ -134,7 +105,7 @@ fn same_name_and_arguments(
         }
     }
     // Check if fieldB provides any arguments that fieldA does not provide.
-    for arg in &field_b.field.arguments {
+    for arg in field_b.field.arguments.iter() {
         if self_args.by_name(&arg.name).is_none() {
             return Ok(false);
         };
@@ -176,12 +147,12 @@ fn same_value(left: &executable::Value, right: &executable::Value) -> bool {
 }
 
 fn same_output_type_shape(
-    schema: &schema::Schema,
-    selection_a: FieldSelection<'_>,
-    selection_b: FieldSelection<'_>,
+    schema: &ValidFederationSchema,
+    selection_a: &FieldSelection,
+    selection_b: &FieldSelection,
 ) -> Result<bool, FederationError> {
-    let field_a = &selection_a.field.definition;
-    let field_b = &selection_b.field.definition;
+    let field_a = selection_a.field.field_position.get(schema.schema())?;
+    let field_b = selection_b.field.field_position.get(schema.schema())?;
 
     let mut type_a = &field_a.ty;
     let mut type_b = &field_b.ty;
@@ -218,22 +189,21 @@ fn same_output_type_shape(
         _ => return Ok(false),
     };
 
-    let (Some(def_a), Some(def_b)) = (schema.types.get(type_a), schema.types.get(type_b)) else {
-        return Ok(false); // Cannot do much if we don't know the type
-    };
+    let def_a = schema.get_type(type_a.clone())?;
+    let def_b = schema.get_type(type_b.clone())?;
 
-    match (def_a, def_b) {
-        // 5. If typeA or typeB is Scalar or Enum.
-        (
-            def_a @ (schema::ExtendedType::Scalar(_) | schema::ExtendedType::Enum(_)),
-            def_b @ (schema::ExtendedType::Scalar(_) | schema::ExtendedType::Enum(_)),
-        ) => {
-            // 5a. If typeA and typeB are the same type return true, otherwise return false.
-            Ok(def_a == def_b)
-        }
-        // 6. If typeA or typeB is not a composite type, return false.
-        (def_a, def_b) => Ok(is_composite(def_a) && is_composite(def_b)),
+    // 5. If typeA or typeB is Scalar or Enum.
+    if let (
+        TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_),
+        TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_),
+    ) = (&def_a, &def_b)
+    {
+        // 5a. If typeA and typeB are the same type return true, otherwise return false.
+        return Ok(def_a == def_b);
     }
+
+    // 6. If typeA or typeB is not a composite type, return false.
+    Ok(is_composite(def_a) && is_composite(def_b))
 }
 
 /// A boolean that turns on after the first check.
@@ -250,16 +220,16 @@ impl OnceBool {
 }
 
 /// Represents a merged field set that may or may not be valid.
-struct MergedFieldSet<'doc> {
-    selections: Vec<FieldSelection<'doc>>,
-    grouped_by_output_names: OnceCell<IndexMap<Name, Vec<FieldSelection<'doc>>>>,
-    grouped_by_common_parents: OnceCell<Vec<Vec<FieldSelection<'doc>>>>,
+struct MergedFieldSet {
+    selections: Vec<Arc<FieldSelection>>,
+    grouped_by_output_names: OnceCell<IndexMap<Name, Vec<Arc<FieldSelection>>>>,
+    grouped_by_common_parents: OnceCell<Vec<Vec<Arc<FieldSelection>>>>,
     same_response_shape_guard: OnceBool,
     same_for_common_parents_guard: OnceBool,
 }
 
-impl<'doc> MergedFieldSet<'doc> {
-    fn new(selections: Vec<FieldSelection<'doc>>) -> Self {
+impl MergedFieldSet {
+    fn new(selections: Vec<Arc<FieldSelection>>) -> Self {
         Self {
             selections,
             grouped_by_output_names: Default::default(),
@@ -275,7 +245,7 @@ impl<'doc> MergedFieldSet<'doc> {
     /// This prevents leaf output fields from having an inconsistent type.
     fn same_response_shape_by_name(
         &self,
-        validator: &mut FieldsInSetCanMerge<'_, 'doc>,
+        validator: &mut FieldsInSetCanMerge<'_>,
     ) -> Result<bool, FederationError> {
         // No need to do this if this field set has been checked before.
         if self.same_response_shape_guard.already_done() {
@@ -289,19 +259,17 @@ impl<'doc> MergedFieldSet<'doc> {
             };
             for field_b in rest {
                 // Covers steps 3-5 of the spec algorithm.
-                if !same_output_type_shape(validator.schema, *field_a, *field_b)? {
+                if !same_output_type_shape(validator.schema, field_a, field_b)? {
                     return Ok(false);
                 }
             }
 
             let mut nested_selection_sets = fields_for_name
                 .iter()
-                .map(|selection| &selection.field.selection_set)
-                .filter(|set| !set.selections.is_empty())
+                .filter_map(|selection| selection.selection_set.as_ref())
                 .peekable();
             if nested_selection_sets.peek().is_some() {
-                let merged_set =
-                    expand_selections(&validator.document.fragments, nested_selection_sets);
+                let merged_set = expand_selections(nested_selection_sets);
                 if !validator.same_response_shape_by_name(merged_set)? {
                     return Ok(false);
                 }
@@ -318,7 +286,7 @@ impl<'doc> MergedFieldSet<'doc> {
     /// would be a contradiction because there would be no way to know which field takes precedence.
     fn same_for_common_parents_by_name(
         &self,
-        validator: &mut FieldsInSetCanMerge<'_, 'doc>,
+        validator: &mut FieldsInSetCanMerge<'_>,
     ) -> Result<bool, FederationError> {
         // No need to do this if this field set has been checked before.
         if self.same_for_common_parents_guard.already_done() {
@@ -327,7 +295,7 @@ impl<'doc> MergedFieldSet<'doc> {
 
         for fields_for_name in self.group_by_output_name().values() {
             let selection_for_name = validator.lookup(fields_for_name.clone());
-            for fields_for_parents in selection_for_name.group_by_common_parents(validator.schema) {
+            for fields_for_parents in selection_for_name.group_by_common_parents() {
                 // 2bi. fieldA and fieldB must have identical field names.
                 // 2bii. fieldA and fieldB must have identical sets of arguments.
                 // The same arguments check is reflexive so we don't need to check all
@@ -336,19 +304,17 @@ impl<'doc> MergedFieldSet<'doc> {
                     continue;
                 };
                 for field_b in rest {
-                    if !same_name_and_arguments(*field_a, *field_b)? {
+                    if !same_name_and_arguments(field_a, field_b)? {
                         return Ok(false);
                     }
                 }
 
                 let mut nested_selection_sets = fields_for_parents
                     .iter()
-                    .map(|selection| &selection.field.selection_set)
-                    .filter(|set| !set.selections.is_empty())
+                    .filter_map(|selection| selection.selection_set.as_ref())
                     .peekable();
                 if nested_selection_sets.peek().is_some() {
-                    let merged_set =
-                        expand_selections(&validator.document.fragments, nested_selection_sets);
+                    let merged_set = expand_selections(nested_selection_sets);
                     if !validator.same_for_common_parents_by_name(merged_set)? {
                         return Ok(false);
                     }
@@ -358,13 +324,13 @@ impl<'doc> MergedFieldSet<'doc> {
         Ok(true)
     }
 
-    fn group_by_output_name(&self) -> &IndexMap<Name, Vec<FieldSelection<'doc>>> {
+    fn group_by_output_name(&self) -> &IndexMap<Name, Vec<Arc<FieldSelection>>> {
         self.grouped_by_output_names.get_or_init(|| {
             let mut map = IndexMap::<_, Vec<_>>::new();
             for selection in &self.selections {
-                map.entry(selection.field.response_key().clone())
+                map.entry(selection.field.response_name().clone())
                     .or_default()
-                    .push(*selection);
+                    .push(Arc::clone(selection));
             }
             map
         })
@@ -373,22 +339,21 @@ impl<'doc> MergedFieldSet<'doc> {
     /// Returns potentially overlapping groups of fields. Fields overlap if they are selected from
     /// the same concrete type or if they are selected from an abstract type (future schema changes
     /// can make any abstract type overlap with any other type).
-    fn group_by_common_parents(&self, schema: &schema::Schema) -> &Vec<Vec<FieldSelection<'doc>>> {
+    fn group_by_common_parents(&self) -> &Vec<Vec<Arc<FieldSelection>>> {
         self.grouped_by_common_parents.get_or_init(|| {
             let mut abstract_parents = vec![];
             let mut concrete_parents = IndexMap::<_, Vec<_>>::new();
-            for selection in &self.selections {
-                match schema.types.get(selection.parent_type) {
-                    Some(schema::ExtendedType::Object(object)) => {
+            for selection in self.selections.iter().cloned() {
+                match &selection.field.field_position {
+                    FieldDefinitionPosition::Object(object) => {
                         concrete_parents
-                            .entry(object.name.clone())
+                            .entry(object.type_name.clone())
                             .or_default()
-                            .push(*selection);
+                            .push(selection);
                     }
-                    Some(schema::ExtendedType::Interface(_) | schema::ExtendedType::Union(_)) => {
-                        abstract_parents.push(*selection);
+                    FieldDefinitionPosition::Interface(_) | FieldDefinitionPosition::Union(_) => {
+                        abstract_parents.push(selection);
                     }
-                    _ => {}
                 }
             }
 
@@ -398,7 +363,7 @@ impl<'doc> MergedFieldSet<'doc> {
                 concrete_parents
                     .into_values()
                     .map(|mut group| {
-                        group.extend(abstract_parents.iter().copied());
+                        group.extend(abstract_parents.iter().cloned());
                         group
                     })
                     .collect()
@@ -412,7 +377,7 @@ impl<'doc> MergedFieldSet<'doc> {
 struct FieldSelectionsId(u64);
 
 impl FieldSelectionsId {
-    fn new(selections: &[FieldSelection<'_>]) -> Self {
+    fn new(selections: &[impl AsRef<FieldSelection>]) -> Self {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::Hash;
         use std::hash::Hasher;
@@ -420,7 +385,10 @@ impl FieldSelectionsId {
         // We can use the unseeded default hasher because the output will be
         // hashed again with a randomly seeded hasher and still lead to unpredictable output.
         let mut hasher = DefaultHasher::new();
-        selections.hash(&mut hasher);
+        selections.len().hash(&mut hasher);
+        for selection in selections {
+            selection.as_ref().field.hash(&mut hasher);
+        }
         Self(hasher.finish())
     }
 }
@@ -434,41 +402,33 @@ impl FieldSelectionsId {
 ///
 /// [0]: https://tech.new-work.se/graphql-overlapping-fields-can-be-merged-fast-ea6e92e0a01
 /// [1]: https://web.archive.org/web/20240208084612/https://tech.new-work.se/graphql-overlapping-fields-can-be-merged-fast-ea6e92e0a01
-pub(super) struct FieldsInSetCanMerge<'s, 'doc> {
-    schema: &'s schema::Schema,
-    document: &'doc executable::ExecutableDocument,
+pub(super) struct FieldsInSetCanMerge<'s> {
+    schema: &'s ValidFederationSchema,
     /// Stores merged field sets.
     ///
     /// The value is an Rc because it needs to have an independent lifetime from `self`,
     /// so the cache can be updated while a field set is borrowed.
-    cache: HashMap<FieldSelectionsId, Rc<MergedFieldSet<'doc>>>,
+    cache: HashMap<FieldSelectionsId, Rc<MergedFieldSet>>,
 }
 
-impl<'s, 'doc> FieldsInSetCanMerge<'s, 'doc> {
-    pub(super) fn new(
-        schema: &'s schema::Schema,
-        document: &'doc executable::ExecutableDocument,
-    ) -> Self {
+impl<'s> FieldsInSetCanMerge<'s> {
+    pub(super) fn new(schema: &'s ValidFederationSchema) -> Self {
         Self {
             schema,
-            document,
             cache: Default::default(),
         }
     }
 
-    pub(super) fn validate_operation(
+    pub(super) fn validate_selection_set(
         &mut self,
-        operation: &'doc Node<executable::Operation>,
+        selection_set: &SelectionSet,
     ) -> Result<bool, FederationError> {
-        let fields = expand_selections(
-            &self.document.fragments,
-            std::iter::once(&operation.selection_set),
-        );
+        let fields = expand_selections(std::iter::once(selection_set));
         let set = self.lookup(fields);
         Ok(set.same_response_shape_by_name(self)? && set.same_for_common_parents_by_name(self)?)
     }
 
-    fn lookup(&mut self, selections: Vec<FieldSelection<'doc>>) -> Rc<MergedFieldSet<'doc>> {
+    fn lookup(&mut self, selections: Vec<Arc<FieldSelection>>) -> Rc<MergedFieldSet> {
         let id = FieldSelectionsId::new(&selections);
         self.cache
             .entry(id)
@@ -478,7 +438,7 @@ impl<'s, 'doc> FieldsInSetCanMerge<'s, 'doc> {
 
     fn same_for_common_parents_by_name(
         &mut self,
-        selections: Vec<FieldSelection<'doc>>,
+        selections: Vec<Arc<FieldSelection>>,
     ) -> Result<bool, FederationError> {
         self.lookup(selections)
             .same_for_common_parents_by_name(self)
@@ -486,7 +446,7 @@ impl<'s, 'doc> FieldsInSetCanMerge<'s, 'doc> {
 
     fn same_response_shape_by_name(
         &mut self,
-        selections: Vec<FieldSelection<'doc>>,
+        selections: Vec<Arc<FieldSelection>>,
     ) -> Result<bool, FederationError> {
         self.lookup(selections).same_response_shape_by_name(self)
     }

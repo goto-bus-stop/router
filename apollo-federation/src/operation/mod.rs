@@ -2783,11 +2783,11 @@ impl IntoIterator for SelectionSet {
 }
 
 pub(crate) struct FieldSelectionsIter<'sel> {
-    stack: Vec<indexmap::map::Values<'sel, SelectionKey, Selection>>,
+    stack: Vec<std::slice::Iter<'sel, Selection>>,
 }
 
 impl<'sel> FieldSelectionsIter<'sel> {
-    fn new(iter: indexmap::map::Values<'sel, SelectionKey, Selection>) -> Self {
+    fn new(iter: std::slice::Iter<'sel, Selection>) -> Self {
         Self { stack: vec![iter] }
     }
 }

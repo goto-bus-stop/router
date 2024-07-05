@@ -18,6 +18,7 @@ or test(plugins::telemetry::tests::it_test_prometheus_metrics)
 or test(test_client_name)
 or test(api_schema_hides_field)
 or test(integration::batching::it_handles_single_request_cancelled_by_coprocessor)
+or test(integration::file_upload::it_fails_with_file_count_limits)
 or test(integration::redis::connection_failure_blocks_startup)
 or test(integration::redis::entity_cache)
 '''

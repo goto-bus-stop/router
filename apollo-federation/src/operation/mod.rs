@@ -89,7 +89,7 @@ pub struct Operation {
     pub(crate) root_kind: SchemaRootDefinitionKind,
     pub(crate) name: Option<Name>,
     pub(crate) variables: Arc<Vec<Node<executable::VariableDefinition>>>,
-    pub(crate) directives: Arc<executable::DirectiveList>,
+    pub(crate) directives: executable::DirectiveList,
     pub(crate) selection_set: SelectionSet,
     pub(crate) named_fragments: NamedFragments,
 }
@@ -134,7 +134,7 @@ impl Operation {
             root_kind: operation.operation_type.into(),
             name: operation.name.clone(),
             variables: Arc::new(operation.variables.clone()),
-            directives: Arc::new(operation.directives.clone()),
+            directives: operation.directives.clone(),
             selection_set,
             named_fragments,
         })
@@ -300,7 +300,7 @@ impl Selection {
         }
     }
 
-    fn directives(&self) -> &Arc<executable::DirectiveList> {
+    fn directives(&self) -> &executable::DirectiveList {
         match self {
             Selection::Field(field_selection) => &field_selection.field.directives,
             Selection::FragmentSpread(fragment_spread_selection) => {
@@ -577,7 +577,7 @@ pub(crate) struct Fragment {
     pub(crate) schema: ValidFederationSchema,
     pub(crate) name: Name,
     pub(crate) type_condition_position: CompositeTypeDefinitionPosition,
-    pub(crate) directives: Arc<executable::DirectiveList>,
+    pub(crate) directives: executable::DirectiveList,
     pub(crate) selection_set: SelectionSet,
 }
 
@@ -593,7 +593,7 @@ impl Fragment {
             type_condition_position: schema
                 .get_type(fragment.type_condition().clone())?
                 .try_into()?,
-            directives: Arc::new(fragment.directives.clone()),
+            directives: fragment.directives.clone(),
             selection_set: SelectionSet::from_selection_set(
                 &fragment.selection_set,
                 named_fragments,
@@ -835,7 +835,7 @@ mod field_selection {
             &self.data
         }
 
-        pub(super) fn directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
+        pub(super) fn directives_mut(&mut self) -> &mut executable::DirectiveList {
             &mut self.data.directives
         }
 
@@ -852,7 +852,7 @@ mod field_selection {
             directives: executable::DirectiveList,
         ) -> Field {
             let mut data = self.data.clone();
-            data.directives = Arc::new(directives);
+            data.directives = directives;
             Self::new(data)
         }
 
@@ -921,7 +921,7 @@ mod field_selection {
         pub(crate) field_position: FieldDefinitionPosition,
         pub(crate) alias: Option<Name>,
         pub(crate) arguments: Arc<Vec<Node<executable::Argument>>>,
-        pub(crate) directives: Arc<executable::DirectiveList>,
+        pub(crate) directives: executable::DirectiveList,
         pub(crate) sibling_typename: Option<SiblingTypename>,
     }
 
@@ -970,11 +970,11 @@ mod field_selection {
 
     impl HasSelectionKey for FieldData {
         fn key(&self) -> SelectionKey {
-            let mut directives = self.directives.as_ref().clone();
+            let mut directives = self.directives.clone();
             sort_directives(&mut directives);
             SelectionKey::Field {
                 response_name: self.response_name(),
-                directives: Arc::new(directives),
+                directives: directives.into(),
             }
         }
     }
@@ -1056,7 +1056,7 @@ mod fragment_spread_selection {
             &self.data
         }
 
-        pub(super) fn directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
+        pub(super) fn directives_mut(&mut self) -> &mut executable::DirectiveList {
             &mut self.data.directives
         }
     }
@@ -1073,13 +1073,13 @@ mod fragment_spread_selection {
         pub(crate) fragment_name: Name,
         pub(crate) type_condition_position: CompositeTypeDefinitionPosition,
         // directives applied on the fragment spread selection
-        pub(crate) directives: Arc<executable::DirectiveList>,
+        pub(crate) directives: executable::DirectiveList,
         // directives applied within the fragment definition
         //
         // PORT_NOTE: The JS codebase combined the fragment spread's directives with the fragment
         // definition's directives. This was invalid GraphQL as those directives may not be applicable
         // on different locations. While we now keep track of those references, they are currently ignored.
-        pub(crate) fragment_directives: Arc<executable::DirectiveList>,
+        pub(crate) fragment_directives: executable::DirectiveList,
         pub(crate) selection_id: SelectionId,
     }
 
@@ -1090,11 +1090,11 @@ mod fragment_spread_selection {
                     deferred_id: self.selection_id.clone(),
                 }
             } else {
-                let mut directives = self.directives.as_ref().clone();
+                let mut directives = self.directives.clone();
                 sort_directives(&mut directives);
                 SelectionKey::FragmentSpread {
                     fragment_name: self.fragment_name.clone(),
-                    directives: Arc::new(directives),
+                    directives: directives.into(),
                 }
             }
         }
@@ -1129,7 +1129,8 @@ impl FragmentSpreadSelection {
         fragment_spread: &executable::FragmentSpread,
         fragment: &Node<Fragment>,
     ) -> Result<FragmentSpreadSelection, FederationError> {
-        let spread_data = FragmentSpreadData::from_fragment(fragment, &fragment_spread.directives);
+        let spread_data =
+            FragmentSpreadData::from_fragment(fragment, fragment_spread.directives.clone());
         Ok(FragmentSpreadSelection {
             spread: FragmentSpread::new(spread_data),
             selection_set: fragment.selection_set.clone(),
@@ -1138,7 +1139,7 @@ impl FragmentSpreadSelection {
 
     pub(crate) fn from_fragment(
         fragment: &Node<Fragment>,
-        directives: &executable::DirectiveList,
+        directives: executable::DirectiveList,
     ) -> Self {
         let spread_data = FragmentSpreadData::from_fragment(fragment, directives);
         Self {
@@ -1202,13 +1203,13 @@ impl FragmentSpreadSelection {
 impl FragmentSpreadData {
     pub(crate) fn from_fragment(
         fragment: &Node<Fragment>,
-        spread_directives: &executable::DirectiveList,
+        spread_directives: executable::DirectiveList,
     ) -> FragmentSpreadData {
         FragmentSpreadData {
             schema: fragment.schema.clone(),
             fragment_name: fragment.name.clone(),
             type_condition_position: fragment.type_condition_position.clone(),
-            directives: Arc::new(spread_directives.clone()),
+            directives: spread_directives,
             fragment_directives: fragment.directives.clone(),
             selection_id: SelectionId::new(),
         }
@@ -1338,7 +1339,7 @@ mod inline_fragment_selection {
             &self.data
         }
 
-        pub(super) fn directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
+        pub(super) fn directives_mut(&mut self) -> &mut executable::DirectiveList {
             &mut self.data.directives
         }
 
@@ -1355,7 +1356,7 @@ mod inline_fragment_selection {
             directives: executable::DirectiveList,
         ) -> InlineFragment {
             let mut data = self.data().clone();
-            data.directives = Arc::new(directives);
+            data.directives = directives;
             Self::new(data)
         }
 
@@ -1388,7 +1389,7 @@ mod inline_fragment_selection {
         pub(crate) schema: ValidFederationSchema,
         pub(crate) parent_type_position: CompositeTypeDefinitionPosition,
         pub(crate) type_condition_position: Option<CompositeTypeDefinitionPosition>,
-        pub(crate) directives: Arc<executable::DirectiveList>,
+        pub(crate) directives: executable::DirectiveList,
         pub(crate) selection_id: SelectionId,
     }
 
@@ -1417,7 +1418,7 @@ mod inline_fragment_selection {
                     deferred_id: self.selection_id.clone(),
                 }
             } else {
-                let mut directives = self.directives.as_ref().clone();
+                let mut directives = self.directives.clone();
                 sort_directives(&mut directives);
                 SelectionKey::InlineFragment {
                     type_condition: self
@@ -2296,7 +2297,7 @@ impl SelectionSet {
         static TYPENAME_KEY: OnceLock<SelectionKey> = OnceLock::new();
         let key = TYPENAME_KEY.get_or_init(|| SelectionKey::Field {
             response_name: TYPENAME_FIELD,
-            directives: Arc::new(Default::default()),
+            directives: Default::default(),
         });
 
         self.selections.contains_key(key)
@@ -2486,7 +2487,9 @@ impl SelectionSet {
     /// Removes the @defer directive from all selections without removing that selection.
     fn without_defer(&mut self) {
         for (_key, mut selection) in Arc::make_mut(&mut self.selections).iter_safe_mut() {
-            Arc::make_mut(selection.get_directives_mut()).retain(|dir| dir.name != name!("defer"));
+            selection
+                .get_directives_mut()
+                .retain(|dir| dir.name != name!("defer"));
             if let Some(set) = selection.get_selection_set_mut() {
                 set.without_defer();
             }
@@ -3055,7 +3058,7 @@ impl FieldSelection {
                 field_position,
                 alias: field.alias.clone(),
                 arguments: Arc::new(field.arguments.clone()),
-                directives: Arc::new(field.directives.clone()),
+                directives: field.directives.clone(),
                 sibling_typename: None,
             }),
             selection_set: if field_composite_type_result.is_ok() {
@@ -3270,7 +3273,7 @@ impl InlineFragmentSelection {
             schema: schema.clone(),
             parent_type_position: parent_type_position.clone(),
             type_condition_position,
-            directives: Arc::new(inline_fragment.directives.clone()),
+            directives: inline_fragment.directives.clone(),
             selection_id: SelectionId::new(),
         });
         Ok(InlineFragmentSelection::new(
@@ -3309,7 +3312,7 @@ impl InlineFragmentSelection {
     pub(crate) fn from_selection_set(
         parent_type_position: CompositeTypeDefinitionPosition,
         selection_set: SelectionSet,
-        directives: Arc<executable::DirectiveList>,
+        directives: executable::DirectiveList,
     ) -> Self {
         let inline_fragment_data = InlineFragmentData {
             schema: selection_set.schema.clone(),
@@ -3675,7 +3678,7 @@ impl TryFrom<&Operation> for executable::Operation {
             operation_type,
             name: normalized_operation.name.clone(),
             variables: normalized_operation.variables.deref().clone(),
-            directives: normalized_operation.directives.deref().clone(),
+            directives: normalized_operation.directives.clone(),
             selection_set: (&normalized_operation.selection_set).try_into()?,
         })
     }
@@ -3687,7 +3690,7 @@ impl TryFrom<&Fragment> for executable::Fragment {
     fn try_from(normalized_fragment: &Fragment) -> Result<Self, Self::Error> {
         Ok(Self {
             name: normalized_fragment.name.clone(),
-            directives: normalized_fragment.directives.deref().clone(),
+            directives: normalized_fragment.directives.clone(),
             selection_set: (&normalized_fragment.selection_set).try_into()?,
         })
     }
@@ -3755,10 +3758,10 @@ impl TryFrom<&Field> for executable::Field {
         };
         Ok(Self {
             definition,
-            alias: normalized_field.alias.to_owned(),
-            name: normalized_field.name().to_owned(),
+            alias: normalized_field.alias.clone(),
+            name: normalized_field.name().clone(),
             arguments: normalized_field.arguments.deref().to_owned(),
-            directives: normalized_field.directives.deref().to_owned(),
+            directives: normalized_field.directives.clone(),
             selection_set,
         })
     }
@@ -3792,7 +3795,7 @@ impl TryFrom<&InlineFragment> for executable::InlineFragment {
         });
         Ok(Self {
             type_condition,
-            directives: normalized_inline_fragment.directives.deref().to_owned(),
+            directives: normalized_inline_fragment.directives.clone(),
             selection_set: executable::SelectionSet {
                 ty,
                 selections: Vec::new(),
@@ -3816,8 +3819,8 @@ impl From<&FragmentSpreadSelection> for executable::FragmentSpread {
     fn from(val: &FragmentSpreadSelection) -> Self {
         let normalized_fragment_spread = &val.spread;
         Self {
-            fragment_name: normalized_fragment_spread.fragment_name.to_owned(),
-            directives: normalized_fragment_spread.directives.deref().to_owned(),
+            fragment_name: normalized_fragment_spread.fragment_name.clone(),
+            directives: normalized_fragment_spread.directives.clone(),
         }
     }
 }
@@ -3998,7 +4001,7 @@ pub(crate) fn normalize_operation(
         root_kind: operation.operation_type.into(),
         name: operation.name.clone(),
         variables: Arc::new(operation.variables.clone()),
-        directives: Arc::new(operation.directives.clone()),
+        directives: operation.directives.clone(),
         selection_set: normalized_selection_set,
         named_fragments,
     };

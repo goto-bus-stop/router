@@ -59,12 +59,14 @@ impl FieldSelection {
                 parent_type.field(self.field.name().clone())?
             };
 
+        let field_element = self.field.data().clone();
         let field_element =
+        // TODO(@goto-bus-stop): this unconditionally clones anyway, so we really might as well
+        // unconditionally do with_position.
             if self.field.schema() == schema && self.field.field_position == field_position {
-                self.field.data().clone()
+                field_element
             } else {
-                self.field
-                    .with_updated_position(schema.clone(), field_position)
+                field_element.with_position(schema.clone(), field_position)?
             };
 
         if let Some(selection_set) = &self.selection_set {
@@ -83,24 +85,19 @@ impl FieldSelection {
                 // sub-selection is empty. Which suggest something may be wrong with this part of the query
                 // intent, but the query was valid while keeping an empty sub-selection isn't. So in that
                 // case, we just add some "non-included" __typename field just to keep the query valid.
-                let directives =
-                    executable::DirectiveList(vec![Node::new(executable::Directive {
-                        name: name!("include"),
-                        arguments: vec![Node::new(executable::Argument {
-                            name: name!("if"),
-                            value: Node::new(executable::Value::Boolean(false)),
-                        })],
-                    })]);
                 let non_included_typename = Selection::from_field(
-                    Field::new(FieldData {
-                        schema: schema.clone(),
-                        field_position: field_composite_type_position
-                            .introspection_typename_field(),
-                        alias: None,
-                        arguments: Arc::new(vec![]),
-                        directives: Arc::new(directives),
-                        sibling_typename: None,
-                    }),
+                    Field::new(
+                        FieldData::from_position(
+                            &schema,
+                            field_composite_type_position.introspection_typename_field(),
+                        )?
+                        .with_directive(Node::new(
+                            executable::Directive {
+                                name: name!("include"),
+                                arguments: vec![(name!("if"), false).into()],
+                            },
+                        )),
+                    ),
                     None,
                 );
                 let mut typename_selection = SelectionMap::new();
@@ -224,28 +221,20 @@ impl InlineFragmentSelection {
                 // We should be able to rebase, or there is a bug, so error if that is the case.
                 // If we rebased successfully then we add "non-included" __typename field selection
                 // just to keep the query valid.
-                let directives =
-                    executable::DirectiveList(vec![Node::new(executable::Directive {
-                        name: name!("include"),
-                        arguments: vec![Node::new(executable::Argument {
-                            name: name!("if"),
-                            value: Node::new(executable::Value::Boolean(false)),
-                        })],
-                    })]);
                 let parent_typename_field = if let Some(condition) = this_condition {
                     condition.introspection_typename_field()
                 } else {
                     parent_type.introspection_typename_field()
                 };
                 let typename_field_selection = Selection::from_field(
-                    Field::new(FieldData {
-                        schema: schema.clone(),
-                        field_position: parent_typename_field,
-                        alias: None,
-                        arguments: Arc::new(vec![]),
-                        directives: Arc::new(directives),
-                        sibling_typename: None,
-                    }),
+                    Field::new(
+                        FieldData::from_position(&schema, parent_typename_field)?.with_directive(
+                            Node::new(executable::Directive {
+                                name: name!("include"),
+                                arguments: vec![(name!("if"), false).into()],
+                            }),
+                        ),
+                    ),
                     None,
                 );
 

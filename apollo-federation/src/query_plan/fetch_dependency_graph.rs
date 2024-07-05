@@ -2555,11 +2555,13 @@ fn operation_for_entities_fetch(
     }
 
     let entities = FieldDefinitionPosition::Object(query_type.field(ENTITIES_QUERY.clone()));
+    let entities_definition = entities.get(subgraph_schema.schema())?.clone();
 
     let entities_call = Selection::from_element(
         OpPathElement::Field(Field::new(FieldData {
             schema: subgraph_schema.clone(),
             field_position: entities,
+            definition: entities_definition,
             alias: None,
             arguments: Arc::new(vec![executable::Argument {
                 name: FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME,
@@ -3146,7 +3148,7 @@ fn compute_nodes_for_key_resolution<'a>(
     let mut input_selections = SelectionSet::for_composite_type(
         dependency_graph.supergraph_schema.clone(),
         input_type.clone(),
-    );
+    )?;
     let Some(edge_conditions) = &edge.conditions else {
         // PORT_NOTE: TypeScript `computeGroupsForTree()` has a non-null assertion here
         return Err(FederationError::internal(
@@ -3175,7 +3177,7 @@ fn compute_nodes_for_key_resolution<'a>(
         &source_schema,
         &source_type,
         None,
-    )));
+    )?));
     let typename_path = stack_item
         .node_path
         .path_in_node
@@ -3250,7 +3252,7 @@ fn compute_nodes_for_root_type_resolution<'a>(
             &source_schema,
             &source_type.into(),
             None,
-        )));
+        )?));
         let typename_path = stack_item
             .node_path
             .path_in_node
@@ -3349,7 +3351,7 @@ fn compute_nodes_for_op_path_element<'a>(
             operation.schema(),
             &operation.parent_type_position(),
             sibling_typename.alias().cloned(),
-        )));
+        )?));
         let typename_path = stack_item
             .node_path
             .path_in_node
@@ -4082,7 +4084,7 @@ fn inputs_for_require(
     let mut full_selection_set = SelectionSet::for_composite_type(
         fetch_dependency_graph.supergraph_schema.clone(),
         input_type.clone(),
-    );
+    )?;
 
     // JS PORT NOTE: we are manipulating selection sets in place which means we need to rebase new
     // elements before they can be merged. This is different from JS implementation which relied on
@@ -4125,7 +4127,7 @@ fn inputs_for_require(
         // should just use `entity_type` (that @interfaceObject type), not input type which will be an implementation the
         // subgraph does not know in that particular case.
         let mut key_inputs =
-            SelectionSet::for_composite_type(entity_type_schema, entity_type_position.into());
+            SelectionSet::for_composite_type(entity_type_schema, entity_type_position.into())?;
         key_inputs.add_selection_set(&key_condition)?;
 
         Ok((

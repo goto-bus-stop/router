@@ -189,20 +189,27 @@ impl Field {
                 }
                 .into())
             } else {
-                let mut updated_field_data = self.data().clone();
-                updated_field_data.schema = schema.clone();
-                updated_field_data.field_position = parent_type.introspection_typename_field();
-                Ok(Field::new(updated_field_data))
+                let updated_field_data = self.data().clone();
+                Ok(Field::new(updated_field_data.with_position(
+                    schema.clone(),
+                    parent_type.introspection_typename_field(),
+                )?))
             };
         }
 
         let field_from_parent = parent_type.field(self.name().clone())?;
-        return if field_from_parent.try_get(schema.schema()).is_some()
-            && self.can_rebase_on(parent_type)?
-        {
+        let Ok(definition) = field_from_parent.get(schema.schema()) else {
+            return Err(RebaseError::CannotRebase {
+                field_position: self.field_position.clone(),
+                parent_type: parent_type.clone(),
+            }
+            .into());
+        };
+        return if self.can_rebase_on(parent_type)? {
             let mut updated_field_data = self.data().clone();
             updated_field_data.schema = schema.clone();
             updated_field_data.field_position = field_from_parent;
+            updated_field_data.definition = definition.clone();
             Ok(Field::new(updated_field_data))
         } else {
             Err(RebaseError::CannotRebase {
@@ -246,11 +253,7 @@ impl Field {
     ) -> Result<Option<OutputTypeDefinitionPosition>, FederationError> {
         let data = self;
         if data.field_position.parent() == *parent_type && data.schema == *schema {
-            let base_ty_name = data
-                .field_position
-                .get(schema.schema())?
-                .ty
-                .inner_named_type();
+            let base_ty_name = data.definition.ty.inner_named_type();
             return Ok(Some(
                 data.schema.get_type(base_ty_name.clone())?.try_into()?,
             ));
@@ -303,11 +306,7 @@ impl FieldSelection {
             });
         };
 
-        let rebased_type_name = rebased
-            .field_position
-            .get(schema.schema())?
-            .ty
-            .inner_named_type();
+        let rebased_type_name = rebased.definition.ty.inner_named_type();
         let rebased_base_type: CompositeTypeDefinitionPosition =
             schema.get_type(rebased_type_name.clone())?.try_into()?;
 

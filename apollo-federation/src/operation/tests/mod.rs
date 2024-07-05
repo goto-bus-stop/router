@@ -1328,7 +1328,7 @@ mod lazy_map_tests {
             let parent_type_pos = s.element()?.parent_type_position();
             // "__typename" field
             let field_element =
-                Field::new_introspection_typename(s.schema(), &parent_type_pos, None);
+                Field::new_introspection_typename(s.schema(), &parent_type_pos, None)?;
             let typename_selection =
                 Selection::from_element(field_element.into(), /*subselection*/ None)?;
             // return `updated` and `typename_selection`
@@ -1368,16 +1368,15 @@ fn field_element(
     object: apollo_compiler::Name,
     field: apollo_compiler::Name,
 ) -> OpPathElement {
-    OpPathElement::Field(super::Field::new(super::FieldData {
-        schema: schema.clone(),
-        field_position: ObjectTypeDefinitionPosition::new(object)
-            .field(field)
-            .into(),
-        alias: None,
-        arguments: Default::default(),
-        directives: Default::default(),
-        sibling_typename: None,
-    }))
+    OpPathElement::Field(super::Field::new(
+        super::FieldData::from_position(
+            schema,
+            ObjectTypeDefinitionPosition::new(object)
+                .field(field)
+                .into(),
+        )
+        .unwrap(),
+    ))
 }
 
 const ADD_AT_PATH_TEST_SCHEMA: &str = r#"

@@ -43,7 +43,6 @@ use crate::schema::definitions::is_composite_type;
 use crate::schema::definitions::types_can_be_merged;
 use crate::schema::definitions::AbstractType;
 use crate::schema::position::CompositeTypeDefinitionPosition;
-use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
@@ -1187,8 +1186,8 @@ mod field_selection {
         pub(crate) fn from_position(
             schema: &ValidFederationSchema,
             field_position: FieldDefinitionPosition,
-        ) -> Self {
-            Self::new(FieldData::from_position(schema, field_position))
+        ) -> Result<Self, FederationError> {
+            Ok(Self::new(FieldData::from_position(schema, field_position)?))
         }
 
         // Note: The `schema` argument must be a subgraph schema, so the __typename field won't
@@ -1197,15 +1196,11 @@ mod field_selection {
             schema: &ValidFederationSchema,
             parent_type: &CompositeTypeDefinitionPosition,
             alias: Option<Name>,
-        ) -> Self {
-            Self::new(FieldData {
-                schema: schema.clone(),
-                field_position: parent_type.introspection_typename_field(),
-                alias,
-                arguments: Default::default(),
-                directives: Default::default(),
-                sibling_typename: None,
-            })
+        ) -> Result<Self, FederationError> {
+            let mut field =
+                FieldData::from_position(&schema, parent_type.introspection_typename_field())?;
+            field.alias = alias;
+            Ok(Self::new(field))
         }
 
         /// Turn this `Field` into a `FieldSelection` with the given sub-selection. If this is
@@ -1342,6 +1337,7 @@ mod field_selection {
     pub(crate) struct FieldData {
         pub(crate) schema: ValidFederationSchema,
         pub(crate) field_position: FieldDefinitionPosition,
+        pub(crate) definition: apollo_compiler::schema::Component<ast::FieldDefinition>,
         pub(crate) alias: Option<Name>,
         pub(crate) arguments: Arc<Vec<Node<executable::Argument>>>,
         pub(crate) directives: Arc<executable::DirectiveList>,
@@ -1353,15 +1349,36 @@ mod field_selection {
         pub fn from_position(
             schema: &ValidFederationSchema,
             field_position: FieldDefinitionPosition,
-        ) -> Self {
-            Self {
+        ) -> Result<Self, FederationError> {
+            let definition = field_position.get(schema.schema())?.clone();
+            Ok(Self {
                 schema: schema.clone(),
                 field_position,
+                definition,
                 alias: None,
                 arguments: Default::default(),
                 directives: Default::default(),
                 sibling_typename: None,
-            }
+            })
+        }
+
+        pub(super) fn with_position(
+            self,
+            schema: ValidFederationSchema,
+            field_position: FieldDefinitionPosition,
+        ) -> Result<Self, FederationError> {
+            let definition = field_position.get(schema.schema())?.clone();
+            Ok(Self {
+                schema,
+                field_position,
+                definition,
+                ..self
+            })
+        }
+
+        pub(super) fn with_directive(mut self, directive: Node<ast::Directive>) -> Self {
+            Arc::make_mut(&mut self.directives).push(directive);
+            self
         }
 
         pub(crate) fn name(&self) -> &Name {
@@ -1372,14 +1389,13 @@ mod field_selection {
             self.alias.clone().unwrap_or_else(|| self.name().clone())
         }
 
-        fn output_ast_type(&self) -> Result<&ast::Type, FederationError> {
-            Ok(&self.field_position.get(self.schema.schema())?.ty)
+        fn output_ast_type(&self) -> &ast::Type {
+            &self.definition.ty
         }
 
         pub(crate) fn output_base_type(&self) -> Result<TypeDefinitionPosition, FederationError> {
-            let definition = self.field_position.get(self.schema.schema())?;
             self.schema
-                .get_type(definition.ty.inner_named_type().clone())
+                .get_type(self.definition.ty.inner_named_type().clone())
         }
 
         pub(crate) fn is_leaf(&self) -> Result<bool, FederationError> {
@@ -1960,14 +1976,14 @@ impl SelectionSet {
     pub(crate) fn for_composite_type(
         schema: ValidFederationSchema,
         type_position: CompositeTypeDefinitionPosition,
-    ) -> Self {
-        let typename_field = Field::new_introspection_typename(&schema, &type_position, None)
+    ) -> Result<Self, FederationError> {
+        let typename_field = Field::new_introspection_typename(&schema, &type_position, None)?
             .with_subselection(None);
-        Self {
+        Ok(Self {
             schema,
             type_position,
             selections: Arc::new(std::iter::once(typename_field).collect()),
-        }
+        })
     }
 
     /// Build a selection set from a single selection.
@@ -2674,7 +2690,7 @@ impl SelectionSet {
                 &self.schema,
                 &selection.element()?.parent_type_position(),
                 sibling_typename.alias().cloned(),
-            );
+            )?;
             let typename_selection =
                 Selection::from_element(field_element.into(), /*subselection*/ None)?;
             Ok([typename_selection, updated].into_iter().collect())
@@ -2689,7 +2705,7 @@ impl SelectionSet {
         if let Some(parent) = parent_type_if_abstract {
             if !self.has_top_level_typename_field() {
                 let typename_selection = Selection::from_field(
-                    Field::new_introspection_typename(&self.schema, &parent.into(), None),
+                    Field::new_introspection_typename(&self.schema, &parent.into(), None)?,
                     None,
                 );
                 selection_map.insert(typename_selection);
@@ -3436,20 +3452,6 @@ pub(crate) fn subselection_type_if_abstract(
     }
 }
 
-impl FieldData {
-    fn with_updated_position(
-        &self,
-        schema: ValidFederationSchema,
-        field_position: FieldDefinitionPosition,
-    ) -> Self {
-        Self {
-            schema,
-            field_position,
-            ..self.clone()
-        }
-    }
-}
-
 impl FieldSelection {
     /// Normalize this field selection (merging selections with the same keys), with the following
     /// additional transformations:
@@ -3474,7 +3476,7 @@ impl FieldSelection {
         // the given `field`, but on the off-chance there's a mutation somewhere in between
         // Operation creation and the creation of the ValidFederationSchema, it's safer to just
         // confirm it exists in this schema.
-        field_position.get(schema.schema())?;
+        let definition = field_position.get(schema.schema())?;
         let field_composite_type_result: Result<CompositeTypeDefinitionPosition, FederationError> =
             schema.get_type(field.selection_set.ty.clone())?.try_into();
 
@@ -3482,6 +3484,7 @@ impl FieldSelection {
             field: Field::new(FieldData {
                 schema: schema.clone(),
                 field_position,
+                definition: definition.clone(),
                 alias: field.alias.clone(),
                 arguments: Arc::new(field.arguments.clone()),
                 directives: Arc::new(field.directives.clone()),
@@ -3602,11 +3605,9 @@ impl Field {
     }
 
     pub(crate) fn types_can_be_merged(&self, other: &Self) -> Result<bool, FederationError> {
-        let self_definition = self.field_position.get(self.schema().schema())?;
-        let other_definition = other.field_position.get(self.schema().schema())?;
         types_can_be_merged(
-            &self_definition.ty,
-            &other_definition.ty,
+            &self.definition.ty,
+            &other.definition.ty,
             self.schema().schema(),
         )
     }

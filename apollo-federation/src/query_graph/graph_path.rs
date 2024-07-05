@@ -1997,7 +1997,7 @@ impl OpGraphPath {
             self.graph.schema_by_source(&tail_weight.source)?,
             &tail_type_pos,
             None,
-        );
+        )?;
         let Some(edge) = self.graph.edge_for_field(path.tail, &typename_field) else {
             return Err(FederationError::internal(
                 "Unexpectedly missing edge for __typename field",
@@ -2361,19 +2361,19 @@ impl OpGraphPath {
                         {
                             let field_on_tail_type = tail_type_pos
                                 .field(operation_field.field_position.field_name().clone());
-                            if field_on_tail_type
-                                .try_get(self.graph.schema_by_source(&tail_weight.source)?.schema())
-                                .is_none()
-                            {
+                            let Ok(tail_type) = field_on_tail_type
+                                .get(self.graph.schema_by_source(&tail_weight.source)?.schema())
+                            else {
                                 let edge_weight = self.graph.edge_weight(edge)?;
                                 return Err(FederationError::internal(format!(
                                     "Unexpectedly missing {} for {} from path {}",
                                     operation_field, edge_weight, self,
                                 )));
-                            }
+                            };
                             operation_field = Field::new(FieldData {
                                 schema: self.graph.schema_by_source(&tail_weight.source)?.clone(),
                                 field_position: field_on_tail_type.into(),
+                                definition: tail_type.clone(),
                                 alias: operation_field.alias.clone(),
                                 arguments: operation_field.arguments.clone(),
                                 directives: operation_field.directives.clone(),
@@ -3682,7 +3682,6 @@ fn is_useless_followup_element(
 mod tests {
     use std::sync::Arc;
 
-    use apollo_compiler::executable::DirectiveList;
     use apollo_compiler::Name;
     use apollo_compiler::Schema;
     use petgraph::stable_graph::EdgeIndex;
@@ -3723,17 +3722,10 @@ mod tests {
         // This test is run against subgraph schema meaning it will start from Query(S1) node instead
         assert_eq!(path.to_string(), "Query(S1) (types: [Query])");
         let pos = ObjectFieldDefinitionPosition {
-            type_name: Name::new("T").unwrap(),
+            type_name: Name::new("Query").unwrap(),
             field_name: Name::new("t").unwrap(),
         };
-        let data = FieldData {
-            schema: schema.clone(),
-            field_position: FieldDefinitionPosition::Object(pos),
-            alias: None,
-            arguments: Arc::new(Vec::new()),
-            directives: Arc::new(DirectiveList::new()),
-            sibling_typename: None,
-        };
+        let data = FieldData::from_position(&schema, FieldDefinitionPosition::Object(pos)).unwrap();
         let trigger = OpGraphPathTrigger::OpPathElement(OpPathElement::Field(Field::new(data)));
         let path = path
             .add(
@@ -3748,17 +3740,10 @@ mod tests {
             .unwrap();
         assert_eq!(path.to_string(), "Query(S1) --[t]--> T(S1) (types: [T])");
         let pos = ObjectFieldDefinitionPosition {
-            type_name: Name::new("ID").unwrap(),
+            type_name: Name::new("T").unwrap(),
             field_name: Name::new("id").unwrap(),
         };
-        let data = FieldData {
-            schema,
-            field_position: FieldDefinitionPosition::Object(pos),
-            alias: None,
-            arguments: Arc::new(Vec::new()),
-            directives: Arc::new(DirectiveList::new()),
-            sibling_typename: None,
-        };
+        let data = FieldData::from_position(&schema, FieldDefinitionPosition::Object(pos)).unwrap();
         let trigger = OpGraphPathTrigger::OpPathElement(OpPathElement::Field(Field::new(data)));
         let path = path
             .add(
